@@ -1,0 +1,29 @@
+==============
+If Statement 1
+==============
+
+__test statement:
+    if a > 1:
+        return 1
+    else:
+        return 2
+    end
+end
+
+---
+
+(source_file
+    (test_statement
+        (if_statement
+            condition: (binary_expression
+                left: (reference (identifier))
+                right: (integer)
+            )
+            body: (return_statement (integer))
+            else: (else_section
+                body: (return_statement (integer))
+            )
+        )
+    )
+)
+

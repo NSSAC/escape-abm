@@ -1,0 +1,27 @@
+============
+While Loop 1
+============
+
+__test statement:
+    while b < 100:
+        b *= 10;
+    end
+end
+
+---
+
+(source_file
+    (test_statement
+        (while_loop
+            (binary_expression 
+                (reference (identifier))
+                (integer)
+            )
+            (update_statement
+                (reference (identifier))
+                (integer)
+            )
+        )
+    )
+)
+

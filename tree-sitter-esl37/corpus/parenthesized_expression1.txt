@@ -1,0 +1,65 @@
+==========================
+Parenthesized Expression 1
+==========================
+
+__test expression:
+    (a + b)
+end
+
+__test expression:
+    a * (b)
+end
+
+__test expression:
+    a * (-b)
+end
+
+__test expression:
+    (-a) * (-b)
+end
+
+---
+
+(source_file
+    (test_expression
+        (parenthesized_expression
+            (binary_expression
+                (reference (identifier))
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (parenthesized_expression
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+        )
+    )
+)
+

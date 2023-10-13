@@ -1,0 +1,36 @@
+=============
+Switch case 1
+=============
+
+__test statement:
+    switch a:
+        case 1:
+            return 1
+        case 2:
+            return 2
+        default:
+            return 3
+    end
+end
+
+---
+
+(source_file
+    (test_statement
+        (switch_statement
+            (reference (identifier))
+            (case_section
+                (integer)
+                (return_statement (integer))
+            )
+            (case_section
+                (integer)
+                (return_statement (integer))
+            )
+            (default_section
+                (return_statement (integer))
+            )
+        )
+    )
+)
+

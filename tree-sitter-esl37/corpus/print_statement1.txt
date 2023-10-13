@@ -1,0 +1,20 @@
+=================
+Print statement 1
+=================
+
+__test statement:
+    print("he \" llo", a, "b")
+end
+
+---
+
+(source_file
+    (test_statement
+        (print_statement
+            (string)
+            (reference (identifier))
+            (string)
+        )
+    )
+)
+

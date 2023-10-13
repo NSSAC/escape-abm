@@ -1,0 +1,67 @@
+===========
+Contagion 1
+===========
+
+contagion c1
+    state type c1_state_t
+    dwell type int
+
+    transition
+        E -> I , p = 1.0 , dwell = fixed1
+        I -> R , p = 1.0 , dwell = normal1
+    end
+
+    transmission
+        E => S -> E
+        E => V -> E
+        I => S -> E
+        I => V -> E
+    end
+end
+
+---
+
+(source_file
+    (contagion
+        name: (identifier)
+        body: (contagion_state_type type: (type (identifier)))
+        body: (contagion_dwell_type type: (type (identifier)))
+        body: (transitions
+            body: (transition
+                entry: (identifier)
+                exit: (identifier)
+                p: (float)
+                dwell: (identifier)
+            )
+            body: (transition
+                entry: (identifier)
+                exit: (identifier)
+                p: (float)
+                dwell: (identifier)
+            )
+        )
+        body: (transmissions
+            body: (transmission
+                contact: (identifier)
+                entry: (identifier)
+                exit: (identifier)
+            )
+            body: (transmission
+                contact: (identifier)
+                entry: (identifier)
+                exit: (identifier)
+            )
+            body: (transmission
+                contact: (identifier)
+                entry: (identifier)
+                exit: (identifier)
+            )
+            body: (transmission
+                contact: (identifier)
+                entry: (identifier)
+                exit: (identifier)
+            )
+        )
+    )
+)
+

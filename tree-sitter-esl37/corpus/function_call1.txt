@@ -1,0 +1,21 @@
+===============
+Function Call 1
+===============
+
+__test expression:
+    a + b.susceptibility()
+end
+
+---
+
+(source_file
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (function_call
+                (reference (identifier) (identifier))
+            )
+        )
+    )
+)
+

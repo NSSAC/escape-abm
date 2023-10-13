@@ -1,0 +1,21 @@
+========
+Config 1
+========
+
+config num_ticks = 10
+
+config transmissibility = 0.1
+
+config some_flag = True
+
+config other_flag = False
+
+---
+
+(source_file
+    (config name: (identifier) default: (integer))
+    (config name: (identifier) default: (float))
+    (config name: (identifier) default: (true))
+    (config name: (identifier) default: (false))
+)
+

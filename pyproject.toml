@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=60", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "episim37"
+version = "1.0.0"
+authors = [
+  { name="Parantapa Bhattacharya", email="parantapa@virginia.edu" },
+]
+description = "Epidemic simulations on contact networks"
+readme = "README.rst"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "click",
+    "platformdirs",
+    "rich",
+    "attrs",
+    "tree_sitter",
+    "jinja2",
+    "pygls",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.urls]
+"Homepage" = "http://github.com/nssac/episim37"
+
+[project.scripts]
+episim37 = "episim37.cli:cli"

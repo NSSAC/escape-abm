@@ -1,0 +1,44 @@
+======
+Edge 1
+======
+
+edge
+    pid1: int static target node key
+    pid2: int static source node key
+    activity1: activity_t static
+    activity2: activity_t static
+    duration: float
+end
+
+---
+
+(source_file
+    (edge
+        field: (edge_field
+            name: (identifier)
+            type: (type (identifier))
+            annotation: (edge_annotation)
+            annotation: (edge_annotation)
+        )
+        field: (edge_field
+            name: (identifier)
+            type: (type (identifier))
+            annotation: (edge_annotation)
+            annotation: (edge_annotation)
+        )
+        field: (edge_field
+            name: (identifier)
+            type: (type (identifier))
+            annotation: (edge_annotation)
+        )
+        field: (edge_field
+            name: (identifier)
+            type: (type (identifier))
+            annotation: (edge_annotation)
+        )
+        field: (edge_field
+            name: (identifier)
+            type: (type (identifier))
+        )
+    )
+)

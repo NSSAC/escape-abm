@@ -1,0 +1,26 @@
+======
+Enum 1
+======
+
+enum gender_t
+    M, F
+end
+
+enum gender_t M, F end
+
+---
+
+(source_file
+    (enum
+        name: (identifier)
+        const: (identifier)
+        const: (identifier)
+    )
+    (enum
+        name: (identifier)
+        const: (identifier)
+        const: (identifier)
+    )
+)
+
+

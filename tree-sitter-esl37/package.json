@@ -1,0 +1,35 @@
+{
+  "name": "tree-sitter-esl37",
+  "version": "1.0.0",
+  "description": "Tree sitter grammar for esl37",
+  "main": "bindings/node",
+  "scripts": {
+    "test": "make test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nssac/episim37.git"
+  },
+  "keywords": [
+    "epidemic",
+    "simulation",
+    "high",
+    "performance",
+    "computing",
+    "domain",
+    "specific",
+    "language"
+  ],
+  "author": "Parantapa Bhattacharya <parantapa@virginia.edu>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nssac/episim37/issues"
+  },
+  "homepage": "https://github.com/nssac/episim37#readme",
+  "dependencies": {
+    "nan": "^2.18.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.20.8"
+  }
+}

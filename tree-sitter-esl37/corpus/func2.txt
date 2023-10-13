@@ -1,0 +1,54 @@
+==========
+Function 3
+==========
+
+def func(a: int) -> int:
+    b = 3
+    if a > 1:
+        b += 2
+    else:
+        b += 3
+    end
+    return b
+end
+
+---
+
+(source_file
+    (function
+        name: (identifier)
+        params: (function_params
+            (function_param
+                name: (identifier)
+                type: (type (identifier))
+            )
+        )
+        return: (type (identifier))
+        body: (function_body
+            (assignment_statement
+                left: (reference (identifier))
+                right: (integer)
+            )
+            (if_statement
+                condition: (binary_expression
+                    left: (reference (identifier))
+                    right: (integer)
+                )
+                body: (update_statement
+                    left: (reference (identifier))
+                    right: (integer)
+                )
+                else: (else_section
+                    body: (update_statement
+                        left: (reference (identifier))
+                        right: (integer)
+                    )
+                )
+            )
+            (return_statement
+                (reference (identifier))
+            )
+        )
+    )
+)
+

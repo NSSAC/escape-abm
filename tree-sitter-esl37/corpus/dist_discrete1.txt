@@ -1,0 +1,43 @@
+===============
+Discrete Dist 1
+===============
+
+distribution
+    discrete fixed1
+        p = 1, v = 1
+    end
+    discrete fixed1
+        p = 1, v = 1
+        p = 1, v = 2.0
+        p = 0.5, v = 3.0
+    end
+end
+
+---
+
+(source_file
+    (distributions
+        (discrete_dist
+            name: (identifier)
+            pv: (discrete_pv
+                p: (integer)
+                v: (integer)
+            )
+        )
+        (discrete_dist
+            name: (identifier)
+            pv: (discrete_pv
+                p: (integer)
+                v: (integer)
+            )
+            pv: (discrete_pv
+                p: (integer)
+                v: (float)
+            )
+            pv: (discrete_pv
+                p: (float)
+                v: (float)
+            )
+        )
+    )
+)
