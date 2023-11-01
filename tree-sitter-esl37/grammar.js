@@ -349,9 +349,22 @@ module.exports = grammar({
         ),
 
         nodeset_statement: $ => seq(
-            'nodeset',
             field('name', $.identifier),
+            ':',
+            'nodeset',
             '=',
+            choice($.filter_expression, $.sample_expression),
+        ),
+
+        edgeset_statement: $ => seq(
+            field('name', $.identifier),
+            ':',
+            'edgeset',
+            '=',
+            choice($.filter_expression, $.sample_expression),
+        ),
+
+        filter_expression: $ => seq(
             '{',
             field('var', $.identifier),
             ':',
@@ -359,15 +372,12 @@ module.exports = grammar({
             '}'
         ),
 
-        edgeset_statement: $ => seq(
-            'edgeset',
-            field('name', $.identifier),
-            '=',
-            '{',
-            field('var', $.identifier),
-            ':',
-            field('condition', $._expression),
-            '}'
+        sample_expression: $ => seq(
+            'sample',
+            field('type', choice('approx', 'relative')),
+            field('amount', $._number),
+            'from',
+            field('parent', $.identifier)
         ),
 
         foreach_loop: $ => seq(

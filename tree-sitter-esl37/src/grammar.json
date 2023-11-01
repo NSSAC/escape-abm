@@ -1710,9 +1710,43 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
           "type": "STRING",
           "value": "nodeset"
         },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "filter_expression"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "sample_expression"
+            }
+          ]
+        }
+      ]
+    },
+    "edgeset_statement": {
+      "type": "SEQ",
+      "members": [
         {
           "type": "FIELD",
           "name": "name",
@@ -1723,8 +1757,34 @@
         },
         {
           "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "STRING",
+          "value": "edgeset"
+        },
+        {
+          "type": "STRING",
           "value": "="
         },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "filter_expression"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "sample_expression"
+            }
+          ]
+        }
+      ]
+    },
+    "filter_expression": {
+      "type": "SEQ",
+      "members": [
         {
           "type": "STRING",
           "value": "{"
@@ -1755,52 +1815,49 @@
         }
       ]
     },
-    "edgeset_statement": {
+    "sample_expression": {
       "type": "SEQ",
       "members": [
         {
           "type": "STRING",
-          "value": "edgeset"
+          "value": "sample"
         },
         {
           "type": "FIELD",
-          "name": "name",
+          "name": "type",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "approx"
+              },
+              {
+                "type": "STRING",
+                "value": "relative"
+              }
+            ]
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "amount",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_number"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "from"
+        },
+        {
+          "type": "FIELD",
+          "name": "parent",
           "content": {
             "type": "SYMBOL",
             "name": "identifier"
           }
-        },
-        {
-          "type": "STRING",
-          "value": "="
-        },
-        {
-          "type": "STRING",
-          "value": "{"
-        },
-        {
-          "type": "FIELD",
-          "name": "var",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ":"
-        },
-        {
-          "type": "FIELD",
-          "name": "condition",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_expression"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": "}"
         }
       ]
     },
