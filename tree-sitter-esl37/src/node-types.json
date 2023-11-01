@@ -1,63 +1,5 @@
 [
   {
-    "type": "assignment_statement",
-    "named": true,
-    "fields": {
-      "left": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "reference",
-            "named": true
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "false",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "true",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "binary_expression",
     "named": true,
     "fields": {
@@ -229,11 +171,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -274,6 +216,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -330,10 +276,40 @@
     "type": "config",
     "named": true,
     "fields": {
-      "default": {
+      "name": {
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "const_statement",
+    "named": true,
+    "fields": {
+      "right": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
           {
             "type": "false",
             "named": true
@@ -343,21 +319,77 @@
             "named": true
           },
           {
+            "type": "function_call",
+            "named": true
+          },
+          {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "reference",
             "named": true
           },
           {
             "type": "true",
             "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
           }
         ]
       },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "var": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "constant_dist",
+    "named": true,
+    "fields": {
       "name": {
         "multiple": false,
         "required": true,
         "types": [
           {
             "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "v": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
             "named": true
           }
         ]
@@ -372,10 +404,6 @@
         "multiple": true,
         "required": false,
         "types": [
-          {
-            "type": "contagion_dwell_type",
-            "named": true
-          },
           {
             "type": "contagion_state_type",
             "named": true
@@ -407,22 +435,6 @@
     }
   },
   {
-    "type": "contagion_dwell_type",
-    "named": true,
-    "fields": {
-      "type": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "contagion_state_type",
     "named": true,
     "fields": {
@@ -431,7 +443,7 @@
         "required": true,
         "types": [
           {
-            "type": "type",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -447,11 +459,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -492,6 +504,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -541,10 +557,6 @@
             "named": true
           },
           {
-            "type": "identifier",
-            "named": true
-          },
-          {
             "type": "integer",
             "named": true
           }
@@ -556,10 +568,6 @@
         "types": [
           {
             "type": "float",
-            "named": true
-          },
-          {
-            "type": "identifier",
             "named": true
           },
           {
@@ -578,6 +586,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "constant_dist",
+          "named": true
+        },
         {
           "type": "discrete_dist",
           "named": true
@@ -599,7 +611,7 @@
     "fields": {
       "field": {
         "multiple": true,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "edge_field",
@@ -638,7 +650,7 @@
         "required": true,
         "types": [
           {
-            "type": "type",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -722,11 +734,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -767,6 +779,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -828,11 +844,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -873,6 +889,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -922,11 +942,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -967,6 +987,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -1006,11 +1030,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -1051,6 +1075,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -1116,15 +1144,11 @@
         ]
       },
       "return": {
-        "multiple": true,
+        "multiple": false,
         "required": false,
         "types": [
           {
-            "type": "->",
-            "named": false
-          },
-          {
-            "type": "type",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -1140,11 +1164,11 @@
       "required": true,
       "types": [
         {
-          "type": "assignment_statement",
+          "type": "call_statement",
           "named": true
         },
         {
-          "type": "call_statement",
+          "type": "const_statement",
           "named": true
         },
         {
@@ -1185,6 +1209,10 @@
         },
         {
           "type": "update_statement",
+          "named": true
+        },
+        {
+          "type": "var_statement",
           "named": true
         },
         {
@@ -1275,7 +1303,7 @@
         "required": true,
         "types": [
           {
-            "type": "type",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -1306,11 +1334,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -1351,6 +1379,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -1429,7 +1461,7 @@
     "fields": {
       "field": {
         "multiple": true,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "node_field",
@@ -1468,7 +1500,7 @@
         "required": true,
         "types": [
           {
-            "type": "type",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -1547,6 +1579,20 @@
     "type": "normal_dist",
     "named": true,
     "fields": {
+      "max": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
       "mean": {
         "multiple": false,
         "required": true,
@@ -1556,7 +1602,17 @@
             "named": true
           },
           {
-            "type": "identifier",
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "min": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "float",
             "named": true
           },
           {
@@ -1581,10 +1637,6 @@
         "types": [
           {
             "type": "float",
-            "named": true
-          },
-          {
-            "type": "identifier",
             "named": true
           },
           {
@@ -1985,11 +2037,11 @@
       "required": true,
       "types": [
         {
-          "type": "assignment_statement",
+          "type": "call_statement",
           "named": true
         },
         {
-          "type": "call_statement",
+          "type": "const_statement",
           "named": true
         },
         {
@@ -2030,6 +2082,10 @@
         },
         {
           "type": "update_statement",
+          "named": true
+        },
+        {
+          "type": "var_statement",
           "named": true
         },
         {
@@ -2075,14 +2131,10 @@
       },
       "p": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "float",
-            "named": true
-          },
-          {
-            "type": "identifier",
             "named": true
           },
           {
@@ -2159,21 +2211,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "type",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "identifier",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -2255,10 +2292,6 @@
             "named": true
           },
           {
-            "type": "identifier",
-            "named": true
-          },
-          {
             "type": "integer",
             "named": true
           }
@@ -2270,10 +2303,6 @@
         "types": [
           {
             "type": "float",
-            "named": true
-          },
-          {
-            "type": "identifier",
             "named": true
           },
           {
@@ -2331,6 +2360,10 @@
           {
             "type": "/=",
             "named": false
+          },
+          {
+            "type": "=",
+            "named": false
           }
         ]
       },
@@ -2379,6 +2412,74 @@
     }
   },
   {
+    "type": "var_statement",
+    "named": true,
+    "fields": {
+      "right": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "function_call",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "reference",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "var": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "while_loop",
     "named": true,
     "fields": {
@@ -2387,11 +2488,11 @@
         "required": true,
         "types": [
           {
-            "type": "assignment_statement",
+            "type": "call_statement",
             "named": true
           },
           {
-            "type": "call_statement",
+            "type": "const_statement",
             "named": true
           },
           {
@@ -2432,6 +2533,10 @@
           },
           {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "var_statement",
             "named": true
           },
           {
@@ -2609,6 +2714,14 @@
     "named": false
   },
   {
+    "type": "const",
+    "named": false
+  },
+  {
+    "type": "constant",
+    "named": false
+  },
+  {
     "type": "contagion",
     "named": false
   },
@@ -2630,10 +2743,6 @@
   },
   {
     "type": "dwell",
-    "named": false
-  },
-  {
-    "type": "dwell type",
     "named": false
   },
   {
@@ -2709,7 +2818,15 @@
     "named": false
   },
   {
+    "type": "max",
+    "named": false
+  },
+  {
     "type": "mean",
+    "named": false
+  },
+  {
+    "type": "min",
     "named": false
   },
   {
@@ -2794,6 +2911,10 @@
   },
   {
     "type": "v",
+    "named": false
+  },
+  {
+    "type": "var",
     "named": false
   },
   {

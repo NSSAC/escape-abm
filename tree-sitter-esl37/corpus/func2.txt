@@ -1,5 +1,5 @@
 ==========
-Function 3
+Function 2
 ==========
 
 def func(a: int) -> int:
@@ -20,12 +20,12 @@ end
         params: (function_params
             (function_param
                 name: (identifier)
-                type: (type (identifier))
+                type: (identifier)
             )
         )
-        return: (type (identifier))
+        return: (identifier)
         body: (function_body
-            (assignment_statement
+            (update_statement
                 left: (reference (identifier))
                 right: (integer)
             )

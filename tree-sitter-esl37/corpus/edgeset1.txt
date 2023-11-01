@@ -27,7 +27,7 @@ end
         (foreach_loop
             (identifier)
             (reference (identifier))
-            (assignment_statement
+            (update_statement
                 (reference (identifier) (identifier))
                 (true)
             )

@@ -20,7 +20,7 @@ end
     (function
         name: (identifier)
         params: (function_params)
-        return: (type (identifier))
+        return: (identifier)
         body: (function_body
             (return_statement (integer))
         )
@@ -37,14 +37,14 @@ end
         params: (function_params
             (function_param
                 name: (identifier)
-                type: (type (identifier))
+                type: (identifier)
             )
             (function_param
                 name: (identifier)
-                type: (type (identifier))
+                type: (identifier)
             )
         )
-        return: (type (identifier))
+        return: (identifier)
         body: (function_body
             (return_statement (float))
         )

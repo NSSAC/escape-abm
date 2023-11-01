@@ -16,29 +16,29 @@ end
     (edge
         field: (edge_field
             name: (identifier)
-            type: (type (identifier))
+            type: (identifier)
             annotation: (edge_annotation)
             annotation: (edge_annotation)
         )
         field: (edge_field
             name: (identifier)
-            type: (type (identifier))
+            type: (identifier)
             annotation: (edge_annotation)
             annotation: (edge_annotation)
         )
         field: (edge_field
             name: (identifier)
-            type: (type (identifier))
+            type: (identifier)
             annotation: (edge_annotation)
         )
         field: (edge_field
             name: (identifier)
-            type: (type (identifier))
+            type: (identifier)
             annotation: (edge_annotation)
         )
         field: (edge_field
             name: (identifier)
-            type: (type (identifier))
+            type: (identifier)
         )
     )
 )

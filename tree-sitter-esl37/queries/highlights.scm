@@ -1,46 +1,83 @@
 ; Config
-(config name: (identifier) @constant.builtin)
+(config
+    "config" @keyword
+    name: (identifier) @constant
+    type: (identifier) @type
+)
 
 ; Enum
-(enum name: (identifier) @type)
 (enum
-    const: (identifier) @constant.builtin
-    ("," const: (identifier) @constant.builtin)*
+    "enum" @keyword
+    name: (identifier) @type
 )
+(enum
+    const: (identifier) @constant
+    ("," const: (identifier) @constant)*
+)
+
+; Node
+(node "node" @keyword)
+(node_field
+  type: (identifier) @type
+)
+(node_annotation) @annotation
+
+; Edge
+
+(edge "edge" @keyword)
+(edge_field
+  type: (identifier) @type
+)
+(edge_annotation) @annotation
 
 ; Distributions
 
-(discrete_dist "discrete" @keyword)
-(discrete_dist name: (identifier) @function)
-(discrete_pv ["p" "v"] @keyword)
-(discrete_pv (identifier) @constant.builtin)
+[ "distribution" ] @keyword
 
-(normal_dist ["normal" "mean" "std"] @keyword)
-(normal_dist name: (identifier) @function)
-(normal_dist mean: (identifier) @constant.builtin)
-(normal_dist std: (identifier) @constant.builtin)
+(constant_dist
+    ["constant" "v"] @keyword
+    name: (identifier) @function
+)
 
-(uniform_dist ["uniform" "low" "high"] @keyword)
-(uniform_dist name: (identifier) @function)
-(uniform_dist low: (identifier) @constant.builtin)
-(uniform_dist high: (identifier) @constant.builtin)
+(discrete_dist
+    "discrete" @keyword
+    name: (identifier) @function
+)
+(discrete_pv
+    ["p" "v"] @keyword
+)
+
+(normal_dist
+    ["normal" "mean" "std" "min" "max"] @keyword
+    name: (identifier) @function
+)
+
+(uniform_dist
+    ["uniform" "low" "high"] @keyword
+    name: (identifier) @function
+)
 
 ; Contagion
 
-(contagion_state_type "state type" @keyword)
-(contagion_dwell_type "dwell type" @keyword)
+[ "contagion" "transition" "transmission" ] @keyword
 
-(transition entry: (identifier) @constant.builtin)
-(transition exit: (identifier) @constant.builtin)
-(transition p: (identifier) @constant.builtin)
-(transition dwell: (identifier) @function)
+(contagion_state_type "state type" @keyword)
+
+(transition
+    entry: (identifier) @constant
+    exit: (identifier) @constant
+    dwell: (identifier) @function
+)
 (transition ["p" "dwell"] @keyword)
 
-(transmission (identifier) @constant.builtin)
+(transmission
+  (identifier) @constant
+)
 
 ; Function
-
 (function name: (identifier) @function)
+(function return: (identifier) @type)
+(function_param type: (identifier) @type)
 
 ; Function call
 
@@ -57,13 +94,7 @@
 
 ; Print statement
 
-(print_statement "print" @keyword)
-
-; General
-
-(type (identifier) @type)
-(node_annotation) @annotation
-(edge_annotation) @annotation
+(print_statement "print" @function.builtin)
 
 ; Literals
 
@@ -118,19 +149,12 @@
 
 [
  "end"
- "config"
- "enum"
- "node"
- "edge"
- "distribution"
- "contagion"
- "transition"
- "transmission"
  "def"
  "pass"
  "return"
  "if" "elif" "else"
- "for" "in"
  "switch" "case" "default"
+ "while" "for" "in"
+ "var" "const"
  "nodeset" "edgeset" "foreach"
 ] @keyword

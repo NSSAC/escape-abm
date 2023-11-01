@@ -29,17 +29,13 @@ module.exports = grammar({
             $.test_expression
         )),
 
-        identifier: _ => /[_a-zA-Z][_a-zA-Z0-9]*/,
-
-        type: $ => $.identifier,
-
         reference: $ => dotSep1($.identifier),
 
         config: $ => seq(
             'config',
             field('name', $.identifier),
-            '=',
-            field('default', choice($.integer, $.float, $.true, $.false)),
+            ':',
+            field('type', $.identifier),
             $._terminator
         ),
 
@@ -52,14 +48,14 @@ module.exports = grammar({
 
         node: $ => seq(
             'node',
-            field('field', repeat($.node_field)),
+            field('field', repeat1($.node_field)),
             'end'
         ),
 
         node_field: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.type),
+            field('type', $.identifier),
             field('annotation', repeat($.node_annotation)),
             $._terminator
         ),
@@ -71,14 +67,14 @@ module.exports = grammar({
 
         edge: $ => seq(
             'edge',
-            field('field', repeat($.edge_field)),
+            field('field', repeat1($.edge_field)),
             'end'
         ),
 
         edge_field: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.type),
+            field('type', $.identifier),
             field('annotation', repeat($.edge_annotation)),
             $._terminator
         ),
@@ -96,9 +92,18 @@ module.exports = grammar({
         ),
 
         _distribution: $ => choice(
+            $.constant_dist,
             $.discrete_dist,
             $.normal_dist,
             $.uniform_dist
+        ),
+
+        constant_dist: $ => seq(
+            'constant',
+            field('name', $.identifier),
+            'v', '=', field('v', $._number),
+            $._terminator,
+            'end'
         ),
 
         discrete_dist: $ => seq(
@@ -109,16 +114,18 @@ module.exports = grammar({
         ),
 
         discrete_pv: $ => seq(
-            'p', '=', field('p', choice($._number, $.identifier)), ',',
-            'v', '=', field('v', choice($._number, $.identifier)),
+            'p', '=', field('p', $._number), ',',
+            'v', '=', field('v', $._number),
             $._terminator
         ),
 
         normal_dist: $ => seq(
             'normal',
             field('name', $.identifier),
-            'mean', '=', field('mean', choice($._number, $.identifier)), ',',
-            'std', '=', field('std', choice($._number, $.identifier)),
+            'mean', '=', field('mean', $._number), ',',
+            'std', '=', field('std', $._number),
+            optional(seq(',', 'min', '=', field('min', $._number))),
+            optional(seq(',', 'max', '=', field('max', $._number))),
             $._terminator,
             'end'
         ),
@@ -126,8 +133,8 @@ module.exports = grammar({
         uniform_dist: $ => seq(
             'uniform',
             field('name', $.identifier),
-            'low', '=', field('low', choice($._number, $.identifier)), ',',
-            'high', '=', field('high', choice($._number, $.identifier)),
+            'low', '=', field('low', $._number), ',',
+            'high', '=', field('high', $._number),
             $._terminator,
             'end'
         ),
@@ -137,7 +144,6 @@ module.exports = grammar({
             field('name', $.identifier),
             field('body', repeat(choice(
                 $.contagion_state_type,
-                $.contagion_dwell_type,
                 $.transitions,
                 $.transmissions,
                 $.function,
@@ -147,13 +153,7 @@ module.exports = grammar({
 
         contagion_state_type: $ => seq(
             alias(/state\s+type/, 'state type'),
-            field('type', $.type),
-            $._terminator
-        ),
-
-        contagion_dwell_type: $ => seq(
-            alias(/dwell\s+type/, 'dwell type'),
-            field('type', $.type),
+            field('type', $.identifier),
             $._terminator
         ),
 
@@ -166,7 +166,7 @@ module.exports = grammar({
         transition: $ => seq(
             field('entry', $.identifier), '->',
             field('exit', $.identifier), ',',
-            'p', '=', field('p', choice($._number, $.identifier)), ',',
+            optional(seq('p', '=', field('p', $._number), ',')),
             'dwell', '=', field('dwell', $.identifier),
             $._terminator
         ),
@@ -188,7 +188,7 @@ module.exports = grammar({
             'def',
             field('name', $.identifier),
             field('params', $.function_params),
-            field('return', optional($._function_return)),
+            optional(seq('->', field('return', $.identifier))),
             ':',
             field('body', $.function_body),
             'end'
@@ -201,12 +201,7 @@ module.exports = grammar({
         function_param: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.type),
-        ),
-
-        _function_return: $ => seq(
-            '->',
-            $.type
+            field('type', $.identifier),
         ),
 
         function_body: $ => repeat1($._statement),
@@ -225,7 +220,8 @@ module.exports = grammar({
             $.while_loop,
             $.for_loop,
             $.call_statement,
-            $.assignment_statement,
+            $.var_statement,
+            $.const_statement,
             $.update_statement,
             $.nodeset_statement,
             $.edgeset_statement,
@@ -318,8 +314,21 @@ module.exports = grammar({
             $._terminator
         ),
 
-        assignment_statement: $ => seq(
-            field('left', $.reference),
+        var_statement: $ => seq(
+            'var',
+            field('var', $.identifier),
+            ':',
+            field('type', $.identifier),
+            '=',
+            field('right', $._expression),
+            $._terminator,
+        ),
+
+        const_statement: $ => seq(
+            'const',
+            field('var', $.identifier),
+            ':',
+            field('type', $.identifier),
             '=',
             field('right', $._expression),
             $._terminator,
@@ -328,6 +337,7 @@ module.exports = grammar({
         update_statement: $ => seq(
             field('left', $.reference),
             field('operator', choice(
+                '=',
                 '*=',
                 '/=',
                 '%=',
@@ -438,6 +448,8 @@ module.exports = grammar({
             field('arg', commaSep($._expression)),
             ')'
         )),
+        
+        identifier: _ => /[a-zA-Z][_a-zA-Z0-9]*/,
 
         comment: _ => token(seq('#', /.*/)),
 

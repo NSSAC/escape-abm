@@ -4,11 +4,10 @@ Contagion 1
 
 contagion c1
     state type c1_state_t
-    dwell type int
 
     transition
         E -> I , p = 1.0 , dwell = fixed1
-        I -> R , p = 1.0 , dwell = normal1
+        I -> R , dwell = normal1
     end
 
     transmission
@@ -24,8 +23,7 @@ end
 (source_file
     (contagion
         name: (identifier)
-        body: (contagion_state_type type: (type (identifier)))
-        body: (contagion_dwell_type type: (type (identifier)))
+        body: (contagion_state_type type: (identifier))
         body: (transitions
             body: (transition
                 entry: (identifier)
@@ -36,7 +34,6 @@ end
             body: (transition
                 entry: (identifier)
                 exit: (identifier)
-                p: (float)
                 dwell: (identifier)
             )
         )
