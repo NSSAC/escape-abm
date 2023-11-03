@@ -18,3 +18,13 @@ int main() {
 {% macro print_statement(s) %}
 std::cout {% for a in s.args %}<< {{ a | codegen }} << {{ s.sep }} {% endfor %}<< {{ s.end }} << std::flush;
 {% endmacro %}
+
+{% macro cmake_lists(s) %}
+cmake_minimum_required(VERSION 3.27)
+
+project({{s.source.module}} VERSION 0.0.1)
+
+add_executable(simulator simulator.cpp)
+{% endmacro %}
+
+
