@@ -5,24 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+import attrs
 from tree_sitter import Node as TSNode
 
 import rich
+import rich.markup
 from rich.tree import Tree
 from rich.pretty import Pretty
 
 from .tree_sitter_bindings import get_parser
-from .errors import ErrorType, append_error
-
-
-def check_parse_errors(node: TSNode):
-    if node.type == "ERROR":
-        append_error(type=ErrorType.ParseError, explanation=node.sexp(), node=node)
-    elif node.is_missing:
-        append_error(type=ErrorType.MissingToken, explanation=node.type, node=node)
-    elif node.has_error:
-        for child in node.children:
-            check_parse_errors(child)
 
 
 class PTNode:
@@ -36,7 +27,15 @@ class PTNode:
     def text(self) -> str:
         return self.node.text.decode()
 
-    def field(self, name: str) -> PTNode | None:
+    def field(self, name: str) -> PTNode:
+        child = self.node.child_by_field_name(name)
+        if child is None:
+            raise ValueError(
+                f"Node of type '{self.type}' doesn't have a field named '{name}'"
+            )
+        return self.__class__(child)
+
+    def maybe_field(self, name: str) -> PTNode | None:
         child = self.node.child_by_field_name(name)
         if child is None:
             return None
@@ -75,12 +74,66 @@ class PTNode:
         return tree
 
 
+@attrs.define
+class Error:
+    type: str
+    explanation: str
+    show_source: bool
+    node: TSNode
+
+    def rich_print(self, file_path: Path, file_bytes: bytes):
+        fpath = str(file_path)
+        etype = self.type
+        line = self.node.start_point[0] + 1
+        col = self.node.start_point[1] + 1
+        expl = rich.markup.escape(self.explanation)
+
+        rich.print(f"[red]{etype}[/red]:[yellow]{fpath}[/yellow]:{line}:{col}: {expl}")
+        if self.show_source:
+            start = self.node.start_byte
+            end = self.node.end_byte
+            error_part = file_bytes[start:end].decode()
+            print(error_part)
+
+
+def check_parse_errors(node: TSNode, errors: list[Error] | None = None) -> list[Error]:
+    if errors is None:
+        errors = []
+
+    if node.type == "ERROR":
+        errors.append(Error("Parse error", node.sexp(), True, node))
+    elif node.is_missing:
+        errors.append(Error("Missing token", node.type, True, node))
+    elif node.has_error:
+        for child in node.children:
+            check_parse_errors(child, errors)
+
+    return errors
+
+
+class ParseTreeConstructionError(Exception):
+    def __init__(self, errors: list[Error]):
+        super().__init__()
+        self.errors = errors
+
+    def __str__(self):
+        return "Failed to construct parse tree"
+
+    def rich_print(self, file_path: Path, file_bytes: bytes):
+        rich.print(f"[red]{self}[/red]")
+        for error in self.errors:
+            error.rich_print(file_path, file_bytes)
+
+
 def mk_pt(file_bytes: bytes) -> PTNode:
     """Make parse tree."""
     parser = get_parser()
     parse_tree = parser.parse(file_bytes)
-    check_parse_errors(parse_tree.root_node)
-    root_node = PTNode(parse_tree.root_node)
+    root_node = parse_tree.root_node
+    errors = check_parse_errors(root_node)
+    if errors:
+        raise ParseTreeConstructionError(errors)
+    root_node = PTNode(root_node)
     return root_node
 
 
@@ -91,7 +144,9 @@ def mk_pt(file_bytes: bytes) -> PTNode:
 )
 def print_parse_tree(filename: Path):
     """Print the parse tree."""
-
     file_bytes = filename.read_bytes()
-    root_node = mk_pt(file_bytes)
-    rich.print(root_node.rich_tree())
+    try:
+        pt = mk_pt(file_bytes)
+        rich.print(pt.rich_tree())
+    except ParseTreeConstructionError as e:
+        e.rich_print(filename, file_bytes)

@@ -1,5 +1,6 @@
 """Python bindings for the tree-sitter-parser."""
 
+
 from pathlib import Path
 from tree_sitter import Language, Parser
 
