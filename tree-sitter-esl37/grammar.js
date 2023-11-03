@@ -36,6 +36,8 @@ module.exports = grammar({
             field('name', $.identifier),
             ':',
             field('type', $.identifier),
+            '=',
+            field('default', choice($.integer, $.float, $.boolean)),
             $._terminator
         ),
 
@@ -406,8 +408,7 @@ module.exports = grammar({
         _expression: $ => choice(
             $.integer,
             $.float,
-            $.true,
-            $.false,
+            $.boolean,
             $.unary_expression,
             $.binary_expression,
             $.parenthesized_expression,
@@ -501,8 +502,7 @@ module.exports = grammar({
             ));
         },
 
-        true: _ => 'True',
-        false: _ => 'False',
+        boolean: _ => choice('True', 'False'),
 
         string: _ => token(seq(
             '"',

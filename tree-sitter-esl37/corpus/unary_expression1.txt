@@ -44,10 +44,10 @@ end
         (unary_expression (float))
     )
     (test_expression
-        (unary_expression (true))
+        (unary_expression (boolean))
     )
     (test_expression
-        (unary_expression (false))
+        (unary_expression (boolean))
     )
 )
 

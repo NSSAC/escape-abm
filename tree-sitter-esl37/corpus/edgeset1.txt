@@ -31,7 +31,7 @@ end
             (reference (identifier))
             (update_statement
                 (reference (identifier) (identifier))
-                (true)
+                (boolean)
             )
         )
     )

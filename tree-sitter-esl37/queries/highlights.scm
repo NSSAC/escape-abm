@@ -99,8 +99,7 @@
 ; Literals
 
 [
-  (true)
-  (false)
+  (boolean)
 ] @boolean
 
 [

@@ -42,10 +42,10 @@ end
         (float)
     )
     (test_expression
-        (true)
+        (boolean)
     )
     (test_expression
-        (false)
+        (boolean)
     )
 )
 

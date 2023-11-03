@@ -99,6 +99,31 @@
           }
         },
         {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "default",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "float"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "boolean"
+              }
+            ]
+          }
+        },
+        {
           "type": "SYMBOL",
           "name": "_terminator"
         }
@@ -2019,11 +2044,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "true"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "false"
+          "name": "boolean"
         },
         {
           "type": "SYMBOL",
@@ -2941,13 +2962,18 @@
         ]
       }
     },
-    "true": {
-      "type": "STRING",
-      "value": "True"
-    },
-    "false": {
-      "type": "STRING",
-      "value": "False"
+    "boolean": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "True"
+        },
+        {
+          "type": "STRING",
+          "value": "False"
+        }
+      ]
     },
     "string": {
       "type": "TOKEN",

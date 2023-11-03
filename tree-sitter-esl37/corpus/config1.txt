@@ -2,20 +2,20 @@
 Config 1
 ========
 
-config num_ticks: int
+config num_ticks: int = 0
 
-config transmissibility: float
+config transmissibility: float = 1.0
 
-config some_flag: bool
+config some_flag: bool = True
 
-config other_flag: bool
+config other_flag: bool = False
 
 ---
 
 (source_file
-    (config name: (identifier) type: (identifier))
-    (config name: (identifier) type: (identifier))
-    (config name: (identifier) type: (identifier))
-    (config name: (identifier) type: (identifier))
+    (config name: (identifier) type: (identifier) default: (integer))
+    (config name: (identifier) type: (identifier) default: (float))
+    (config name: (identifier) type: (identifier) default: (boolean))
+    (config name: (identifier) type: (identifier) default: (boolean))
 )
 
