@@ -1,0 +1,20 @@
+{# Codegen CPU Macros #}
+
+{% macro source(s) %}
+#include <iomanip>
+#include <iostream>
+
+int main() {
+    std::cout << std::boolalpha;
+
+    {% for statement in s.main_function.body %}
+    {{ statement | codegen }}
+    {% endfor %}
+    
+    return 0;
+}
+{% endmacro %}
+
+{% macro print_statement(s) %}
+std::cout {% for a in s.args %}<< {{ a | codegen }} << {{ s.sep }} {% endfor %}<< {{ s.end }} << std::flush;
+{% endmacro %}
