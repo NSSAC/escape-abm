@@ -16,7 +16,7 @@ import rich
 from rich.syntax import Syntax
 
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast1 import Expression, expression_type, mk_ast1, ASTConstructionError
+from .ast1 import EnumType, Expression, expression_type, mk_ast1, ASTConstructionError
 
 T = TypeVar("T")
 
@@ -148,6 +148,7 @@ register_function(Reference, codegen_reference)
 
 
 register_template(Config, "config")
+register_template(EnumType, "enum_type")
 
 
 def cout_cast(t: str) -> str:

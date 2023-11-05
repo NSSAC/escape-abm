@@ -1,5 +1,12 @@
 {# Codegen CPU Macros #}
 
+{% macro enum_type(t) %}
+typedef {{ t.base_type | codegen }} {{ t.name }};
+{% for const in t.consts %}
+#define {{ const }} {{ loop.index0 }}
+{% endfor %}
+{% endmacro %}
+
 {% macro config(c) %}
 {{ c.type | codegen }} {{ c.name }} = {{ c.default | codegen }};
 {% endmacro %}
@@ -13,6 +20,10 @@
 
 {% for c in s.configs %}
 {{ c | codegen }}
+{% endfor %}
+
+{% for e in s.enums %}
+{{ e | codegen }}
 {% endfor %}
 
 int main() {

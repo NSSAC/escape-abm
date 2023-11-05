@@ -184,7 +184,7 @@ class EnumConstant(str):
 @attrs.define
 class EnumType:
     name: str
-    base_type: str
+    base_type: BuiltinType
     consts: list[str]
     node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -200,6 +200,7 @@ class EnumType:
         base_type = smallest_int_type(len(consts) - 1)
         if base_type is None:
             raise Error("Large enum", "Enum is too big", node)
+        _, base_type = scope.resolve(base_type, node)
 
         obj = cls(name, base_type, consts, node)
         scope.define(name, obj, True, node)
@@ -424,6 +425,10 @@ class Source:
 
         if main_function is None:
             raise Error("Main undefined", "No main function was defined", node)
+        if main_function.params:
+            raise Error("Bad main", "Main function must not have any parameters", node)
+        if main_function.return_ is not None:
+            raise Error("Bad main", "Main function must not have a return type", node)
 
         return cls(
             module=module,
