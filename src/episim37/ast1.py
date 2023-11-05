@@ -95,16 +95,16 @@ class Scope:
 
 def smallest_int_type(max_val: int) -> str | None:
     if max_val < 2**8:
-        c_type = "uint8_t"
+        type = "u8"
     elif max_val < 2**16:
-        c_type = "uint16_t"
+        type = "u16"
     elif max_val < 2**32:
-        c_type = "uint32_t"
+        type = "u32"
     elif max_val < 2**32:
-        c_type = "uint64_t"
+        type = "u64"
     else:
-        c_type = None
-    return c_type
+        type = None
+    return type
 
 
 def make_bool(text: str) -> bool:
@@ -132,12 +132,18 @@ def add_reserved_name(name: str, scope: Scope, node: PTNode):
 def add_builtins(scope: Scope, node: PTNode):
     for type in ["int", "uint", "float", "bool", "node", "edge"]:
         add_builtin_type(type, scope, node)
+    for type in ["u8", "u16", "u32", "u64"]:
+        add_builtin_type(type, scope, node)
+    for type in ["i8", "i16", "i32", "i64"]:
+        add_builtin_type(type, scope, node)
+    for type in ["f32", "f64"]:
+        add_builtin_type(type, scope, node)
 
 
 @attrs.define
 class Config:
     name: str
-    type: str
+    type: BuiltinType
     default: int | float | bool
     node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -146,8 +152,8 @@ class Config:
         name = node.field("name").text
         type_node = node.field("type")
         match scope.resolve(type_node.text, type_node):
-            case _, BuiltinType():
-                type = type_node.text
+            case _, BuiltinType() as t:
+                type = t
             case _:
                 raise Error(
                     "Invalid type",
@@ -178,7 +184,7 @@ class EnumConstant(str):
 @attrs.define
 class EnumType:
     name: str
-    base_c_type: str
+    base_type: str
     consts: list[str]
     node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -191,11 +197,11 @@ class EnumType:
             scope.define(const, EnumConstant(const), True, child)
             consts.append(const)
 
-        base_c_type = smallest_int_type(len(consts) - 1)
-        if base_c_type is None:
+        base_type = smallest_int_type(len(consts) - 1)
+        if base_type is None:
             raise Error("Large enum", "Enum is too big", node)
 
-        obj = cls(name, base_c_type, consts, node)
+        obj = cls(name, base_type, consts, node)
         scope.define(name, obj, True, node)
         return obj
 
@@ -252,10 +258,33 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
             raise UnexpectedValue(unexpected, node)
 
 
-Expression = int | float | bool
+@attrs.define
+class Reference:
+    parts: list[str]
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Reference:
+        parts = [s.text for s in node.named_children]
+        return Reference(parts, scope, node)
+
+    def resolve(self) -> Any:
+        assert self.scope is not None
+        assert self.node is not None
+
+        head, tail = self.parts[0], self.parts[1:]
+        _, v = self.scope.resolve(head, self.node)
+        for part in tail:
+            _, v = v.scope.resolve(part, self.node)
+
+        return v
 
 
-def parse_expression(node: PTNode, _: Scope) -> Expression:
+Expression = int | float | bool | Reference
+
+
+def parse_expression(node: PTNode, scope: Scope) -> Expression:
     match node.type:
         case "integer":
             return int(node.text)
@@ -263,8 +292,29 @@ def parse_expression(node: PTNode, _: Scope) -> Expression:
             return float(node.text)
         case "boolean":
             return make_bool(node.text)
+        case "reference":
+            return Reference.make(node, scope)
         case unexpected:
             raise UnexpectedValue(unexpected, node)
+
+
+def expression_type(e: Expression) -> str:
+    match e:
+        case bool():
+            return "bool"
+        case int():
+            return "i64"
+        case float():
+            return "f64"
+        case Reference():
+            r = e.resolve()
+            match r:
+                case Config():
+                    return r.type.name
+                case unexpcted:
+                    return f"unexpcted type {unexpcted}"
+        case unexpcted:
+            return f"unexpcted type {unexpcted}"
 
 
 @attrs.define

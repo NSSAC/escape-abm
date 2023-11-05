@@ -1,23 +1,40 @@
 {# Codegen CPU Macros #}
 
+{% macro config(c) %}
+{{ c.type | codegen }} {{ c.name }} = {{ c.default | codegen }};
+{% endmacro %}
+
+
 {% macro source(s) %}
+#include <cinttypes>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 
+{% for c in s.configs %}
+{{ c | codegen }}
+{% endfor %}
+
 int main() {
     std::cout << std::boolalpha;
+    {% for c in s.configs %}
+    {
+        char *p = std::getenv("{{ c.name | upper }}");
+        if (p) {
+            {{ c.name }} = {{ c.type.name | cstr_to_ctype }}(p);
+        }
+        // std::cout << "{{ c.name }} = " << {{ c.type.name | cout_cast }}({{ c.name }}) << std::endl;
+    }
+    {% endfor %}
 
     {% for statement in s.main_function.body %}
     {{ statement | codegen }}
     {% endfor %}
-    
+
     return 0;
 }
 {% endmacro %}
 
-{% macro print_statement(s) %}
-std::cout {% for a in s.args %}<< {{ a | codegen }} << {{ s.sep }} {% endfor %}<< {{ s.end }} << std::flush;
-{% endmacro %}
 
 {% macro cmake_lists(s) %}
 cmake_minimum_required(VERSION 3.27)

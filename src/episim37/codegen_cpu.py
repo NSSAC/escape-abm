@@ -16,9 +16,13 @@ import rich
 from rich.syntax import Syntax
 
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast1 import mk_ast1, ASTConstructionError
+from .ast1 import Expression, expression_type, mk_ast1, ASTConstructionError
 
 T = TypeVar("T")
+
+
+class CodegenError(Exception):
+    pass
 
 
 ENVIRONMENT = jinja2.Environment(
@@ -68,15 +72,127 @@ def codegen(o: Any) -> str:
 
 ENVIRONMENT.filters["codegen"] = codegen
 
-from .ast1 import Source, PrintStatement
 
+def ctype(t: str) -> str:
+    # fmt: off
+    type_map = {
+        "int":   "int64_t",
+        "uint":  "uint64_t",
+        "float": "double",
+        "bool":  "uint8_t",
+
+        "u8":  "uint8_t",
+        "u16": "uint16_t",
+        "u32": "uint32_t",
+        "u64": "uint64_t",
+
+        "i8":  "int8_t",
+        "i16": "int16_t",
+        "i32": "int32_t",
+        "i64": "int64_t",
+
+        "f32": "float",
+        "f64": "double",
+
+        "node":  "uint64_t",
+        "edge":  "uint64_t",
+    }
+    # fmt: on
+
+    unk = f"unknown type {t}"
+    return type_map.get(t, unk)
+
+
+ENVIRONMENT.filters["ctype"] = ctype
+
+
+def cstr_to_ctype(t: str) -> str:
+    match t:
+        case ("int" | "i8" | "i16" | "i32" | "i64"):
+            return "std::stol"
+        case ("uint" | "u8" | "u16" | "u32" | "u64"):
+            return "std::stoul"
+        case ("float" | "f32" | "f64"):
+            return "std::stod"
+        case "bool":
+            return "std::stol"
+        case unexpected:
+            raise CodegenError(f"Unexpected builtin: {unexpected}")
+
+
+ENVIRONMENT.filters["cstr_to_ctype"] = cstr_to_ctype
+
+
+from .ast1 import BuiltinType, Reference, Config, PrintStatement, Source
+
+# Literals
 register_function(str, str)
 register_function(int, str)
 register_function(float, str)
-register_function(bool, lambda x: "true" if x else "false")
+register_function(bool, lambda x: str(int(x)))
 
+
+def codegen_builtin_type(b: BuiltinType) -> str:
+    return ctype(b.name)
+
+
+register_function(BuiltinType, codegen_builtin_type)
+
+
+def codegen_reference(r: Reference) -> str:
+    v = r.resolve()
+    return v.name
+
+
+register_function(Reference, codegen_reference)
+
+
+register_template(Config, "config")
+
+
+def cout_cast(t: str) -> str:
+    match t:
+        case ("i8" | "i16" | "i32" | "i64"):
+            return "int64_t"
+        case ("u8" | "u16" | "u32" | "u64"):
+            return "uint64_t"
+        case ("float" | "f32" | "f64"):
+            return "double"
+        case ("node" | "edge"):
+            return "uint64_t"
+        case "bool":
+            return "bool"
+        case unexpected:
+            raise CodegenError(f"Unexpected builtin: {unexpected}")
+
+
+ENVIRONMENT.filters["cout_cast"] = cout_cast
+
+
+def cout_expr(e: Expression) -> str:
+    type = expression_type(e)
+    type = cout_cast(type)
+    expr = codegen(e)
+    return f"{type}({expr})"
+
+
+def codegen_print_statement(s: PrintStatement) -> str:
+    out_args = []
+    for arg in s.args:
+        if isinstance(arg, str):
+            out_args.append(arg)
+            out_args.append(s.sep)
+        else:
+            out_args.append(cout_expr(arg))
+            out_args.append(s.sep)
+    out_args.append(s.end)
+    out_args = " << ".join(out_args)
+    out_args = "std::cout << " + out_args + " << std::flush;"
+    return out_args
+
+
+register_function(PrintStatement, codegen_print_statement)
 register_template(Source, "source")
-register_template(PrintStatement, "print_statement")
 
 
 @attrs.define
@@ -155,7 +271,7 @@ def run(input: Path):
             prefix=f"{input.stem}-", suffix="-episim37"
         ) as temp_output_dir:
             output = Path(temp_output_dir).absolute()
-            rich.print(f"[cyan]Output dir:[/cyan] {output!s}")
+            rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
 
             rich.print("[cyan]Creating simulator[/cyan]")
             output = do_build(output, input, file_bytes)
