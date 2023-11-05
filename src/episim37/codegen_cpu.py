@@ -16,7 +16,16 @@ import rich
 from rich.syntax import Syntax
 
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast1 import EnumType, Expression, expression_type, mk_ast1, ASTConstructionError
+from .ast1 import expression_type, mk_ast1, ASTConstructionError
+from .ast1 import (
+    BuiltinType,
+    EnumType,
+    Config,
+    Reference,
+    Expression,
+    PrintStatement,
+    Source,
+)
 
 T = TypeVar("T")
 
@@ -116,14 +125,12 @@ def cstr_to_ctype(t: str) -> str:
             return "std::stod"
         case "bool":
             return "std::stol"
-        case unexpected:
+        case _ as unexpected:
             raise CodegenError(f"Unexpected builtin: {unexpected}")
 
 
 ENVIRONMENT.filters["cstr_to_ctype"] = cstr_to_ctype
 
-
-from .ast1 import BuiltinType, Reference, Config, PrintStatement, Source
 
 # Literals
 register_function(str, str)
@@ -153,9 +160,9 @@ register_template(EnumType, "enum_type")
 
 def cout_cast(t: str) -> str:
     match t:
-        case ("i8" | "i16" | "i32" | "i64"):
+        case ("int" | "i8" | "i16" | "i32" | "i64"):
             return "int64_t"
-        case ("u8" | "u16" | "u32" | "u64"):
+        case ("uint" | "u8" | "u16" | "u32" | "u64"):
             return "uint64_t"
         case ("float" | "f32" | "f64"):
             return "double"
@@ -163,7 +170,7 @@ def cout_cast(t: str) -> str:
             return "uint64_t"
         case "bool":
             return "bool"
-        case unexpected:
+        case _ as unexpected:
             raise CodegenError(f"Unexpected builtin: {unexpected}")
 
 

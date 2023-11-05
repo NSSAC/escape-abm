@@ -1,0 +1,89 @@
+# A minimal epidemic model
+
+config num_ticks : int = 10
+config seed_prob : float = 0.01
+
+node
+    pid: int node key static
+end
+
+edge
+    pid1: int target node key static
+    pid2: int source node key static
+end
+
+distribution
+    discrete fixed1
+        p = 1, v = 1.0
+    end
+
+    uniform uniform1
+        low = 0.0, high=1.0
+    end
+end
+
+enum c1_state_t
+    S, E, I, R
+end
+
+contagion c1
+    state type c1_state_t
+
+    transition
+        E -> I, p = 1.0, dwell = fixed1
+        I -> R, p = 1.0, dwell = fixed1
+    end
+
+    transmission
+        E => S -> E
+        I => S -> E
+    end
+
+    def susceptibility(v: node) -> float:
+        susceptibility = 0.0
+        switch (v.state1):
+        case S:
+            susceptibility = 1.0
+        end
+        return susceptibility
+    end
+
+    def infectivity(v: node) -> float:
+        infectivity = 0.0
+        switch (v.state1):
+        case E:
+            infectivity = 0.8
+        case I:
+            infectivity = 1.0
+        end
+        return infectivity
+    end
+
+
+    def transmissibility(e: edge) -> float:
+        return 1.0
+    end
+
+end
+
+def main():
+    all_nodes: nodeset = { n : True }
+    all_edges: nodeset = { e : True }
+
+    # print("num_ticks=", num_ticks)
+    # print("seed_prob=", seed_prob)
+    # print("len(nodes)=", len(all_nodes))
+    # print("len(edges)=", len(all_edges))
+
+    # Initialization
+    seed_nodes: nodeset = { n : uniform1() < seed_prob }
+    foreach n in seed_nodes:
+        n.state = E
+    end
+
+    # Main loop
+    for tick in range(num_ticks):
+        c1.do_transmission(1)
+        c1.do_transition(1)
+    end
+end
