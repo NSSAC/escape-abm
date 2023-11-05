@@ -208,6 +208,135 @@ class EnumType:
 
 
 @attrs.define
+class NodeField:
+    name: str
+    type: BuiltinType | EnumType
+    is_node_key: bool
+    is_static: bool
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope):
+        name = node.field("name").text
+        type_node = node.field("type")
+
+        match scope.resolve(type_node.text, type_node):
+            case [_, (BuiltinType() | EnumType()) as t]:
+                type = t
+            case _:
+                raise Error(
+                    "Invalid type",
+                    f"{type_node.text} is not a built in or enumerated type",
+                    type_node,
+                )
+
+        annotations = [c.text for c in node.fields("annotation")]
+        is_node_key = "node key" in annotations
+        is_static = "static" in annotations or is_node_key
+
+        obj = NodeField(name, type, is_node_key, is_static, node)
+        scope.define(name, obj, True, node)
+        return obj
+
+
+@attrs.define
+class NodeTable:
+    fields: list[NodeField]
+    key: NodeField
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, parent_scope: Scope) -> NodeTable:
+        scope = Scope(name="node_table", parent=parent_scope)
+        fields = []
+        for child in node.named_children:
+            fields.append(NodeField.make(child, scope))
+
+        key = [f for f in fields if f.is_node_key]
+        if len(key) != 1:
+            raise Error(
+                "Node key error",
+                "One and only one node key field must be specified.",
+                node,
+            )
+        key = key[0]
+        return NodeTable(fields, key, scope, node)
+
+
+@attrs.define
+class EdgeField:
+    name: str
+    type: BuiltinType | EnumType
+    is_target_node_key: bool
+    is_source_node_key: bool
+    is_static: bool
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope):
+        name = node.field("name").text
+        type_node = node.field("type")
+
+        match scope.resolve(type_node.text, type_node):
+            case [_, (BuiltinType() | EnumType()) as t]:
+                type = t
+            case _:
+                raise Error(
+                    "Invalid type",
+                    f"{type_node.text} is not a built in or enumerated type",
+                    type_node,
+                )
+
+        annotations = [c.text for c in node.fields("annotation")]
+        is_source_node_key = "source node key" in annotations
+        is_target_node_key = "target node key" in annotations
+        is_static = "static" in annotations or is_source_node_key or is_target_node_key
+
+        obj = EdgeField(
+            name, type, is_target_node_key, is_source_node_key, is_static, node
+        )
+        scope.define(name, obj, True, node)
+        return obj
+
+
+@attrs.define
+class EdgeTable:
+    fields: list[EdgeField]
+    target_node_key: EdgeField
+    source_node_key: EdgeField
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, parent_scope: Scope) -> EdgeTable:
+        scope = Scope(name="edge_table", parent=parent_scope)
+        fields = []
+        for child in node.named_children:
+            fields.append(EdgeField.make(child, scope))
+
+        target_key = [f for f in fields if f.is_target_node_key]
+        if len(target_key) != 1:
+            raise Error(
+                "Edge target key error",
+                "One and only one target node key field must be specified.",
+                node,
+            )
+        target_key = target_key[0]
+
+        source_key = [f for f in fields if f.is_source_node_key]
+        if len(source_key) != 1:
+            raise Error(
+                "Edge source key error",
+                "One and only one source node key field must be specified.",
+                node,
+            )
+        source_key = source_key[0]
+
+        return EdgeTable(fields, target_key, source_key, scope, node)
+
+
+@attrs.define
 class PassStatement:
     node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -389,6 +518,8 @@ class Source:
     module: str
     configs: list[Config]
     enums: list[EnumType]
+    node_table: NodeTable
+    edge_table: EdgeTable
     functions: list[Function]
     main_function: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
@@ -401,6 +532,8 @@ class Source:
 
         configs: list[Config] = []
         enums: list[EnumType] = []
+        node_table = None
+        edge_table = None
         functions: list[Function] = []
         main_function = None
         for child in node.named_children:
@@ -409,6 +542,24 @@ class Source:
                     configs.append(Config.make(child, scope))
                 case "enum":
                     enums.append(EnumType.make(child, scope))
+                case "node":
+                    if node_table is None:
+                        node_table = NodeTable.make(child, scope)
+                    else:
+                        raise Error(
+                            "Multiple node table",
+                            "Node table is multiply defined",
+                            child,
+                        )
+                case "edge":
+                    if edge_table is None:
+                        edge_table = EdgeTable.make(child, scope)
+                    else:
+                        raise Error(
+                            "Multiple edge table",
+                            "Edge table is multiply defined",
+                            child,
+                        )
                 case "function":
                     func = Function.make(child, scope)
                     if func.name == "main":
@@ -423,6 +574,11 @@ class Source:
                     else:
                         functions.append(func)
 
+        if node_table is None:
+            raise Error("Node undefined", "Node table was not defined", node)
+        if edge_table is None:
+            raise Error("Edge undefined", "Edge table was not defined", node)
+
         if main_function is None:
             raise Error("Main undefined", "No main function was defined", node)
         if main_function.params:
@@ -433,9 +589,11 @@ class Source:
         return cls(
             module=module,
             configs=configs,
+            enums=enums,
+            node_table=node_table,
+            edge_table=edge_table,
             functions=functions,
             main_function=main_function,
-            enums=enums,
             scope=scope,
         )
 

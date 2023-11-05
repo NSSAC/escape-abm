@@ -1,10 +1,7 @@
-.PHONY : all hello minimal example1
+.PHONY : all minimal example1
 
 
-all : hello minimal example1
-
-hello :
-	episim37 cpu run hello.esl37
+all : minimal example1
 
 minimal :
 	episim37 cpu run minimal.esl37
