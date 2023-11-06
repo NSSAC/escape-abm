@@ -107,8 +107,22 @@ def smallest_int_type(max_val: int) -> str | None:
     return type
 
 
-def make_bool(text: str) -> bool:
-    return text == "True"
+def make_number(n: PTNode) -> int | float:
+    match n.type:
+        case "integer":
+            return int(n.text)
+        case "float":
+            return float(n.text)
+        case _ as unexpcted:
+            raise UnexpectedValue(unexpcted, n)
+
+
+def make_bool(n: PTNode) -> bool:
+    match n.type:
+        case "boolean":
+            return n.text == True
+        case _ as unexpcted:
+            raise UnexpectedValue(unexpcted, n)
 
 
 @attrs.define
@@ -261,7 +275,10 @@ class NodeTable:
                 node,
             )
         key = key[0]
-        return NodeTable(fields, key, scope, node)
+
+        obj = NodeTable(fields, key, scope, node)
+        scope.define("node_table", obj, True, node)
+        return obj
 
 
 @attrs.define
@@ -333,7 +350,108 @@ class EdgeTable:
             )
         source_key = source_key[0]
 
-        return EdgeTable(fields, target_key, source_key, scope, node)
+        obj = EdgeTable(fields, target_key, source_key, scope, node)
+        scope.define("edge_table", obj, True, node)
+        return obj
+
+
+@attrs.define
+class ConstantDist:
+    name: str
+    v: int | float
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> ConstantDist:
+        name = node.field("name").text
+        v = make_number(node.field("v"))
+        obj = ConstantDist(name, v, node)
+        scope.define(name, obj, True, node)
+        return obj
+
+
+@attrs.define
+class DiscreteDist:
+    name: str
+    ps: list[int | float]
+    vs: list[int | float]
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> DiscreteDist:
+        name = node.field("name").text
+        ps = []
+        vs = []
+        for child in node.fields("pv"):
+            p = make_number(child.field("p"))
+            ps.append(p)
+
+            v = make_number(child.field("v"))
+            vs.append(v)
+
+        obj = DiscreteDist(name, ps, vs, node)
+        scope.define(name, obj, True, node)
+        return obj
+
+
+@attrs.define
+class NormalDist:
+    name: str
+    mean: int | float
+    std: int | float
+    min: int | float
+    max: int | float
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> NormalDist:
+        name = node.field("name").text
+        mean = make_number(node.field("mean"))
+        std = make_number(node.field("std"))
+
+        min = node.maybe_field("min")
+        min = -1e300 if min is None else make_number(min)
+
+        max = node.maybe_field("max")
+        max = 1e300 if max is None else make_number(max)
+
+        obj = NormalDist(name, mean, std, min, max, node)
+        scope.define(name, obj, True, node)
+        return obj
+
+
+@attrs.define
+class UniformDist:
+    name: str
+    low: int | float
+    high: int | float
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> UniformDist:
+        name = node.field("name").text
+        low = make_number(node.field("low"))
+        high = make_number(node.field("high"))
+        obj = UniformDist(name, low, high, node)
+        scope.define(name, obj, True, node)
+        return obj
+
+
+Distribution = ConstantDist | DiscreteDist | NormalDist | UniformDist
+
+
+def parse_distribution(node: PTNode, scope: Scope) -> Distribution:
+    match node.type:
+        case "constant_dist":
+            return ConstantDist.make(node, scope)
+        case "discrete_dist":
+            return DiscreteDist.make(node, scope)
+        case "normal_dist":
+            return NormalDist.make(node, scope)
+        case "uniform_dist":
+            return UniformDist.make(node, scope)
+        case unexpected:
+            raise UnexpectedValue(unexpected, node)
 
 
 @attrs.define
@@ -416,12 +534,10 @@ Expression = int | float | bool | Reference
 
 def parse_expression(node: PTNode, scope: Scope) -> Expression:
     match node.type:
-        case "integer":
-            return int(node.text)
-        case "float":
-            return float(node.text)
+        case "integer" | "float":
+            return make_number(node)
         case "boolean":
-            return make_bool(node.text)
+            return make_bool(node)
         case "reference":
             return Reference.make(node, scope)
         case unexpected:
@@ -520,6 +636,7 @@ class Source:
     enums: list[EnumType]
     node_table: NodeTable
     edge_table: EdgeTable
+    distributions: list[Distribution]
     functions: list[Function]
     main_function: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
@@ -534,6 +651,7 @@ class Source:
         enums: list[EnumType] = []
         node_table = None
         edge_table = None
+        distributions: list[Distribution] = []
         functions: list[Function] = []
         main_function = None
         for child in node.named_children:
@@ -560,6 +678,9 @@ class Source:
                             "Edge table is multiply defined",
                             child,
                         )
+                case "distributions":
+                    for d in child.named_children:
+                        distributions.append(parse_distribution(d, scope))
                 case "function":
                     func = Function.make(child, scope)
                     if func.name == "main":
@@ -592,6 +713,7 @@ class Source:
             enums=enums,
             node_table=node_table,
             edge_table=edge_table,
+            distributions=distributions,
             functions=functions,
             main_function=main_function,
             scope=scope,
