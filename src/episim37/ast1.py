@@ -95,16 +95,15 @@ class Scope:
 
 def smallest_int_type(max_val: int) -> str | None:
     if max_val < 2**8:
-        type = "u8"
+        return "u8"
     elif max_val < 2**16:
-        type = "u16"
+        return "u16"
     elif max_val < 2**32:
-        type = "u32"
+        return "u32"
     elif max_val < 2**32:
-        type = "u64"
+        return "u64"
     else:
-        type = None
-    return type
+        return None
 
 
 def make_number(n: PTNode) -> int | float:
@@ -328,7 +327,20 @@ class EdgeTable:
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> EdgeTable:
         scope = Scope(name="edge_table", parent=parent_scope)
+
         fields = []
+        gen_field = EdgeField(
+            "_source_node_idx", BuiltinType("u64"), False, False, True, node
+        )
+        scope.define(gen_field.name, gen_field, True, node)
+        fields.append(gen_field)
+
+        gen_field = EdgeField(
+            "_target_node_idx", BuiltinType("u64"), False, False, True, node
+        )
+        scope.define(gen_field.name, gen_field, True, node)
+        fields.append(gen_field)
+
         for child in node.named_children:
             fields.append(EdgeField.make(child, scope))
 

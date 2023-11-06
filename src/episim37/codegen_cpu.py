@@ -21,6 +21,8 @@ from .ast1 import (
     BuiltinType,
     EnumType,
     Config,
+    NodeTable,
+    EdgeTable,
     Reference,
     Expression,
     PrintStatement,
@@ -112,9 +114,6 @@ def ctype(t: str) -> str:
     return type_map.get(t, unk)
 
 
-ENVIRONMENT.filters["ctype"] = ctype
-
-
 def cstr_to_ctype(t: str) -> str:
     match t:
         case ("int" | "i8" | "i16" | "i32" | "i64"):
@@ -132,18 +131,48 @@ def cstr_to_ctype(t: str) -> str:
 ENVIRONMENT.filters["cstr_to_ctype"] = cstr_to_ctype
 
 
+def hdf5_type(t: str) -> str:
+    # fmt: off
+    type_map = {
+        "uint8_t": "H5::PredType::NATIVE_UINT8",
+        "uint16_t": "H5::PredType::NATIVE_UINT16",
+        "uint32_t": "H5::PredType::NATIVE_UINT32",
+        "uint64_t": "H5::PredType::NATIVE_UINT64",
+
+        "int8_t": "H5::PredType::NATIVE_INT8",
+        "int16_t": "H5::PredType::NATIVE_INT16",
+        "int32_t": "H5::PredType::NATIVE_INT32",
+        "int64_t": "H5::PredType::NATIVE_INT64",
+
+        "float": "H5::PredType::NATIVE_FLOAT",
+        "double": "H5::PredType::NATIVE_DOUBLE",
+    }
+    # fmt: on
+
+    unk = f"unknown type {t}"
+    return type_map.get(t, unk)
+
+
+ENVIRONMENT.filters["hdf5_type"] = hdf5_type
+
+
+def to_ctype(b: BuiltinType | EnumType) -> str:
+    match b:
+        case BuiltinType():
+            return ctype(b.name)
+        case EnumType():
+            return b.name
+        case _ as unexpected:
+            raise CodegenError(f"Unexpected type: {unexpected}")
+
+
+ENVIRONMENT.filters["to_ctype"] = to_ctype
+
 # Literals
 register_function(str, str)
 register_function(int, str)
 register_function(float, str)
 register_function(bool, lambda x: str(int(x)))
-
-
-def codegen_builtin_type(b: BuiltinType) -> str:
-    return ctype(b.name)
-
-
-register_function(BuiltinType, codegen_builtin_type)
 
 
 def codegen_reference(r: Reference) -> str:
@@ -153,9 +182,10 @@ def codegen_reference(r: Reference) -> str:
 
 register_function(Reference, codegen_reference)
 
-
 register_template(Config, "config")
 register_template(EnumType, "enum_type")
+register_template(NodeTable, "node_table")
+register_template(EdgeTable, "edge_table")
 
 
 def cout_cast(t: str) -> str:
