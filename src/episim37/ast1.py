@@ -11,37 +11,34 @@ import click
 import rich
 import rich.markup
 
-from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError
+from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError, SourcePosition
 
 
 class ASTConstructionError(Exception):
-    def __init__(self, type: str, explanation: str, node: PTNode):
+    def __init__(self, type: str, explanation: str, pos: SourcePosition):
         super().__init__()
         self.type = type
         self.explanation = explanation
-        self.node = node.node
+        self.pos = pos
 
     def __str__(self):
         return "Failed to construct AST"
 
-    def rich_print(self, file_path: Path, file_bytes: bytes):
-        fpath = str(file_path)
-        etype = self.type
-        line = self.node.start_point[0] + 1
-        col = self.node.start_point[1] + 1
+    def rich_print(self):
+        etype = f"[red]{self.type}[/red]"
+        fpath = f"[yellow]{self.pos.source}[/yellow]"
+        line = self.pos.line
+        col = self.pos.col
         expl = rich.markup.escape(self.explanation)
 
         rich.print(f"[red]{self}[/red]")
-        rich.print(f"[red]{etype}[/red]:[yellow]{fpath}[/yellow]:{line}:{col}: {expl}")
-        start = self.node.start_byte
-        end = self.node.end_byte
-        error_part = file_bytes[start:end].decode()
-        print(error_part)
+        rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
+        print(self.pos.text)
 
 
 class UnexpectedValue(ASTConstructionError):
-    def __init__(self, unexpected, node: PTNode):
-        super().__init__("Unexpected value", str(unexpected), node)
+    def __init__(self, unexpected, pos: SourcePosition):
+        super().__init__("Unexpected value", repr(unexpected), pos)
 
 
 Error = ASTConstructionError
@@ -68,14 +65,14 @@ class Scope:
         elif self.parent is not None:
             return self.parent.resolve(k, node)
 
-        raise Error("Undefined reference", f"{k} is not defined", node)
+        raise Error("Undefined reference", f"{k} is not defined", node.pos)
 
     def define(self, k: str, v: Any, const: bool, node: PTNode):
         if k in self.names:
             raise Error(
                 "Already defined",
                 f"{k} has been already defined",
-                node,
+                node.pos,
             )
 
         self.names[k] = v
@@ -88,7 +85,7 @@ class Scope:
             raise Error(
                 "Constant update",
                 f"{k} can't be updated",
-                node,
+                node.pos,
             )
         scope.names[k] = v
 
@@ -113,7 +110,7 @@ def make_number(n: PTNode) -> int | float:
         case "float":
             return float(n.text)
         case _ as unexpcted:
-            raise UnexpectedValue(unexpcted, n)
+            raise UnexpectedValue(unexpcted, n.pos)
 
 
 def make_bool(n: PTNode) -> bool:
@@ -121,7 +118,7 @@ def make_bool(n: PTNode) -> bool:
         case "boolean":
             return n.text == True
         case _ as unexpcted:
-            raise UnexpectedValue(unexpcted, n)
+            raise UnexpectedValue(unexpcted, n.pos)
 
 
 @attrs.define
@@ -171,7 +168,7 @@ class Config:
                 raise Error(
                     "Invalid type",
                     f"{type_node.text} is not a builtin type",
-                    type_node,
+                    type_node.pos,
                 )
 
         default_node = node.field("default")
@@ -183,7 +180,7 @@ class Config:
             case "boolean":
                 default = default_node.text == "True"
             case unexpected:
-                raise UnexpectedValue(unexpected, default_node)
+                raise UnexpectedValue(unexpected, default_node.pos)
 
         obj = cls(name=name, type=type, default=default, node=node)
         scope.define(name, obj, True, node)
@@ -212,7 +209,7 @@ class EnumType:
 
         base_type = smallest_int_type(len(consts) - 1)
         if base_type is None:
-            raise Error("Large enum", "Enum is too big", node)
+            raise Error("Large enum", "Enum is too big", node.pos)
         _, base_type = scope.resolve(base_type, node)
 
         obj = cls(name, base_type, consts, node)
@@ -240,7 +237,7 @@ class NodeField:
                 raise Error(
                     "Invalid type",
                     f"{type_node.text} is not a built in or enumerated type",
-                    type_node,
+                    type_node.pos,
                 )
 
         annotations = [c.text for c in node.fields("annotation")]
@@ -271,13 +268,34 @@ class NodeTable:
             raise Error(
                 "Node key error",
                 "One and only one node key field must be specified.",
-                node,
+                node.pos,
             )
         key = key[0]
 
         obj = NodeTable(fields, key, scope, node)
         scope.define("node_table", obj, True, node)
         return obj
+
+    def add_contagion_fields(self, c: Contagion):
+        assert self.scope is not None
+        assert c.scope is not None
+        assert c.node is not None
+
+        self.scope.define(c.name, c, True, c.node)
+
+        field = NodeField(f"_{c.name}_state", c.state_type, False, False, c.node)
+        c.scope.define("state", field, True, c.node)
+        self.fields.append(field)
+
+        field = NodeField(f"_{c.name}_next_state", c.state_type, False, False, c.node)
+        c.scope.define("next_state", field, True, c.node)
+        self.fields.append(field)
+
+        field = NodeField(
+            f"_{c.name}_dwell_time", BuiltinType("f32"), False, False, c.node
+        )
+        c.scope.define("dwell_time", field, True, c.node)
+        self.fields.append(field)
 
 
 @attrs.define
@@ -301,7 +319,7 @@ class EdgeField:
                 raise Error(
                     "Invalid type",
                     f"{type_node.text} is not a built in or enumerated type",
-                    type_node,
+                    type_node.pos,
                 )
 
         annotations = [c.text for c in node.fields("annotation")]
@@ -349,7 +367,7 @@ class EdgeTable:
             raise Error(
                 "Edge target key error",
                 "One and only one target node key field must be specified.",
-                node,
+                node.pos,
             )
         target_key = target_key[0]
 
@@ -358,7 +376,7 @@ class EdgeTable:
             raise Error(
                 "Edge source key error",
                 "One and only one source node key field must be specified.",
-                node,
+                node.pos,
             )
         source_key = source_key[0]
 
@@ -463,7 +481,143 @@ def parse_distribution(node: PTNode, scope: Scope) -> Distribution:
         case "uniform_dist":
             return UniformDist.make(node, scope)
         case unexpected:
-            raise UnexpectedValue(unexpected, node)
+            raise UnexpectedValue(unexpected, node.pos)
+
+
+@attrs.define
+class Contagion:
+    name: str
+    state_type: EnumType
+    transitions: list
+    transmissions: list
+    susceptibility: Function
+    infectivity: Function
+    transmissibility: Function
+    enabled: Function
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, parent_scope: Scope) -> Contagion:
+        name = node.field("name").text
+        scope = Scope(name=name, parent=parent_scope)
+
+        state_type = None
+        transitions = []
+        transmissions = []
+        susceptibility = None
+        infectivity = None
+        transmissibility = None
+        enabled = None
+
+        for child in node.fields("body"):
+            match child.type:
+                case "contagion_state_type":
+                    if state_type is not None:
+                        raise Error(
+                            "Multiple state types",
+                            "Contagion state type is multiply defined",
+                            child.pos,
+                        )
+                    match scope.resolve(child.field("type").text, child):
+                        case _, EnumType() as t:
+                            state_type = t
+                        case _:
+                            raise Error(
+                                "Invalid type",
+                                f"{child.field('type').text} is not a enumerated type",
+                                child.field("type").pos,
+                            )
+                case "transitions":
+                    pass
+                case "transmissions":
+                    pass
+                case "function":
+                    match child.field("name").text:
+                        case "susceptibility":
+                            if susceptibility is not None:
+                                raise Error(
+                                    "Multiple susceptibility",
+                                    "Susceptibility function is multiply defined",
+                                    child.pos,
+                                )
+                            susceptibility = Function.make(child, scope)
+                        case "infectivity":
+                            if infectivity is not None:
+                                raise Error(
+                                    "Multiple infectivity",
+                                    "Infectivity function is multiply defined",
+                                    child.pos,
+                                )
+                            infectivity = Function.make(child, scope)
+                        case "transmissibility":
+                            if transmissibility is not None:
+                                raise Error(
+                                    "Multiple transmissibility",
+                                    "Transmissibility function is multiply defined",
+                                    child.pos,
+                                )
+                            transmissibility = Function.make(child, scope)
+                        case "enabled":
+                            if enabled is not None:
+                                raise Error(
+                                    "Multiple enabled",
+                                    "Enabled (edge) function is multiply defined",
+                                    child.pos,
+                                )
+                            enabled = Function.make(child, scope)
+                        case _:
+                            raise Error(
+                                "Invalid function",
+                                f"{child.field('name').text} is not a valid contagion function",
+                                child.field("type").pos,
+                            )
+                case _ as unexpcted:
+                    raise UnexpectedValue(unexpcted, child.pos)
+
+        if state_type is None:
+            raise Error(
+                "State type undefined", "State type has not been defined", node.pos
+            )
+        if susceptibility is None:
+            raise Error(
+                "Susceptibility undefined",
+                "Susceptibility function has not been defined",
+                node.pos,
+            )
+        if infectivity is None:
+            raise Error(
+                "Infectivity undefined",
+                "Infectivity function has not been defined",
+                node.pos,
+            )
+        if transmissibility is None:
+            raise Error(
+                "Transmissibility undefined",
+                "Transmissibility function has not been defined",
+                node.pos,
+            )
+        if enabled is None:
+            raise Error(
+                "Edge enabled undefined",
+                "Enabled (edge) function has not been defined",
+                node.pos,
+            )
+
+        obj = Contagion(
+            name,
+            state_type,
+            transitions,
+            transmissions,
+            susceptibility,
+            infectivity,
+            transmissibility,
+            enabled,
+            scope,
+            node,
+        )
+        scope.define(name, obj, True, node)
+        return obj
 
 
 @attrs.define
@@ -515,7 +669,7 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
         case "print_statement":
             return PrintStatement.make(node, scope)
         case unexpected:
-            raise UnexpectedValue(unexpected, node)
+            raise UnexpectedValue(unexpected, node.pos)
 
 
 @attrs.define
@@ -553,7 +707,7 @@ def parse_expression(node: PTNode, scope: Scope) -> Expression:
         case "reference":
             return Reference.make(node, scope)
         case unexpected:
-            raise UnexpectedValue(unexpected, node)
+            raise UnexpectedValue(unexpected, node.pos)
 
 
 def expression_type(e: Expression) -> str:
@@ -591,7 +745,7 @@ class Param:
                 raise Error(
                     "Invalid type",
                     f"{type_node.text} is not a built in or enumerated type",
-                    type_node,
+                    type_node.pos,
                 )
 
         obj = cls(name, type)
@@ -628,7 +782,7 @@ class Function:
                     raise Error(
                         "Invalid type",
                         f"{return_node.text} is not a built in or enumerated type",
-                        return_node,
+                        return_node.pos,
                     )
 
         body = []
@@ -649,6 +803,7 @@ class Source:
     node_table: NodeTable
     edge_table: EdgeTable
     distributions: list[Distribution]
+    contagions: list[Contagion]
     functions: list[Function]
     main_function: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
@@ -661,11 +816,12 @@ class Source:
 
         configs: list[Config] = []
         enums: list[EnumType] = []
-        node_table = None
-        edge_table = None
+        node_table: NodeTable | None = None
+        edge_table: EdgeTable | None = None
         distributions: list[Distribution] = []
+        contagions: list[Contagion] = []
         functions: list[Function] = []
-        main_function = None
+        main_function: Function | None = None
         for child in node.named_children:
             match child.type:
                 case "config":
@@ -679,7 +835,7 @@ class Source:
                         raise Error(
                             "Multiple node table",
                             "Node table is multiply defined",
-                            child,
+                            child.pos,
                         )
                 case "edge":
                     if edge_table is None:
@@ -688,11 +844,13 @@ class Source:
                         raise Error(
                             "Multiple edge table",
                             "Edge table is multiply defined",
-                            child,
+                            child.pos,
                         )
                 case "distributions":
                     for d in child.named_children:
                         distributions.append(parse_distribution(d, scope))
+                case "contagion":
+                    contagions.append(Contagion.make(child, scope))
                 case "function":
                     func = Function.make(child, scope)
                     if func.name == "main":
@@ -702,22 +860,29 @@ class Source:
                             raise Error(
                                 "Multiple main",
                                 "Main function is multiply defined",
-                                child,
+                                child.pos,
                             )
                     else:
                         functions.append(func)
 
         if node_table is None:
-            raise Error("Node undefined", "Node table was not defined", node)
+            raise Error("Node undefined", "Node table was not defined", node.pos)
         if edge_table is None:
-            raise Error("Edge undefined", "Edge table was not defined", node)
+            raise Error("Edge undefined", "Edge table was not defined", node.pos)
 
         if main_function is None:
-            raise Error("Main undefined", "No main function was defined", node)
+            raise Error("Main undefined", "No main function was defined", node.pos)
         if main_function.params:
-            raise Error("Bad main", "Main function must not have any parameters", node)
+            raise Error(
+                "Bad main", "Main function must not have any parameters", node.pos
+            )
         if main_function.return_ is not None:
-            raise Error("Bad main", "Main function must not have a return type", node)
+            raise Error(
+                "Bad main", "Main function must not have a return type", node.pos
+            )
+
+        for c in contagions:
+            node_table.add_contagion_fields(c)
 
         return cls(
             module=module,
@@ -726,6 +891,7 @@ class Source:
             node_table=node_table,
             edge_table=edge_table,
             distributions=distributions,
+            contagions=contagions,
             functions=functions,
             main_function=main_function,
             scope=scope,
@@ -748,8 +914,8 @@ def print_ast1(filename: Path):
     """Print the AST1."""
     file_bytes = filename.read_bytes()
     try:
-        pt = mk_pt(file_bytes)
+        pt = mk_pt(str(filename), file_bytes)
         ast1 = mk_ast1(filename, pt)
         rich.print(ast1)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
-        e.rich_print(filename, file_bytes)
+        e.rich_print()

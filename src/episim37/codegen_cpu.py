@@ -241,8 +241,9 @@ class CmakeLists:
 register_template(CmakeLists, "cmake_lists")
 
 
-def do_build(output: Path | None, input: Path, file_bytes: bytes) -> Path:
-    pt = mk_pt(file_bytes)
+def do_build(output: Path | None, input: Path) -> Path:
+    input_bytes = input.read_bytes()
+    pt = mk_pt(str(input), input_bytes)
     source = mk_ast1(input, pt)
 
     if output is None:
@@ -277,11 +278,10 @@ def cpu():
 )
 def build(output: Path | None, input: Path):
     """Build simulator."""
-    file_bytes = input.read_bytes()
     try:
-        do_build(output, input, file_bytes)
+        do_build(output, input)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
-        e.rich_print(input, file_bytes)
+        e.rich_print()
 
 
 def pprint_cmd(cmd):
@@ -303,7 +303,6 @@ def verbose_run(cmd, *args, **kwargs):
 )
 def run(input: Path):
     """Build and run simulator."""
-    file_bytes = input.read_bytes()
     try:
         with TemporaryDirectory(
             prefix=f"{input.stem}-", suffix="-episim37"
@@ -312,7 +311,7 @@ def run(input: Path):
             rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
 
             rich.print("[cyan]Creating simulator[/cyan]")
-            output = do_build(output, input, file_bytes)
+            output = do_build(output, input)
 
             rich.print("[cyan]Running cmake[/cyan]")
             cmd = "cmake ."
@@ -326,4 +325,4 @@ def run(input: Path):
             cmd = "./simulator"
             verbose_run(cmd, cwd=output)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
-        e.rich_print(input, file_bytes)
+        e.rich_print()
