@@ -160,112 +160,6 @@
     }
   },
   {
-    "type": "case_section",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "call_statement",
-            "named": true
-          },
-          {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
-            "named": true
-          },
-          {
-            "type": "pass_statement",
-            "named": true
-          },
-          {
-            "type": "print_statement",
-            "named": true
-          },
-          {
-            "type": "return_statement",
-            "named": true
-          },
-          {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
-            "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
-            "named": true
-          },
-          {
-            "type": "while_loop",
-            "named": true
-          }
-        ]
-      },
-      "match": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "boolean",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "config",
     "named": true,
     "fields": {
@@ -298,70 +192,6 @@
         ]
       },
       "type": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "const_statement",
-    "named": true,
-    "fields": {
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "boolean",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      },
-      "type": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "var": {
         "multiple": false,
         "required": true,
         "types": [
@@ -451,74 +281,6 @@
         "types": [
           {
             "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "default_section",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "call_statement",
-            "named": true
-          },
-          {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
-            "named": true
-          },
-          {
-            "type": "pass_statement",
-            "named": true
-          },
-          {
-            "type": "print_statement",
-            "named": true
-          },
-          {
-            "type": "return_statement",
-            "named": true
-          },
-          {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
-            "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
-            "named": true
-          },
-          {
-            "type": "while_loop",
             "named": true
           }
         ]
@@ -665,36 +427,6 @@
     }
   },
   {
-    "type": "edgeset_statement",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "filter_expression",
-          "named": true
-        },
-        {
-          "type": "sample_expression",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "elif_section",
     "named": true,
     "fields": {
@@ -707,27 +439,7 @@
             "named": true
           },
           {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
             "named": true
           },
           {
@@ -743,15 +455,7 @@
             "named": true
           },
           {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
             "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
             "named": true
           },
           {
@@ -813,27 +517,7 @@
             "named": true
           },
           {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
             "named": true
           },
           {
@@ -849,15 +533,7 @@
             "named": true
           },
           {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
             "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
             "named": true
           },
           {
@@ -887,236 +563,6 @@
         ]
       },
       "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "filter_expression",
-    "named": true,
-    "fields": {
-      "condition": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "boolean",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      },
-      "var": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "for_loop",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "call_statement",
-            "named": true
-          },
-          {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
-            "named": true
-          },
-          {
-            "type": "pass_statement",
-            "named": true
-          },
-          {
-            "type": "print_statement",
-            "named": true
-          },
-          {
-            "type": "return_statement",
-            "named": true
-          },
-          {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
-            "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
-            "named": true
-          },
-          {
-            "type": "while_loop",
-            "named": true
-          }
-        ]
-      },
-      "range": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "range_expression",
-            "named": true
-          }
-        ]
-      },
-      "var": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "foreach_loop",
-    "named": true,
-    "fields": {
-      "body": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "call_statement",
-            "named": true
-          },
-          {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
-            "named": true
-          },
-          {
-            "type": "pass_statement",
-            "named": true
-          },
-          {
-            "type": "print_statement",
-            "named": true
-          },
-          {
-            "type": "return_statement",
-            "named": true
-          },
-          {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
-            "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
-            "named": true
-          },
-          {
-            "type": "while_loop",
-            "named": true
-          }
-        ]
-      },
-      "set": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "reference",
-            "named": true
-          }
-        ]
-      },
-      "var": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1187,27 +633,7 @@
           "named": true
         },
         {
-          "type": "const_statement",
-          "named": true
-        },
-        {
-          "type": "edgeset_statement",
-          "named": true
-        },
-        {
-          "type": "for_loop",
-          "named": true
-        },
-        {
-          "type": "foreach_loop",
-          "named": true
-        },
-        {
           "type": "if_statement",
-          "named": true
-        },
-        {
-          "type": "nodeset_statement",
           "named": true
         },
         {
@@ -1223,15 +649,11 @@
           "named": true
         },
         {
-          "type": "switch_statement",
-          "named": true
-        },
-        {
           "type": "update_statement",
           "named": true
         },
         {
-          "type": "var_statement",
+          "type": "variable",
           "named": true
         },
         {
@@ -1353,27 +775,7 @@
             "named": true
           },
           {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
             "named": true
           },
           {
@@ -1389,15 +791,7 @@
             "named": true
           },
           {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
             "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
             "named": true
           },
           {
@@ -1516,36 +910,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "nodeset_statement",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "filter_expression",
-          "named": true
-        },
-        {
-          "type": "sample_expression",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1722,49 +1086,6 @@
     }
   },
   {
-    "type": "range_expression",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "binary_expression",
-          "named": true
-        },
-        {
-          "type": "boolean",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
-          "type": "function_call",
-          "named": true
-        },
-        {
-          "type": "integer",
-          "named": true
-        },
-        {
-          "type": "parenthesized_expression",
-          "named": true
-        },
-        {
-          "type": "reference",
-          "named": true
-        },
-        {
-          "type": "unary_expression",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "reference",
     "named": true,
     "fields": {},
@@ -1823,50 +1144,6 @@
     }
   },
   {
-    "type": "sample_expression",
-    "named": true,
-    "fields": {
-      "amount": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          }
-        ]
-      },
-      "parent": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "type": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "approx",
-            "named": false
-          },
-          {
-            "type": "relative",
-            "named": false
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "source_file",
     "named": true,
     "fields": {},
@@ -1909,72 +1186,12 @@
         {
           "type": "test_statement",
           "named": true
+        },
+        {
+          "type": "variable",
+          "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "switch_statement",
-    "named": true,
-    "fields": {
-      "case": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "case_section",
-            "named": true
-          }
-        ]
-      },
-      "condition": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "boolean",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      },
-      "default": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "default_section",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -2034,27 +1251,7 @@
           "named": true
         },
         {
-          "type": "const_statement",
-          "named": true
-        },
-        {
-          "type": "edgeset_statement",
-          "named": true
-        },
-        {
-          "type": "for_loop",
-          "named": true
-        },
-        {
-          "type": "foreach_loop",
-          "named": true
-        },
-        {
           "type": "if_statement",
-          "named": true
-        },
-        {
-          "type": "nodeset_statement",
           "named": true
         },
         {
@@ -2070,15 +1267,7 @@
           "named": true
         },
         {
-          "type": "switch_statement",
-          "named": true
-        },
-        {
           "type": "update_statement",
-          "named": true
-        },
-        {
-          "type": "var_statement",
           "named": true
         },
         {
@@ -2397,10 +1586,10 @@
     }
   },
   {
-    "type": "var_statement",
+    "type": "variable",
     "named": true,
     "fields": {
-      "right": {
+      "init": {
         "multiple": false,
         "required": true,
         "types": [
@@ -2473,27 +1662,7 @@
             "named": true
           },
           {
-            "type": "const_statement",
-            "named": true
-          },
-          {
-            "type": "edgeset_statement",
-            "named": true
-          },
-          {
-            "type": "for_loop",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset_statement",
             "named": true
           },
           {
@@ -2509,15 +1678,7 @@
             "named": true
           },
           {
-            "type": "switch_statement",
-            "named": true
-          },
-          {
             "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "var_statement",
             "named": true
           },
           {
@@ -2687,23 +1848,11 @@
     "named": false
   },
   {
-    "type": "approx",
-    "named": false
-  },
-  {
-    "type": "case",
-    "named": false
-  },
-  {
     "type": "comment",
     "named": true
   },
   {
     "type": "config",
-    "named": false
-  },
-  {
-    "type": "const",
     "named": false
   },
   {
@@ -2716,10 +1865,6 @@
   },
   {
     "type": "def",
-    "named": false
-  },
-  {
-    "type": "default",
     "named": false
   },
   {
@@ -2741,10 +1886,6 @@
   {
     "type": "edge_annotation",
     "named": true
-  },
-  {
-    "type": "edgeset",
-    "named": false
   },
   {
     "type": "elif",
@@ -2771,18 +1912,6 @@
     "named": true
   },
   {
-    "type": "for",
-    "named": false
-  },
-  {
-    "type": "foreach",
-    "named": false
-  },
-  {
-    "type": "from",
-    "named": false
-  },
-  {
     "type": "high",
     "named": false
   },
@@ -2792,10 +1921,6 @@
   },
   {
     "type": "if",
-    "named": false
-  },
-  {
-    "type": "in",
     "named": false
   },
   {
@@ -2827,10 +1952,6 @@
     "named": true
   },
   {
-    "type": "nodeset",
-    "named": false
-  },
-  {
     "type": "normal",
     "named": false
   },
@@ -2855,19 +1976,7 @@
     "named": false
   },
   {
-    "type": "range",
-    "named": false
-  },
-  {
-    "type": "relative",
-    "named": false
-  },
-  {
     "type": "return",
-    "named": false
-  },
-  {
-    "type": "sample",
     "named": false
   },
   {
@@ -2885,10 +1994,6 @@
   {
     "type": "string",
     "named": true
-  },
-  {
-    "type": "switch",
-    "named": false
   },
   {
     "type": "transition",
@@ -2912,14 +2017,6 @@
   },
   {
     "type": "while",
-    "named": false
-  },
-  {
-    "type": "{",
-    "named": false
-  },
-  {
-    "type": "}",
     "named": false
   }
 ]

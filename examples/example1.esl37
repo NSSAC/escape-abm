@@ -4,6 +4,9 @@ config enable_hybrid_learning: bool = True
 config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = True
 
+config num_ticks: int = 10
+var cur_tick: int = 0
+
 node
     pid: int node key static
     is_in_school: bool static
@@ -113,7 +116,8 @@ end
 # Thursday = 4
 # Friday = 5
 def is_school_day() -> bool:
-    const day_of_week : int = cur_tick % 7
+    # const day_of_week : int = cur_tick % 7
+    var day_of_week : int = cur_tick % 7
 
     if enable_hybrid_learning and 1 <= day_of_week and day_of_week <= 3:
         return True
@@ -125,50 +129,49 @@ def is_school_day() -> bool:
 end
 
 def main():
-    print("num_ticks =", 1, 2, 3.0, True)
-    #print("num_ticks=", num_ticks)
     #print("len(nodes)=", len(ALL_NODES))
     #print("len(edges)=", len(ALL_EDGES))
 
-    for tick in range(num_ticks):
-        cur_tick = tick
+    while cur_tick < num_ticks:
+        cur_tick += 1
+        print("cur_tick = ", cur_tick)
 
-        c1.do_transmission()
-        c1.do_transition(1.0)
+        # c1.do_transmission()
+        # c1.do_transition(1.0)
 
         # seed nodes
-        if tick < 10:
-            susceptibles : nodeset = { n : n.c1.state == S }
-            seed_nodes : nodeset = sample approx 5 from susceptible
-            foreach n in seed_nodes:
-                n.c1.state = E
-            end
-        end
+        # if tick < 10:
+        #     susceptibles : nodeset = { n : n.c1.state == S }
+        #     seed_nodes : nodeset = sample approx 5 from susceptible
+        #     foreach n in seed_nodes:
+        #         n.c1.state = E
+        #     end
+        # end
 
-        if (enable_day_30_antigen_test or enable_day_30_pcr_test) and tick >= 30:
-            positive_inschool_nodes : nodeset = { n :
-                (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
-                and
-                n.is_in_school
-                and
-                not is_isolating(n)
-            }
-        end
+        # if (enable_day_30_antigen_test or enable_day_30_pcr_test) and tick >= 30:
+        #     positive_inschool_nodes : nodeset = { n :
+        #         (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
+        #         and
+        #         n.is_in_school
+        #         and
+        #         not is_isolating(n)
+        #     }
+        # end
 
-        if enable_day_30_antigen_test and tick >= 30:
-            will_start_isolation : nodeset = sample relative 0.8 from positive_inschool_nodes
-            foreach n in will_start_isolation_antigen:
-                n.home_isolation_start = tick+1
-                n.home_isolation_end = tick+15
-            end
-        end
+        # if enable_day_30_antigen_test and tick >= 30:
+        #     will_start_isolation : nodeset = sample relative 0.8 from positive_inschool_nodes
+        #     foreach n in will_start_isolation_antigen:
+        #         n.home_isolation_start = tick+1
+        #         n.home_isolation_end = tick+15
+        #     end
+        # end
 
-        if enable_day_30_pcr_test and tick >= 30:
-            will_start_isolation : nodeset = sample relative 0.95 from positive_inschool_nodes
-            foreach n in will_start_isolation_antigen:
-                n.home_isolation_start = tick+2
-                n.home_isolation_end = tick+16
-            end
-        end
+        # if enable_day_30_pcr_test and tick >= 30:
+        #     will_start_isolation : nodeset = sample relative 0.95 from positive_inschool_nodes
+        #     foreach n in will_start_isolation_antigen:
+        #         n.home_isolation_start = tick+2
+        #         n.home_isolation_end = tick+16
+        #     end
+        # end
     end
 end
