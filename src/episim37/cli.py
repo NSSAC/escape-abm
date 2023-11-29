@@ -3,8 +3,8 @@
 import click
 
 from .parse_tree import print_parse_tree
-from .ast1 import print_ast1, print_ast2
-# from .codegen_cpu import cpu
+from .ast1 import print_ast1
+from .ir1 import print_ir1
 
 
 @click.group()
@@ -14,5 +14,4 @@ def cli():
 
 cli.add_command(print_parse_tree)
 cli.add_command(print_ast1)
-cli.add_command(print_ast2)
-# cli.add_command(cpu)
+cli.add_command(print_ir1)

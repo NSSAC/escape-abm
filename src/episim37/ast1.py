@@ -3,15 +3,39 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, Generic
 
 import attrs
 import click
-
 import rich
 import rich.markup
+from typeguard import check_type
 
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError, SourcePosition
+
+
+T = TypeVar("T")
+
+
+class UniqueObject(Generic[T]):
+    def __init__(self):
+        self.obj: T | None = None
+
+    def dup_error(self, type: str, explanation: str, pos: SourcePosition):
+        if self.obj is not None:
+            raise Error(type, explanation, pos)
+
+    def set(self, obj: T):
+        assert self.obj is None
+        self.obj = obj
+
+    def get(self) -> T:
+        assert self.obj is not None
+        return self.obj
+
+    def missing_error(self, type: str, explanation, pos: SourcePosition):
+        if self.obj is None:
+            raise Error(type, explanation, pos)
 
 
 class ASTConstructionError(Exception):
@@ -27,17 +51,18 @@ class ASTConstructionError(Exception):
     def rich_print(self):
         rich.print(f"[red]{self}[/red]")
 
-        if self.pos is not None:
-            etype = f"[red]{self.type}[/red]"
-            fpath = f"[yellow]{self.pos.source}[/yellow]"
-            line = self.pos.line
-            col = self.pos.col
-            expl = rich.markup.escape(self.explanation)
-
-            rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
-            print(self.pos.text)
-        else:
+        if self.pos is None:
             print(self.explanation)
+            return
+
+        etype = f"[red]{self.type}[/red]"
+        fpath = f"[yellow]{self.pos.source}[/yellow]"
+        line = self.pos.line
+        col = self.pos.col
+        expl = rich.markup.escape(self.explanation)
+
+        rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
+        print(self.pos.text)
 
 
 class UnexpectedValue(ASTConstructionError):
@@ -79,19 +104,6 @@ class Scope:
         self.names[k] = v
 
 
-def smallest_int_type(max_val: int) -> str | None:
-    if max_val < 2**8:
-        return "u8"
-    elif max_val < 2**16:
-        return "u16"
-    elif max_val < 2**32:
-        return "u32"
-    elif max_val < 2**32:
-        return "u64"
-    else:
-        return None
-
-
 def make_literal(n: PTNode, types: type) -> Any:
     match n.type:
         case "integer":
@@ -102,8 +114,8 @@ def make_literal(n: PTNode, types: type) -> Any:
             v = n.text == True
         case "string":
             v = n.text
-        case _ as unexpcted:
-            raise UnexpectedValue(unexpcted, n.pos)
+        case _ as unexpected:
+            raise UnexpectedValue(unexpected, n.pos)
 
     if not isinstance(v, types):
         raise UnexpectedValue(v, n.pos)
@@ -116,8 +128,35 @@ class BuiltinType:
     name: str
 
 
-def add_builtin_type(type: str, scope: Scope, pos: SourcePosition):
-    scope.define(type, BuiltinType(type), pos)
+@attrs.define
+class BuiltinTypeRef:
+    type: str
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> BuiltinTypeRef:
+        return cls(node.text, scope, node.pos)
+
+    def resolve(self) -> BuiltinType:
+        assert self.scope is not None
+
+        v = self.scope.resolve(self.type, self.pos)
+        if isinstance(v, BuiltinType):
+            return v
+
+        raise Error(
+            "Invalid type",
+            "Expected a built type",
+            self.pos,
+        )
+
+
+@attrs.define
+class BuiltinFunction:
+    name: str
+    params: list[Param]
+    return_: TypeRef | None
 
 
 @attrs.define
@@ -127,20 +166,18 @@ class EnumConstant:
 
 
 @attrs.define
-class ConstRef:
+class EnumConstantRef:
     const: str
-    scope: Scope = attrs.field(repr=False, eq=False)
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
-    def __str__(self):
-        return self.const
-
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> ConstRef:
-        type = node.text
-        return ConstRef(type, scope, node.pos)
+    def make(cls, node: PTNode, scope: Scope) -> EnumConstantRef:
+        return cls(node.text, scope, node.pos)
 
     def resolve(self) -> EnumConstant:
+        assert self.scope is not None
+
         v = self.scope.resolve(self.const, self.pos)
         if isinstance(v, EnumConstant):
             return v
@@ -155,7 +192,6 @@ class ConstRef:
 @attrs.define
 class EnumType:
     name: str
-    base_type: BuiltinType
     consts: list[str]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -164,11 +200,7 @@ class EnumType:
         name = node.field("name").text
         consts = [child.text for child in node.fields("const")]
 
-        base_type = smallest_int_type(len(consts) - 1)
-        if base_type is None:
-            raise Error("Large enum", "Enum is too big", node.pos)
-
-        obj = cls(name, BuiltinType(base_type), consts, node.pos)
+        obj = cls(name, consts, node.pos)
         for child in node.fields("const"):
             enum_const = EnumConstant(child.text, obj)
             scope.define(enum_const.name, enum_const, child.pos)
@@ -178,42 +210,18 @@ class EnumType:
 
 
 @attrs.define
-class TypeRef:
+class EnumTypeRef:
     type: str
-    scope: Scope = attrs.field(repr=False, eq=False)
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
-    def __str__(self):
-        return self.type
-
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> TypeRef:
-        type = node.text
-        return TypeRef(type, scope, node.pos)
+    def make(cls, node: PTNode, scope: Scope) -> EnumTypeRef:
+        return cls(node.text, scope, node.pos)
 
-    def resolve(self) -> BuiltinType | EnumType:
-        v = self.scope.resolve(self.type, self.pos)
-        if isinstance(v, BuiltinType | EnumType):
-            return v
+    def resolve(self) -> EnumType:
+        assert self.scope is not None
 
-        raise Error(
-            "Invalid type",
-            "Expected a built in or enumerated type",
-            self.pos,
-        )
-
-    def resolve_builtin(self) -> BuiltinType:
-        v = self.scope.resolve(self.type, self.pos)
-        if isinstance(v, BuiltinType):
-            return v
-
-        raise Error(
-            "Invalid type",
-            "Expected a built type",
-            self.pos,
-        )
-
-    def resolve_enum(self) -> EnumType:
         v = self.scope.resolve(self.type, self.pos)
         if isinstance(v, EnumType):
             return v
@@ -226,57 +234,81 @@ class TypeRef:
 
 
 @attrs.define
+class TypeRef:
+    type: str
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> TypeRef:
+        return cls(node.text, scope, node.pos)
+
+    def resolve(self) -> BuiltinType | EnumType:
+        assert self.scope is not None
+
+        v = self.scope.resolve(self.type, self.pos)
+        if isinstance(v, BuiltinType | EnumType):
+            return v
+
+        raise Error(
+            "Invalid type",
+            "Expected a built in or enumerated type",
+            self.pos,
+        )
+
+
+@attrs.define
 class Config:
     name: str
-    type: TypeRef | BuiltinType
+    type: BuiltinTypeRef
     default: int | float | bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Config:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
+        type = BuiltinTypeRef.make(node.field("type"), scope)
         default = make_literal(node.field("default"), int | float | bool)
         obj = cls(name, type, default, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
-    def resolve(self):
-        if isinstance(self.type, TypeRef):
-            self.type = self.type.resolve_builtin()
-
 
 @attrs.define
 class Variable:
     var: str
-    type: TypeRef | BuiltinType | EnumType
+    type: TypeRef
     init: Expression
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Variable:
         var = node.field("var").text
         type = TypeRef.make(node.field("type"), scope)
         init = parse_expression(node.field("init"), scope)
-        obj = cls(var, type, init)
+        obj = cls(var, type, init, None, node.pos)
         scope.define(var, obj, node.pos)
         return obj
 
-    def resolve(self):
-        if isinstance(self.type, TypeRef):
-            self.type = self.type.resolve_builtin()
-        self.init = resolve_expression(self.init)
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
+        match self.type:
+            case TypeRef("node"):
+                self.scope = node_table.scope
+            case TypeRef("edge"):
+                self.scope = edge_table.scope
 
 
 @attrs.define
 class NodeField:
     name: str
-    type: TypeRef | BuiltinType | EnumType
+    type: TypeRef
     is_node_key: bool
     is_static: bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope):
+    def make(cls, node: PTNode, scope: Scope) -> NodeField:
         name = node.field("name").text
         type = TypeRef.make(node.field("type"), scope)
 
@@ -284,13 +316,9 @@ class NodeField:
         is_node_key = "node key" in annotations
         is_static = "static" in annotations or is_node_key
 
-        obj = NodeField(name, type, is_node_key, is_static, node.pos)
+        obj = cls(name, type, is_node_key, is_static, node.pos)
         scope.define(name, obj, node.pos)
         return obj
-
-    def resolve(self):
-        if isinstance(self.type, TypeRef):
-            self.type = self.type.resolve()
 
 
 @attrs.define
@@ -318,33 +346,29 @@ class NodeTable:
             )
         key = key[0]
 
-        obj = NodeTable(fields, key, [], scope, node.pos)
+        obj = cls(fields, key, [], scope, node.pos)
         parent_scope.define("node_table", obj, node.pos)
         return obj
 
-    def add_contagions(self, contagions: list[Contagion]):
+    def link_contagions(self, contagions: list[Contagion]):
         assert self.scope is not None
 
         for contagion in contagions:
             self.scope.define(contagion.name, contagion, contagion.pos)
             self.contagions.append(contagion)
 
-    def resolve(self):
-        for field in self.fields:
-            field.resolve()
-
 
 @attrs.define
 class EdgeField:
     name: str
-    type: TypeRef | BuiltinType | EnumType
+    type: TypeRef
     is_target_node_key: bool
     is_source_node_key: bool
     is_static: bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope):
+    def make(cls, node: PTNode, scope: Scope) -> EdgeField:
         name = node.field("name").text
         type = TypeRef.make(node.field("type"), scope)
 
@@ -353,15 +377,11 @@ class EdgeField:
         is_target_node_key = "target node key" in annotations
         is_static = "static" in annotations or is_source_node_key or is_target_node_key
 
-        obj = EdgeField(
+        obj = cls(
             name, type, is_target_node_key, is_source_node_key, is_static, node.pos
         )
         scope.define(name, obj, node.pos)
         return obj
-
-    def resolve(self):
-        if isinstance(self.type, TypeRef):
-            self.type = self.type.resolve()
 
 
 @attrs.define
@@ -417,7 +437,7 @@ class EdgeTable:
         target_node = TargetNodeAccessor(None)
         scope.define("target_node", target_node, None)
 
-        obj = EdgeTable(
+        obj = cls(
             fields,
             target_key,
             source_key,
@@ -430,20 +450,14 @@ class EdgeTable:
         parent_scope.define("edge_table", obj, node.pos)
         return obj
 
-    def add_contagions(self, contagions: list[Contagion]):
+    def link_contagions(self, contagions: list[Contagion]):
         assert self.scope is not None
 
         for contagion in contagions:
             self.scope.define(contagion.name, contagion, contagion.pos)
             self.contagions.append(contagion)
 
-    def resolve(self):
-        assert self.scope is not None
-
-        for field in self.fields:
-            field.resolve()
-
-        node_table = self.scope.resolve("node_table", None)
+    def link_node_table(self, node_table: NodeTable):
         self.source_node.scope = node_table.scope
         self.target_node.scope = node_table.scope
 
@@ -458,7 +472,7 @@ class ConstantDist:
     def make(cls, node: PTNode, scope: Scope) -> ConstantDist:
         name = node.field("name").text
         v = make_literal(node.field("v"), int | float)
-        obj = ConstantDist(name, v, node.pos)
+        obj = cls(name, v, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
@@ -482,7 +496,7 @@ class DiscreteDist:
             v = make_literal(child.field("v"), int | float)
             vs.append(v)
 
-        obj = DiscreteDist(name, ps, vs, node.pos)
+        obj = cls(name, ps, vs, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
@@ -508,7 +522,7 @@ class NormalDist:
         max = node.maybe_field("max")
         max = 1e300 if max is None else make_literal(max, int | float)
 
-        obj = NormalDist(name, mean, std, min, max, node.pos)
+        obj = cls(name, mean, std, min, max, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
@@ -525,7 +539,7 @@ class UniformDist:
         name = node.field("name").text
         low = make_literal(node.field("low"), int | float)
         high = make_literal(node.field("high"), int | float)
-        obj = UniformDist(name, low, high, node.pos)
+        obj = cls(name, low, high, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
@@ -549,22 +563,18 @@ def parse_distribution(node: PTNode, scope: Scope) -> Distribution:
 
 @attrs.define
 class DistRef:
-    const: str
+    dist: str
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
-    def __str__(self):
-        return self.const
-
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> DistRef:
-        type = node.text
-        return DistRef(type, scope, node.pos)
+        return cls(node.text, scope, node.pos)
 
     def resolve(self) -> Distribution:
         assert self.scope is not None
-        v = self.scope.resolve(self.const, self.pos)
 
+        v = self.scope.resolve(self.dist, self.pos)
         if isinstance(v, Distribution):
             return v
 
@@ -577,16 +587,16 @@ class DistRef:
 
 @attrs.define
 class Transition:
-    entry: ConstRef | EnumConstant
-    exit: ConstRef | EnumConstant
+    entry: EnumConstantRef
+    exit: EnumConstantRef
     p: int | float
-    dwell: DistRef | Distribution
+    dwell: DistRef
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Transition:
-        entry = ConstRef.make(node.field("entry"), scope)
-        exit = ConstRef.make(node.field("exit"), scope)
+        entry = EnumConstantRef.make(node.field("entry"), scope)
+        exit = EnumConstantRef.make(node.field("exit"), scope)
         p_node = node.maybe_field("p")
         if p_node is None:
             p = 1.0
@@ -595,42 +605,26 @@ class Transition:
         dwell = DistRef.make(node.field("dwell"), scope)
         return cls(entry, exit, p, dwell, node.pos)
 
-    def resolve(self):
-        if isinstance(self.entry, ConstRef):
-            self.entry = self.entry.resolve()
-        if isinstance(self.exit, ConstRef):
-            self.exit = self.exit.resolve()
-        if isinstance(self.dwell, DistRef):
-            self.dwell = self.dwell.resolve()
-
 
 @attrs.define
 class Transmission:
-    contact: ConstRef | EnumConstant
-    entry: ConstRef | EnumConstant
-    exit: ConstRef | EnumConstant
+    contact: EnumConstantRef
+    entry: EnumConstantRef
+    exit: EnumConstantRef
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Transmission:
-        contact = ConstRef.make(node.field("contact"), scope)
-        entry = ConstRef.make(node.field("entry"), scope)
-        exit = ConstRef.make(node.field("exit"), scope)
+        contact = EnumConstantRef.make(node.field("contact"), scope)
+        entry = EnumConstantRef.make(node.field("entry"), scope)
+        exit = EnumConstantRef.make(node.field("exit"), scope)
         return cls(contact, entry, exit, node.pos)
-
-    def resolve(self):
-        if isinstance(self.contact, ConstRef):
-            self.contact = self.contact.resolve()
-        if isinstance(self.entry, ConstRef):
-            self.entry = self.entry.resolve()
-        if isinstance(self.exit, ConstRef):
-            self.exit = self.exit.resolve()
 
 
 @attrs.define
 class Contagion:
     name: str
-    state_type: TypeRef | EnumType
+    state_type: EnumTypeRef
     transitions: list[Transition]
     transmissions: list[Transmission]
     susceptibility: Function
@@ -638,6 +632,8 @@ class Contagion:
     transmissibility: Function
     enabled: Function
     node_fields: list[NodeField]
+    do_transmission: BuiltinFunction
+    do_transition: BuiltinFunction
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -646,24 +642,23 @@ class Contagion:
         name = node.field("name").text
         scope = Scope(name=name, parent=parent_scope)
 
-        state_type = None
-        transitions = []
-        transmissions = []
-        susceptibility = None
-        infectivity = None
-        transmissibility = None
-        enabled = None
+        state_type: UniqueObject[EnumTypeRef] = UniqueObject()
+        transitions: list[Transition] = []
+        transmissions: list[Transmission] = []
+        susceptibility: UniqueObject[Function] = UniqueObject()
+        infectivity: UniqueObject[Function] = UniqueObject()
+        transmissibility: UniqueObject[Function] = UniqueObject()
+        enabled: UniqueObject[Function] = UniqueObject()
 
         for child in node.fields("body"):
             match child.type:
                 case "contagion_state_type":
-                    if state_type is not None:
-                        raise Error(
-                            "Multiple state types",
-                            "Contagion state type is multiply defined",
-                            child.pos,
-                        )
-                    state_type = TypeRef.make(child.field("type"), scope)
+                    state_type.dup_error(
+                        "Multiple state types",
+                        "Contagion state type is multiply defined",
+                        child.pos,
+                    )
+                    state_type.set(EnumTypeRef.make(child.field("type"), scope))
                 case "transitions":
                     for gc in child.fields("body"):
                         transitions.append(Transition.make(gc, scope))
@@ -673,129 +668,178 @@ class Contagion:
                 case "function":
                     match child.field("name").text:
                         case "susceptibility":
-                            if susceptibility is not None:
-                                raise Error(
-                                    "Multiple susceptibility",
-                                    "Susceptibility function is multiply defined",
-                                    child.pos,
-                                )
-                            susceptibility = Function.make(child, scope)
+                            susceptibility.dup_error(
+                                "Multiple susceptibility",
+                                "Susceptibility function is multiply defined",
+                                child.pos,
+                            )
+                            susceptibility.set(make_susceptibility(child, scope))
                         case "infectivity":
-                            if infectivity is not None:
-                                raise Error(
-                                    "Multiple infectivity",
-                                    "Infectivity function is multiply defined",
-                                    child.pos,
-                                )
-                            infectivity = Function.make(child, scope)
+                            infectivity.dup_error(
+                                "Multiple infectivity",
+                                "Infectivity function is multiply defined",
+                                child.pos,
+                            )
+                            infectivity.set(make_infectivity(child, scope))
                         case "transmissibility":
-                            if transmissibility is not None:
-                                raise Error(
-                                    "Multiple transmissibility",
-                                    "Transmissibility function is multiply defined",
-                                    child.pos,
-                                )
-                            transmissibility = Function.make(child, scope)
+                            transmissibility.dup_error(
+                                "Multiple transmissibility",
+                                "Transmissibility function is multiply defined",
+                                child.pos,
+                            )
+                            transmissibility.set(make_transmissibility(child, scope))
                         case "enabled":
-                            if enabled is not None:
-                                raise Error(
-                                    "Multiple enabled",
-                                    "Enabled (edge) function is multiply defined",
-                                    child.pos,
-                                )
-                            enabled = Function.make(child, scope)
+                            enabled.dup_error(
+                                "Multiple enabled",
+                                "Enabled (edge) function is multiply defined",
+                                child.pos,
+                            )
+                            enabled.set(make_enabled(child, scope))
                         case _:
                             raise Error(
                                 "Invalid function",
                                 f"{child.field('name').text} is not a valid contagion function",
                                 child.field("type").pos,
                             )
-                case _ as unexpcted:
-                    raise UnexpectedValue(unexpcted, child.pos)
+                case _ as unexpected:
+                    raise UnexpectedValue(unexpected, child.pos)
 
-        if state_type is None:
-            raise Error(
-                "State type undefined", "State type has not been defined", node.pos
-            )
-        if susceptibility is None:
-            raise Error(
-                "Susceptibility undefined",
-                "Susceptibility function has not been defined",
-                node.pos,
-            )
-        if infectivity is None:
-            raise Error(
-                "Infectivity undefined",
-                "Infectivity function has not been defined",
-                node.pos,
-            )
-        if transmissibility is None:
-            raise Error(
-                "Transmissibility undefined",
-                "Transmissibility function has not been defined",
-                node.pos,
-            )
-        if enabled is None:
-            raise Error(
-                "Edge enabled undefined",
-                "Enabled (edge) function has not been defined",
-                node.pos,
-            )
+        state_type.missing_error(
+            "State type undefined", "State type has not been defined", node.pos
+        )
+        susceptibility.missing_error(
+            "Susceptibility undefined",
+            "Susceptibility function has not been defined",
+            node.pos,
+        )
+        infectivity.missing_error(
+            "Infectivity undefined",
+            "Infectivity function has not been defined",
+            node.pos,
+        )
+        transmissibility.missing_error(
+            "Transmissibility undefined",
+            "Transmissibility function has not been defined",
+            node.pos,
+        )
+        enabled.missing_error(
+            "Edge enabled undefined",
+            "Enabled (edge) function has not been defined",
+            node.pos,
+        )
 
         node_fields = [
-            NodeField("state", state_type, False, False, None),
-            NodeField("next_state", state_type, False, False, None),
-            NodeField("dwell_time", BuiltinType("float"), False, False, None),
+            NodeField(
+                "state",
+                TypeRef(state_type.get().type, scope),
+                False,
+                False,
+                None,
+            ),
+            NodeField(
+                "next_state",
+                TypeRef(state_type.get().type, scope),
+                False,
+                False,
+                None,
+            ),
+            NodeField("dwell_time", TypeRef("float", scope), False, False, None),
         ]
         for field in node_fields:
             scope.define(field.name, field, field.pos)
 
-        obj = Contagion(
+        do_transmission = BuiltinFunction("do_transmission", [], None)
+        do_transition = BuiltinFunction(
+            "do_transition", [Param("elapsed", TypeRef("float", scope))], None
+        )
+        scope.define("do_transmission", do_transmission, None)
+        scope.define("do_transition", do_transition, None)
+
+        obj = cls(
             name,
-            state_type,
+            state_type.get(),
             transitions,
             transmissions,
-            susceptibility,
-            infectivity,
-            transmissibility,
-            enabled,
+            susceptibility.get(),
+            infectivity.get(),
+            transmissibility.get(),
+            enabled.get(),
             node_fields,
+            do_transmission,
+            do_transition,
             scope,
             node.pos,
         )
         parent_scope.define(name, obj, node.pos)
         return obj
 
-    def resolve(self):
-        if isinstance(self.state_type, TypeRef):
-            self.state_type = self.state_type.resolve_enum()
 
-        for field in self.node_fields:
-            field.resolve()
+@attrs.define
+class UnaryExpression:
+    operator: str
+    argument: Expression
 
-        for transm in self.transmissions:
-            transm.resolve()
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> UnaryExpression:
+        operator = node.field("operator").text
+        argument = parse_expression(node.field("argument"), scope)
+        return cls(operator, argument)
 
-        for transi in self.transitions:
-            transi.resolve()
 
-        self.susceptibility.resolve()
-        self.infectivity.resolve()
-        self.transmissibility.resolve()
-        self.enabled.resolve()
+@attrs.define
+class BinaryExpression:
+    left: Expression
+    operator: str
+    right: Expression
 
-        self.susceptibility.check_susceptibility()
-        self.infectivity.check_infectivity()
-        self.transmissibility.check_transmissibility()
-        self.enabled.check_enabled()
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> BinaryExpression:
+        left = parse_expression(node.field("left"), scope)
+        operator = node.field("operator").text
+        right = parse_expression(node.field("right"), scope)
+        return cls(left, operator, right)
+
+
+@attrs.define
+class ParenthesizedExpression:
+    expression: Expression
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> ParenthesizedExpression:
+        expression = parse_expression(node.field("expression"), scope)
+        return cls(expression)
+
+
+@attrs.define
+class Reference:
+    names: list[str]
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Reference:
+        names = [s.text for s in node.named_children]
+        return cls(names, scope, node.pos)
+
+    def resolve(self) -> Referable:
+        return resolve_ref(self)
+
+
+@attrs.define
+class FunctionCall:
+    function: Reference
+    args: list[Expression]
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
+        function = Reference.make(node.field("function"), scope)
+        args = [parse_expression(c, scope) for c in node.fields("args")]
+        return cls(function, args)
 
 
 @attrs.define
 class PassStatement:
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    def resolve(self):
-        pass
 
 
 @attrs.define
@@ -807,10 +851,7 @@ class ReturnStatement:
     def make(cls, node: PTNode, scope: Scope) -> ReturnStatement:
         expression = node.named_children[0]
         expression = parse_expression(expression, scope)
-        return ReturnStatement(expression, node.pos)
-
-    def resolve(self):
-        self.expression = resolve_expression(self.expression)
+        return cls(expression, node.pos)
 
 
 @attrs.define
@@ -826,11 +867,6 @@ class ElifSection:
             body.append(parse_statement(child, scope))
         return cls(condition, body)
 
-    def resolve(self):
-        self.condition = resolve_expression(self.condition)
-        for stmt in self.body:
-            stmt.resolve()
-
 
 @attrs.define
 class ElseSection:
@@ -843,10 +879,6 @@ class ElseSection:
             body.append(parse_statement(child, scope))
         return cls(body)
 
-    def resolve(self):
-        for stmt in self.body:
-            stmt.resolve()
-
 
 @attrs.define
 class IfStatement:
@@ -854,6 +886,7 @@ class IfStatement:
     body: list[Statement]
     elifs: list[ElifSection]
     else_: ElseSection | None
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> IfStatement:
@@ -868,23 +901,15 @@ class IfStatement:
         if else_ is not None:
             else_ = ElseSection.make(else_, scope)
 
-        obj = cls(condition, body, elifs, else_)
+        obj = cls(condition, body, elifs, else_, node.pos)
         return obj
-
-    def resolve(self):
-        self.condition = resolve_expression(self.condition)
-        for stmt in self.body:
-            stmt.resolve()
-        for elif_ in self.elifs:
-            elif_.resolve()
-        if self.else_ is not None:
-            self.else_.resolve()
 
 
 @attrs.define
 class WhileLoop:
     condition: Expression
     body: list[Statement]
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> WhileLoop:
@@ -892,25 +917,18 @@ class WhileLoop:
         body = []
         for child in node.fields("body"):
             body.append(parse_statement(child, scope))
-        return cls(condition, body)
-
-    def resolve(self):
-        self.condition = resolve_expression(self.condition)
-        for stmt in self.body:
-            stmt.resolve()
+        return cls(condition, body, node.pos)
 
 
 @attrs.define
 class CallStatement:
     call: FunctionCall
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> CallStatement:
         call = FunctionCall.make(node.named_children[0], scope)
-        return cls(call)
-
-    def resolve(self):
-        self.call.resolve()
+        return cls(call, node.pos)
 
 
 @attrs.define
@@ -918,18 +936,15 @@ class UpdateStatement:
     left: Reference
     operator: str
     right: Expression
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> UpdateStatement:
         left = Reference.make(node.field("left"), scope)
         operator = node.field("operator").text
         right = parse_expression(node.field("right"), scope)
-        obj = cls(left, operator, right)
+        obj = cls(left, operator, right, node.pos)
         return obj
-
-    def resolve(self):
-        self.left.resolve()
-        self.right = resolve_expression(self.right)
 
 
 @attrs.define
@@ -949,109 +964,13 @@ class PrintStatement:
                 args.append(parse_expression(child, scope))
         sep = '" "'
         end = r'"\n"'
-        return PrintStatement(args, sep, end, node.pos)
-
-    def resolve(self):
-        args = []
-        for arg in self.args:
-            if isinstance(arg, str):
-                args.append(arg)
-            else:
-                args.append(resolve_expression(arg))
-        self.args = args
-
-
-@attrs.define
-class UnaryExpression:
-    operator: str
-    argument: Expression
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> UnaryExpression:
-        operator = node.field("operator").text
-        argument = parse_expression(node.field("argument"), scope)
-        return cls(operator, argument)
-
-    def resolve(self):
-        self.argument = resolve_expression(self.argument)
-
-
-@attrs.define
-class BinaryExpression:
-    left: Expression
-    operator: str
-    right: Expression
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> BinaryExpression:
-        left = parse_expression(node.field("left"), scope)
-        operator = node.field("operator").text
-        right = parse_expression(node.field("right"), scope)
-        return cls(left, operator, right)
-
-    def resolve(self):
-        self.left = resolve_expression(self.left)
-        self.right = resolve_expression(self.right)
-
-
-@attrs.define
-class ParenthesizedExpression:
-    expression: Expression
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> ParenthesizedExpression:
-        expression = parse_expression(node.field("expression"), scope)
-        return cls(expression)
-
-    def resolve(self):
-        self.expression = resolve_expression(self.expression)
-
-
-@attrs.define
-class Reference:
-    names: list[str]
-    refs: list
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Reference:
-        names = [s.text for s in node.named_children]
-        return Reference(names, [], scope, node.pos)
-
-    def resolve(self):
-        if not self.refs:
-            assert self.scope is not None
-            head, tail = self.names[0], self.names[1:]
-
-            v = self.scope.resolve(head, self.pos)
-            self.refs.append(v)
-
-            for part in tail:
-                v = v.scope.resolve(part, self.pos)
-                self.refs.append(v)
-
-
-@attrs.define
-class FunctionCall:
-    function: Reference
-    args: list[Expression]
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
-        function = Reference.make(node.field("function"), scope)
-        args = [parse_expression(c, scope) for c in node.fields("args")]
-        return cls(function, args)
-
-    def resolve(self) -> Any:
-        self.function.resolve()
-        self.args = [resolve_expression(arg) for arg in self.args]
+        return cls(args, sep, end, node.pos)
 
 
 @attrs.define
 class Param:
     name: str
-    type: TypeRef | BuiltinType | EnumType
+    type: TypeRef
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -1059,25 +978,15 @@ class Param:
     def make(cls, node: PTNode, scope: Scope) -> Param:
         name = node.field("name").text
         type = TypeRef.make(node.field("type"), scope)
-        if type.type == "node" or type.type == "edge":
-            obj = cls(name, type, scope, node.pos)
-        else:
-            obj = cls(name, type, None, node.pos)
+        obj = cls(name, type, None, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
-    def resolve(self):
-        if isinstance(self.type, TypeRef):
-            self.type = self.type.resolve()
-
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
         match self.type:
-            case BuiltinType("node"):
-                assert self.scope is not None
-                node_table = self.scope.resolve("node_table", self.pos)
+            case TypeRef("node"):
                 self.scope = node_table.scope
-            case BuiltinType("edge"):
-                assert self.scope is not None
-                edge_table = self.scope.resolve("edge_table", self.pos)
+            case TypeRef("edge"):
                 self.scope = edge_table.scope
 
 
@@ -1086,7 +995,7 @@ class Function:
     name: str
     params: list[Param]
     variables: list[Variable]
-    return_: TypeRef | BuiltinType | EnumType | None
+    return_: TypeRef | None
     body: list[Variable | Statement]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -1116,194 +1025,127 @@ class Function:
             else:
                 body.append(parse_statement(child, scope))
 
-        obj = Function(name, params, variables, return_, body, scope, node.pos)
+        obj = cls(name, params, variables, return_, body, scope, node.pos)
         parent_scope.define(name, obj, node.pos)
         return obj
 
-    def check_main(self):
-        match self.params:
-            case []:
-                pass
-            case _:
-                raise Error(
-                    "Bad main", "Main function must not have any parameters", self.pos
-                )
-        match self.return_:
-            case None:
-                pass
-            case _:
-                raise Error(
-                    "Bad main", "Main function must not have a return type", self.pos
-                )
-
-    def check_susceptibility(self):
-        match self.params:
-            case [Param(_, BuiltinType("node"))]:
-                pass
-            case _:
-                raise Error(
-                    "Bad susceptibility",
-                    "Susceptibility function must have one parameter of type `node'",
-                    self.pos,
-                )
-        match self.return_:
-            case BuiltinType("float"):
-                pass
-            case _:
-                raise Error(
-                    "Bad susceptibility",
-                    "Susceptibility function must have a return type `float'",
-                    self.pos,
-                )
-
-    def check_infectivity(self):
-        match self.params:
-            case [Param(_, BuiltinType("node"))]:
-                pass
-            case _:
-                raise Error(
-                    "Bad infectivity",
-                    "Infectivity function must have one parameter of type `node'",
-                    self.pos,
-                )
-
-        match self.return_:
-            case BuiltinType("float"):
-                pass
-            case _:
-                raise Error(
-                    "Bad infectivity",
-                    "Infectivity function must have a return type `float'",
-                    self.pos,
-                )
-
-    def check_transmissibility(self):
-        match self.params:
-            case [Param(_, BuiltinType("edge"))]:
-                pass
-            case _:
-                raise Error(
-                    "Bad transmissibility",
-                    "Transmissibility function must have one parameter of type `edge'",
-                    self.pos,
-                )
-
-        match self.return_:
-            case BuiltinType("float"):
-                pass
-            case _:
-                raise Error(
-                    "Bad transmissibility",
-                    "Transmissibility function must have a return type `float'",
-                    self.pos,
-                )
-
-    def check_enabled(self):
-        match self.params:
-            case [Param(_, BuiltinType("edge"))]:
-                pass
-            case _:
-                raise Error(
-                    "Bad enabled (edge)",
-                    "Enabled (edge) function must have one parameter of type `edge'",
-                    self.pos,
-                )
-        match self.return_:
-            case BuiltinType("bool"):
-                pass
-            case _:
-                raise Error(
-                    "Bad enabled (edge)",
-                    "Enabled (edge) function must have a return type `bool'",
-                    self.pos,
-                )
-
-    def resolve(self):
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
         for param in self.params:
-            param.resolve()
-
-        match self.return_:
-            case TypeRef():
-                self.return_ = self.return_.resolve()
-
-        for stmt in self.body:
-            stmt.resolve()
+            param.link_tables(node_table, edge_table)
+        for var in self.variables:
+            var.link_tables(node_table, edge_table)
 
 
-Expression = (
-    int
-    | float
-    | bool
-    | UnaryExpression
-    | BinaryExpression
-    | ParenthesizedExpression
-    | Reference
-    | FunctionCall
-)
-
-
-def parse_expression(node: PTNode, scope: Scope) -> Expression:
-    match node.type:
-        case "integer" | "float" | "boolean":
-            return make_literal(node, int | float | bool)
-        case "unary_expression":
-            return UnaryExpression.make(node, scope)
-        case "binary_expression":
-            return BinaryExpression.make(node, scope)
-        case "parenthesized_expression":
-            return ParenthesizedExpression.make(node, scope)
-        case "reference":
-            return Reference.make(node, scope)
-        case "function_call":
-            return FunctionCall.make(node, scope)
-        case unexpected:
-            raise UnexpectedValue(unexpected, node.pos)
-
-
-def resolve_expression(e: Expression) -> Expression:
-    match e:
-        case UnaryExpression() | BinaryExpression() | ParenthesizedExpression():
-            e.resolve()
-            return e
-        case Reference():
-            e.resolve()
-            return e
-        case FunctionCall():
-            e.resolve()
-            return e
+def make_main(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    match f.params:
+        case []:
+            pass
         case _:
-            return e
+            raise Error("Bad main", "Main function must not have any parameters", f.pos)
+    match f.return_:
+        case None:
+            pass
+        case _:
+            raise Error("Bad main", "Main function must not have a return type", f.pos)
+    return f
 
 
-Statement = (
-    PassStatement
-    | ReturnStatement
-    | IfStatement
-    | WhileLoop
-    | CallStatement
-    | UpdateStatement
-    | PrintStatement
-)
+def make_susceptibility(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    match f.params:
+        case [Param(_, TypeRef("node"))]:
+            pass
+        case _:
+            raise Error(
+                "Bad susceptibility",
+                "Susceptibility function must have one parameter of type `node'",
+                f.pos,
+            )
+    match f.return_:
+        case TypeRef("float"):
+            pass
+        case _:
+            raise Error(
+                "Bad susceptibility",
+                "Susceptibility function must have a return type `float'",
+                f.pos,
+            )
+    return f
 
 
-def parse_statement(node: PTNode, scope: Scope) -> Statement:
-    match node.type:
-        case "pass_statement":
-            return PassStatement(node.pos)
-        case "return_statement":
-            return ReturnStatement.make(node, scope)
-        case "if_statement":
-            return IfStatement.make(node, scope)
-        case "while_loop":
-            return WhileLoop.make(node, scope)
-        case "call_statement":
-            return CallStatement.make(node, scope)
-        case "update_statement":
-            return UpdateStatement.make(node, scope)
-        case "print_statement":
-            return PrintStatement.make(node, scope)
-        case unexpected:
-            raise UnexpectedValue(unexpected, node.pos)
+def make_infectivity(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    match f.params:
+        case [Param(_, TypeRef("node"))]:
+            pass
+        case _:
+            raise Error(
+                "Bad infectivity",
+                "Infectivity function must have one parameter of type `node'",
+                f.pos,
+            )
+
+    match f.return_:
+        case TypeRef("float"):
+            pass
+        case _:
+            raise Error(
+                "Bad infectivity",
+                "Infectivity function must have a return type `float'",
+                f.pos,
+            )
+    return f
+
+
+def make_transmissibility(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    match f.params:
+        case [Param(_, TypeRef("edge"))]:
+            pass
+        case _:
+            raise Error(
+                "Bad transmissibility",
+                "Transmissibility function must have one parameter of type `edge'",
+                f.pos,
+            )
+    match f.return_:
+        case TypeRef("float"):
+            pass
+        case _:
+            raise Error(
+                "Bad transmissibility",
+                "Transmissibility function must have a return type `float'",
+                f.pos,
+            )
+    return f
+
+
+def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    match f.params:
+        case [Param(_, TypeRef("edge"))]:
+            pass
+        case _:
+            raise Error(
+                "Bad enabled (edge)",
+                "Enabled (edge) function must have one parameter of type `edge'",
+                f.pos,
+            )
+    match f.return_:
+        case TypeRef("bool"):
+            pass
+        case _:
+            raise Error(
+                "Bad enabled (edge)",
+                "Enabled (edge) function must have a return type `bool'",
+                f.pos,
+            )
+    return f
+
+
+def add_builtin_type(type: str, scope: Scope, pos: SourcePosition):
+    scope.define(type, BuiltinType(type), pos)
 
 
 def add_builtins(scope: Scope, pos: SourcePosition):
@@ -1330,7 +1172,7 @@ class Source:
     functions: list[Function]
     main_function: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    node: PTNode | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, module: str, node: PTNode) -> Source:
@@ -1340,12 +1182,12 @@ class Source:
         configs: list[Config] = []
         variables: list[Variable] = []
         enums: list[EnumType] = []
-        node_table: NodeTable | None = None
-        edge_table: EdgeTable | None = None
+        node_table: UniqueObject[NodeTable] = UniqueObject()
+        edge_table: UniqueObject[EdgeTable] = UniqueObject()
         distributions: list[Distribution] = []
         contagions: list[Contagion] = []
         functions: list[Function] = []
-        main_function: Function | None = None
+        main_function: UniqueObject[Function] = UniqueObject()
 
         for child in node.named_children:
             match child.type:
@@ -1356,85 +1198,192 @@ class Source:
                 case "enum":
                     enums.append(EnumType.make(child, scope))
                 case "node":
-                    if node_table is not None:
-                        raise Error(
-                            "Multiple node tables",
-                            "Node table is multiply defined",
-                            child.pos,
-                        )
-
-                    node_table = NodeTable.make(child, scope)
+                    node_table.dup_error(
+                        "Multiple node tables",
+                        "Node table is multiply defined",
+                        child.pos,
+                    )
+                    node_table.set(NodeTable.make(child, scope))
                 case "edge":
-                    if edge_table is not None:
-                        raise Error(
-                            "Multiple edge tables",
-                            "Edge table is multiply defined",
-                            child.pos,
-                        )
+                    edge_table.dup_error(
+                        "Multiple edge tables",
+                        "Edge table is multiply defined",
+                        child.pos,
+                    )
 
-                    edge_table = EdgeTable.make(child, scope)
+                    edge_table.set(EdgeTable.make(child, scope))
                 case "distributions":
                     for d in child.named_children:
                         distributions.append(parse_distribution(d, scope))
                 case "contagion":
                     contagions.append(Contagion.make(child, scope))
                 case "function":
-                    func = Function.make(child, scope)
-                    if func.name == "main":
-                        if main_function is not None:
-                            raise Error(
-                                "Multiple mains",
-                                "Main function is multiply defined",
-                                child.pos,
-                            )
-
-                        main_function = func
+                    if child.field("name").text == "main":
+                        main_function.dup_error(
+                            "Multiple mains",
+                            "Main function is multiply defined",
+                            child.pos,
+                        )
+                        main_function.set(make_main(child, scope))
                     else:
-                        functions.append(func)
+                        functions.append(Function.make(child, scope))
 
-        if node_table is None:
-            raise Error("Node undefined", "Node table was not defined", node.pos)
-        if edge_table is None:
-            raise Error("Edge undefined", "Edge table was not defined", node.pos)
+        node_table.missing_error(
+            "Node undefined", "Node table was not defined", node.pos
+        )
+        edge_table.missing_error(
+            "Edge undefined", "Edge table was not defined", node.pos
+        )
+        main_function.missing_error(
+            "Main undefined", "No main function was defined", node.pos
+        )
 
-        if main_function is None:
-            raise Error("Main undefined", "No main function was defined", node.pos)
-
-        node_table.add_contagions(contagions)
-        edge_table.add_contagions(contagions)
+        node_table.get().link_contagions(contagions)
+        edge_table.get().link_contagions(contagions)
+        edge_table.get().link_node_table(node_table.get())
+        
+        for func in functions:
+            func.link_tables(node_table.get(), edge_table.get())
+        for contagion in contagions:
+            contagion.susceptibility.link_tables(node_table.get(), edge_table.get())
+            contagion.infectivity.link_tables(node_table.get(), edge_table.get())
+            contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
+            contagion.enabled.link_tables(node_table.get(), edge_table.get())
+        main_function.get().link_tables(node_table.get(), edge_table.get())
 
         return cls(
             module=module,
             configs=configs,
             variables=variables,
             enums=enums,
-            node_table=node_table,
-            edge_table=edge_table,
+            node_table=node_table.get(),
+            edge_table=edge_table.get(),
             distributions=distributions,
             contagions=contagions,
             functions=functions,
-            main_function=main_function,
+            main_function=main_function.get(),
             scope=scope,
+            pos=node.pos,
         )
 
-    def resolve(self):
-        for config in self.configs:
-            config.resolve()
-        for var in self.variables:
-            var.resolve()
-        self.node_table.resolve()
-        self.edge_table.resolve()
-        for contagion in self.contagions:
-            contagion.resolve()
-        for function in self.functions:
-            function.resolve()
-        self.main_function.resolve()
 
-        self.main_function.check_main()
+Expression = (
+    int
+    | float
+    | bool
+    | UnaryExpression
+    | BinaryExpression
+    | ParenthesizedExpression
+    | Reference
+    | FunctionCall
+)
+
+
+def parse_expression(node: PTNode, scope: Scope) -> Expression:
+    match node.type:
+        case "integer":
+            return int(node.text)
+        case "float":
+            return float(node.text)
+        case "boolean":
+            return node.text == True
+        case "unary_expression":
+            return UnaryExpression.make(node, scope)
+        case "binary_expression":
+            return BinaryExpression.make(node, scope)
+        case "parenthesized_expression":
+            return ParenthesizedExpression.make(node, scope)
+        case "reference":
+            return Reference.make(node, scope)
+        case "function_call":
+            return FunctionCall.make(node, scope)
+        case unexpected:
+            raise UnexpectedValue(unexpected, node.pos)
+
+
+Statement = (
+    PassStatement
+    | ReturnStatement
+    | IfStatement
+    | WhileLoop
+    | CallStatement
+    | UpdateStatement
+    | PrintStatement
+)
+
+
+StatementParts = Statement | ElseSection | ElifSection | Variable
+
+
+def parse_statement(node: PTNode, scope: Scope) -> Statement:
+    match node.type:
+        case "pass_statement":
+            return PassStatement(node.pos)
+        case "return_statement":
+            return ReturnStatement.make(node, scope)
+        case "if_statement":
+            return IfStatement.make(node, scope)
+        case "while_loop":
+            return WhileLoop.make(node, scope)
+        case "call_statement":
+            return CallStatement.make(node, scope)
+        case "update_statement":
+            return UpdateStatement.make(node, scope)
+        case "print_statement":
+            return PrintStatement.make(node, scope)
+        case unexpected:
+            raise UnexpectedValue(unexpected, node.pos)
+
+
+Referable = (
+    EnumConstant
+    | Config
+    | Param
+    | Variable
+    | BuiltinFunction
+    | Function
+    | tuple[Contagion, BuiltinFunction]
+    | tuple[Contagion, Function]
+    | tuple[Param | Variable, NodeField]
+    | tuple[Param | Variable, EdgeField]
+    | tuple[Param | Variable, Contagion, NodeField]
+    | tuple[Param | Variable, SourceNodeAccessor, NodeField]
+    | tuple[Param | Variable, SourceNodeAccessor, Contagion, NodeField]
+    | tuple[Param | Variable, TargetNodeAccessor, NodeField]
+    | tuple[Param | Variable, TargetNodeAccessor, Contagion, NodeField]
+)
+
+
+def resolve_ref(r: Reference) -> Referable:
+    assert r.scope is not None
+    r_str = ".".join(r.names)
+
+    head, tail = r.names[0], r.names[1:]
+    refs = []
+    try:
+        v = r.scope.resolve(head, r.pos)
+        refs.append(v)
+        for part in tail:
+            v = v.scope.resolve(part, r.pos)
+            refs.append(v)
+    except (ASTConstructionError, AttributeError) as e:
+        raise Error("Undefined reference", f"Failed to resolve '{r_str}'; ({e})", r.pos)
+
+    if len(refs) == 1:
+        ret = refs[0]
+    else:
+        ret = tuple(refs)
+
+    try:
+        ret = check_type(ret, Referable)
+    except Exception as e:
+        raise Error("Invalid reference", f"'{r_str}' is not a valid reference; ({e})", r.pos)
+
+    return ret
 
 
 def mk_ast1(filename: Path, node: PTNode) -> Source:
-    """Make ast1 form parse tree."""
+    """Make ast1 from parse tree."""
     module = filename.stem.replace(".", "_")
     source = Source.make(module, node)
     return source
@@ -1451,23 +1400,6 @@ def print_ast1(filename: Path):
     try:
         pt = mk_pt(str(filename), file_bytes)
         ast1 = mk_ast1(filename, pt)
-        rich.print(ast1)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
-        e.rich_print()
-
-
-@click.command()
-@click.argument(
-    "filename",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
-def print_ast2(filename: Path):
-    """Print the AST2."""
-    file_bytes = filename.read_bytes()
-    try:
-        pt = mk_pt(str(filename), file_bytes)
-        ast1 = mk_ast1(filename, pt)
-        ast1.resolve()
         rich.print(ast1)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
