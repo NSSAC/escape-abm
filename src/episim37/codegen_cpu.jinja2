@@ -1,74 +1,91 @@
-{# Codegen CPU Macros #}
+{# Codegen for CPU #}
 
 {% macro enum_type(t) %}
-typedef {{ t.base_type | to_ctype }} {{ t.name }};
+{{ t.line }}
+typedef {{ t.base_type }} {{ t.name }};
 {% for const in t.consts %}
 const {{ t.name }} {{ const }} = {{ loop.index0 }};
 {% endfor %}
 {% endmacro %}
 
 {% macro config(c) %}
-{{ c.type | to_ctype }} {{ c.name }} = {{ c.default | codegen }};
+{{ c.line }}
+{{ c.type }} {{ c.name }} = {{ c.default }};
+{% endmacro %}
+
+{% macro global_variable(v) %}
+{{ v.line }}
+{{ v.type }} {{ v.var }} = {{ v.init }};
+{% endmacro %}
+
+{% macro alloc_h5_dataset_body(type, dataset_name, h5_type, count) %}
+uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
+{{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
+assert(ret != nullptr);
+
+H5::DataSet dataset = file.openDataSet("{{ dataset_name }}");
+H5::DataSpace dataspace = dataset.getSpace();
+int ndims = dataspace.getSimpleExtentNdims();
+std::vector<hsize_t> dims(ndims);
+dataspace.getSimpleExtentDims(&dims[0]);
+assert(dims.size() == 1);
+assert(dims[0] == {{ count }});
+dataset.read(ret, {{ h5_type }});
+
+return ret;
+{% endmacro %}
+
+{% macro alloc_mem_body(type, count) %}
+uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
+{{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
+assert(ret != nullptr);
+
+std::fill(ret, ret + {{ count }}, 0);
+
+return ret;
 {% endmacro %}
 
 {% macro node_table(t) %}
 static
 uint64_t get_num_nodes(H5::H5File &file) {
-  uint64_t ret;
-  const char *attr_name = "num_nodes";
+    uint64_t ret;
+    const char *attr_name = "num_nodes";
 
-  H5::Attribute attr = file.openAttribute(attr_name);
-  attr.read(attr.getDataType(), &ret);
-  return ret;
+    H5::Attribute attr = file.openAttribute(attr_name);
+    attr.read(attr.getDataType(), &ret);
+    return ret;
 }
 
-{% for field in t.fields %}
-{% set name = field.name %}
-{% set c_type = field.type | to_ctype %}
+{% for f in t.fields %}
 static
-{{ c_type }}*
-alloc_node_{{ name }}(uint64_t num_nodes, H5::H5File &file) {
-  uint64_t alloc_size = sizeof({{ c_type }}) * num_nodes;
-  {{ c_type }}* ret = static_cast<{{ c_type }}*>(std::malloc(alloc_size));
-  assert(ret != nullptr);
-  std::fill(ret, ret + num_nodes, 0);
-
-  {% if field.is_static %}
-  const char *dataset_name = "/node/{{ name }}";
-
-  H5::DataSet dataset = file.openDataSet(dataset_name);
-  H5::DataSpace dataspace = dataset.getSpace();
-  int ndims = dataspace.getSimpleExtentNdims();
-  std::vector<hsize_t> dims(ndims);
-  dataspace.getSimpleExtentDims(&dims[0]);
-  assert(dims.size() == 1);
-  assert(dims[0] == num_nodes);
-  dataset.read(ret, {{ c_type | hdf5_type }});
-  {% endif %}
-
-  return ret;
+{{ f.type }}*
+alloc_node_{{ f.name }}(uint64_t num_nodes, H5::H5File &file) {
+    {% if f.is_static %}
+    {{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_nodes') }}
+    {% else %}
+    {{ alloc_mem_body(f.type, 'num_nodes') }}
+    {% endif %}
 }
 
 {% endfor %}
 
-
 struct node_table {
-    {% for field in t.fields %}
-    {{ field.type | to_ctype }}* {{ field.name }};
+    {% for f in t.fields %}
+    {{ f.type }}* {{ f.name }};
     {% endfor %}
 
-    uint64_t _size;
+    uint64_t num_nodes;
 
     node_table(H5::H5File &file):
-    {% for field in t.fields %}
-    {{ field.name }}{nullptr},
+    {% for f in t.fields %}
+    {{ f.name }}{nullptr},
     {% endfor %}
-    _size{0} {
-        uint64_t num_nodes = get_num_nodes(file);
-        {% for field in t.fields %}
-        {{ field.name }} = alloc_node_{{ field.name }}(num_nodes, file);
+    num_nodes{0} {
+        uint64_t n_nodes = get_num_nodes(file);
+        {% for f in t.fields %}
+        {{ f.name }} = alloc_node_{{ f.name }}(n_nodes, file);
         {% endfor %}
-        _size = num_nodes;
+        num_nodes = n_nodes;
     }
 
     node_table() = delete;                              // default constructor
@@ -78,16 +95,24 @@ struct node_table {
     node_table &operator=(node_table &&) = delete;      // move assignment
 
     ~node_table() {
-    {% for field in t.fields %}
-    std::free({{ field.name }});
+    {% for f in t.fields %}
+    std::free({{ f.name }});
     {% endfor %}
 
-    {% for field in t.fields %}
-    {{ field.name }} = nullptr;
+    {% for f in t.fields %}
+    {{ f.name }} = nullptr;
     {% endfor %}
-    _size = 0;
+    num_nodes = 0;
   }
 } ;
+
+struct node {
+    node_table *n;
+    node_index_t i;
+
+    node(node_table *nn, node_index_t ii):
+    n{nn}, i{ii} {}
+};
 {% endmacro %}
 
 {% macro edge_table(t) %}
@@ -101,53 +126,35 @@ uint64_t get_num_edges(H5::H5File &file) {
   return ret;
 }
 
-{% for field in t.fields %}
-{% set name = field.name %}
-{% set c_type = field.type | to_ctype %}
+{% for f in t.fields %}
 static
-{{ c_type }}*
-alloc_edge_{{ name }}(uint64_t num_edges, H5::H5File &file) {
-  uint64_t alloc_size = sizeof({{ c_type }}) * num_edges;
-  {{ c_type }}* ret = static_cast<{{ c_type }}*>(std::malloc(alloc_size));
-  assert(ret != nullptr);
-  std::fill(ret, ret + num_edges, 0);
-
-  {% if field.is_static %}
-  const char *dataset_name = "/edge/{{ name }}";
-
-  H5::DataSet dataset = file.openDataSet(dataset_name);
-  H5::DataSpace dataspace = dataset.getSpace();
-  int ndims = dataspace.getSimpleExtentNdims();
-  std::vector<hsize_t> dims(ndims);
-  dataspace.getSimpleExtentDims(&dims[0]);
-  assert(dims.size() == 1);
-  assert(dims[0] == num_edges);
-  dataset.read(ret, {{ c_type | hdf5_type }});
-  {% endif %}
-
-  return ret;
+{{ f.type }}* alloc_edge_{{ f.name }}(uint64_t num_edges, H5::H5File &file) {
+    {% if f.is_static %}
+    {{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_edges') }}
+    {% else %}
+    {{ alloc_mem_body(f.type, 'num_edges') }}
+    {% endif %}
 }
 
 {% endfor %}
 
-
 struct edge_table {
-    {% for field in t.fields %}
-    {{ field.type | to_ctype }}* {{ field.name }};
+    {% for f in t.fields %}
+    {{ f.type }}* {{ f.name }};
     {% endfor %}
 
-    uint64_t _size;
+    uint64_t num_edges;
 
     edge_table(H5::H5File &file):
-    {% for field in t.fields %}
-    {{ field.name }}{nullptr},
+    {% for f in t.fields %}
+    {{ f.name }}{nullptr},
     {% endfor %}
-    _size{0} {
-        uint64_t num_edges = get_num_edges(file);
-        {% for field in t.fields %}
-        {{ field.name }} = alloc_edge_{{ field.name }}(num_edges, file);
+    num_edges{0} {
+        uint64_t n_edges = get_num_edges(file);
+        {% for f in t.fields %}
+        {{ f.name }} = alloc_edge_{{ f.name }}(n_edges, file);
         {% endfor %}
-        _size = num_edges;
+        num_edges = n_edges;
     }
 
     edge_table() = delete;                              // default constructor
@@ -157,70 +164,148 @@ struct edge_table {
     edge_table &operator=(edge_table &&) = delete;      // move assignment
 
     ~edge_table() {
-    {% for field in t.fields %}
-    std::free({{ field.name }});
+    {% for f in t.fields %}
+    std::free({{ f.name }});
     {% endfor %}
 
-    {% for field in t.fields %}
-    {{ field.name }} = nullptr;
+    {% for f in t.fields %}
+    {{ f.name }} = nullptr;
     {% endfor %}
-    _size = 0;
+    num_edges = 0;
   }
 } ;
+
+struct edge {
+    edge_table *e;
+    node_table *n;
+    edge_index_t i;
+
+    edge(edge_table *ee, node_table *nn, edge_index_t ii):
+    e{ee}, n{nn}, i{ii} {}
+};
 {% endmacro %}
 
-{% macro source(s) %}
+{% macro adj_csr(a) %}
+static
+{{ a.edge_idx_type }}* alloc_adj_csr_data(uint64_t num_edges, H5::H5File &file) {
+{{ alloc_h5_dataset_body(a.edge_idx_type, a.data_dataset_name, a.edge_idx_h5_type, 'num_edges') }}
+}
+
+static
+{{ a.node_idx_type }}* alloc_adj_csr_indices(uint64_t num_nodes, H5::H5File &file) {
+{{ alloc_h5_dataset_body(a.node_idx_type, a.indices_dataset_name, a.node_idx_h5_type, 'num_nodes') }}
+}
+
+static
+{{ a.node_idx_type }}* alloc_adj_csr_indptr(uint64_t num_nodes, H5::H5File &file) {
+{{ alloc_h5_dataset_body(a.node_idx_type, a.indptr_dataset_name, a.node_idx_h5_type, 'num_nodes') }}
+}
+
+struct adj_csr {
+    {{ a.edge_idx_type }}* data;
+    {{ a.node_idx_type }}* indices;
+    {{ a.node_idx_type }}* indptr;
+
+    uint64_t num_nodes;
+    uint64_t num_edges;
+
+    adj_csr(H5::H5File &file):
+    data{nullptr},
+    indices{nullptr},
+    indptr{nullptr},
+    num_nodes{0},
+    num_edges{0} {
+        uint64_t n_nodes = get_num_nodes(file);
+        uint64_t n_edges = get_num_edges(file);
+        
+        data = alloc_adj_csr_data(num_edges, file);
+        indices = alloc_adj_csr_indices(num_nodes, file);
+        indptr = alloc_adj_csr_indptr(num_nodes, file);
+
+        num_nodes = n_nodes;
+        num_edges = n_edges;
+    }
+
+    adj_csr() = delete;                           // default constructor
+    adj_csr(const adj_csr &) = delete;            // copy constructor
+    adj_csr(adj_csr &&) = delete;                 // move constructor
+    adj_csr &operator=(const adj_csr &) = delete; // copy assignment
+    adj_csr &operator=(adj_csr &&) = delete;      // move assignment
+
+    ~adj_csr() {
+    std::free(data);
+    std::free(indices);
+    std::free(indptr);
+
+    data = nullptr;
+    indices = nullptr;
+    indptr = nullptr;
+
+    num_nodes = 0;
+    num_edges = 0;
+  }
+} ;
+
+{% endmacro %}
+
+{% macro function_params(params) %}
+{% for name, type in params %}{{ type }} {{ name }}{{ "," if not loop.last else ""}}{% endfor %}
+{% endmacro %}
+
+{% macro function_decl(f) %}
+static {{ f.return_ }} {{ f.name}}({{ function_params(f.params) }});
+{% endmacro %}
+
+{% macro function_def(f) %}
+{{ f.line }}
+static {{ f.return_ }} {{ f.name}}({{ function_params(f.params) }}) {
+{% for name, type in f.variables %}
+{{ type }} {{ name }};
+{% endfor %}
+
+{{ f.body }}
+}
+{% endmacro %}
+
+{% macro simulator_cpp(s) %}
 #include <cinttypes>
 #include <cstdlib>
 #include <cassert>
-#include <iomanip>
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <H5Cpp.h>
 
+typedef {{ s.node_idx_type }} node_index_t;
+typedef {{ s.edge_idx_type }} edge_index_t;
+
+{% for t in s.enums %}
+{{ enum_type(t) }}
+{% endfor %}
+
 {% for c in s.configs %}
-{{ c | codegen }}
+{{ config(c) }}
 {% endfor %}
 
-{% for e in s.enums %}
-{{ e | codegen }}
+{% for v in s.variables %}
+{{ global_variable(v) }}
 {% endfor %}
 
-{{ s.node_table | codegen }}
-{{ s.edge_table | codegen }}
+{{ node_table(s.node_table) }}
+
+{{ edge_table(s.edge_table) }}
+
+{{ adj_csr(s.adj_csr) }}
+
+{% for f in s.functions %}
+{{ function_decl(f) }}
+{% endfor %}
+
+{% for f in s.functions %}
+{{ function_def(f) }}
+{% endfor %}
 
 int main() {
-    std::cout << std::boolalpha;
-    {% for c in s.configs %}
-    {
-        const char *p = std::getenv("{{ c.name | upper }}");
-        if (p) {
-            {{ c.name }} = {{ c.type.name | cstr_to_ctype }}(p);
-        }
-        std::cout << "{{ c.name }} = " << {{ c.type.name | cout_cast }}({{ c.name }}) << std::endl;
-    }
-    {% endfor %}
-    const char *_data_file_name = "data.h5";
-    {
-        const char *p = std::getenv("DATA_FILE");
-        if (p) {
-            _data_file_name = p;
-        }
-        std::cout << "data_file = " << _data_file_name << std::endl;
-    }
-
-    H5::H5File _file(_data_file_name, H5F_ACC_RDONLY);
-    node_table _node_tab(_file);
-    edge_table _edge_tab(_file);
-
-    std::cout << "# Nodes: " << _node_tab._size << std::endl;
-    std::cout << "# Edges: " << _edge_tab._size << std::endl;
-
-    {% for statement in s.main_function.body %}
-    {{ statement | codegen }}
-    {% endfor %}
-
     return 0;
 }
 {% endmacro %}
@@ -229,7 +314,7 @@ int main() {
 {% macro cmake_lists(s) %}
 cmake_minimum_required(VERSION 3.27)
 
-project({{s.source.module}} VERSION 0.0.1)
+project({{s.module}} VERSION 0.0.1)
 
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 

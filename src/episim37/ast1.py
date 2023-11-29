@@ -833,7 +833,7 @@ class FunctionCall:
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
         function = Reference.make(node.field("function"), scope)
-        args = [parse_expression(c, scope) for c in node.fields("args")]
+        args = [parse_expression(c, scope) for c in node.fields("arg")]
         return cls(function, args)
 
 
@@ -1347,6 +1347,8 @@ Referable = (
     | tuple[Param | Variable, NodeField]
     | tuple[Param | Variable, EdgeField]
     | tuple[Param | Variable, Contagion, NodeField]
+    | tuple[Param | Variable, SourceNodeAccessor]
+    | tuple[Param | Variable, TargetNodeAccessor]
     | tuple[Param | Variable, SourceNodeAccessor, NodeField]
     | tuple[Param | Variable, SourceNodeAccessor, Contagion, NodeField]
     | tuple[Param | Variable, TargetNodeAccessor, NodeField]

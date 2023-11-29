@@ -173,60 +173,72 @@ def ref(x: ast1.Referable) -> str:
             return mangle(x.name)
         case ast1.Function():
             return mangle(x.name)
-        case [ast1.Contagion() as a, ast1.BuiltinFunction() as b]:
-            return mangle([a.name, b.name])
-        case [ast1.Contagion() as a, ast1.Function() as b]:
-            return mangle([a.name, b.name])
-        case [ast1.Param() | ast1.Variable() as a, ast1.NodeField() as b]:
-            a_ref = ref(a)
-            b_ref = mangle(b.name)
-            return f"{a_ref}.{b_ref}"
-        case [ast1.Param() | ast1.Variable() as a, ast1.EdgeField() as b]:
-            a_ref = ref(a)
-            b_ref = mangle(b.name)
-            return f"{a_ref}.{b_ref}"
+        case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
+            return mangle([c.name, f.name])
+        case [ast1.Contagion() as c, ast1.Function() as f]:
+            return mangle([c.name, f.name])
+        case [ast1.Param() | ast1.Variable() as n, ast1.NodeField() as f]:
+            n_ref = ref(n)
+            f_ref = mangle(f.name)
+            return f"{n_ref}.n->{f_ref}[{n_ref}.i]"
+        case [ast1.Param() | ast1.Variable() as e, ast1.EdgeField() as f]:
+            e_ref = ref(e)
+            f_ref = mangle(f.name)
+            return f"{e_ref}.e->{f_ref}[{e_ref}.i]"
         case [
-            ast1.Param() | ast1.Variable() as a,
-            ast1.Contagion() as b,
-            ast1.NodeField() as c,
-        ]:
-            a_ref = ref(a)
-            b_ref = mangle([b.name, c.name])
-            return f"{a_ref}.{b_ref}"
-        case [
-            ast1.Param() | ast1.Variable() as a,
-            ast1.SourceNodeAccessor() as b,
-            ast1.NodeField() as c,
-        ]:
-            a_ref = ref(a)
-            c_ref = mangle(c.name)
-            return f"{a_ref}.source_node.{c_ref}"
-        case [
-            ast1.Param() | ast1.Variable() as a,
-            ast1.SourceNodeAccessor() as b,
+            ast1.Param() | ast1.Variable() as n,
             ast1.Contagion() as c,
-            ast1.NodeField() as d,
+            ast1.NodeField() as f,
         ]:
-            a_ref = ref(a)
-            c_ref = mangle([c.name, d.name])
-            return f"{a_ref}.source_node.{c_ref}"
+            n_ref = ref(n)
+            f_ref = mangle([c.name, f.name])
+            return f"{n_ref}.n->{f_ref}[{n_ref}.i]"
         case [
-            ast1.Param() | ast1.Variable() as a,
-            ast1.TargetNodeAccessor() as b,
-            ast1.NodeField() as c,
+            ast1.Param() | ast1.Variable() as e,
+            ast1.SourceNodeAccessor(),
         ]:
-            a_ref = ref(a)
-            c_ref = mangle(c.name)
-            return f"{a_ref}.target_node.{c_ref}"
+            e_ref = ref(e)
+            return f"node({e_ref}.n, {e_ref}.e->source_node_idx[{e_ref}.i])"
         case [
-            ast1.Param() | ast1.Variable() as a,
-            ast1.TargetNodeAccessor() as b,
+            ast1.Param() | ast1.Variable() as e,
+            ast1.TargetNodeAccessor(),
+        ]:
+            e_ref = ref(e)
+            return f"node({e_ref}.n, {e_ref}.e->target_node_idx[{e_ref}.i])"
+        case [
+            ast1.Param() | ast1.Variable() as e,
+            ast1.SourceNodeAccessor(),
+            ast1.NodeField() as f,
+        ]:
+            e_ref = ref(e)
+            f_ref = mangle(f.name)
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_idx[{e_ref}.i]]"
+        case [
+            ast1.Param() | ast1.Variable() as e,
+            ast1.SourceNodeAccessor(),
             ast1.Contagion() as c,
-            ast1.NodeField() as d,
+            ast1.NodeField() as f,
         ]:
-            a_ref = ref(a)
-            c_ref = mangle([c.name, d.name])
-            return f"{a_ref}.target_node.{c_ref}"
+            e_ref = ref(e)
+            f_ref = mangle([c.name, f.name])
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_idx[{e_ref}.i]]"
+        case [
+            ast1.Param() | ast1.Variable() as e,
+            ast1.TargetNodeAccessor(),
+            ast1.NodeField() as f,
+        ]:
+            e_ref = ref(e)
+            f_ref = mangle(f.name)
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_idx[{e_ref}.i]]"
+        case [
+            ast1.Param() | ast1.Variable() as e,
+            ast1.TargetNodeAccessor(),
+            ast1.Contagion() as c,
+            ast1.NodeField() as f,
+        ]:
+            e_ref = ref(e)
+            f_ref = mangle([c.name, f.name])
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_idx[{e_ref}.i]]"
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -282,6 +294,7 @@ class Variable:
 @attrs.define
 class Field:
     name: str
+    dataset_name: str
     type: str
     h5_type: str
     is_static: bool
@@ -299,20 +312,22 @@ class Table:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
+            dataset_name = f"/node/{field.name}"
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
             line = make_line(field.pos)
-            fields.append(Field(name, type, h5_type, is_static, line))
+            fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         for contagion in tab.contagions:
             for field in contagion.node_fields:
                 name = mangle([contagion.name, field.name])
+                dataset_name = f"/node/{contagion.name}/{field.name}"
                 type = typename(field.type.resolve())
                 h5_type = h5_typename(field.type.resolve())
                 is_static = field.is_static
                 line = make_line(field.pos)
-                fields.append(Field(name, type, h5_type, is_static, line))
+                fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         name = "node"
         line = make_line(tab.pos)
@@ -323,16 +338,18 @@ class Table:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
+            dataset_name = f"/edge/{field.name}"
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
             line = make_line(field.pos)
-            fields.append(Field(name, type, h5_type, is_static, line))
+            fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         fields.extend(
             [
                 Field(
                     name="target_node_idx",
+                    dataset_name="/edge/_target_node_idx",
                     type=node_idx_type,
                     h5_type=hdf5_type(node_idx_type),
                     is_static=True,
@@ -340,6 +357,7 @@ class Table:
                 ),
                 Field(
                     name="source_node_idx",
+                    dataset_name="/edge/_source_node_idx",
                     type=node_idx_type,
                     h5_type=hdf5_type(node_idx_type),
                     is_static=True,
@@ -355,34 +373,25 @@ class Table:
 
 @attrs.define
 class CsrAdjMatrix:
-    fields: list[Field]
+    node_idx_type: str
+    edge_idx_type: str
+    node_idx_h5_type: str
+    edge_idx_h5_type: str
+    data_dataset_name: str
+    indices_dataset_name: str
+    indptr_dataset_name: str
 
     @classmethod
     def make(cls, node_idx_type: str, edge_idx_type: str) -> CsrAdjMatrix:
-        fields = [
-            Field(
-                name="data",
-                type=edge_idx_type,
-                h5_type=hdf5_type(edge_idx_type),
-                is_static=True,
-                line="",
-            ),
-            Field(
-                name="indices",
-                type=node_idx_type,
-                h5_type=hdf5_type(node_idx_type),
-                is_static=True,
-                line="",
-            ),
-            Field(
-                name="indptr",
-                type=node_idx_type,
-                h5_type=hdf5_type(node_idx_type),
-                is_static=True,
-                line="",
-            ),
-        ]
-        return cls(fields)
+        return cls(
+            node_idx_type,
+            edge_idx_type,
+            hdf5_type(node_idx_type),
+            hdf5_type(edge_idx_type),
+            "/adj/csr/data",
+            "/adj/csr/indices",
+            "/adj/csr/indptr",
+        )
 
 
 @attrs.define
@@ -691,7 +700,7 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
                     args.append(arg)
                 else:
                     args.append(expression_str(arg))
-            args = f" << {s.sep} ".join(args)
+            args = f" << {s.sep} << ".join(args)
             line = "std::cout << " + args + f" << {s.end} << std::flush;"
             lines.append(line)
         case ast1.Variable():
@@ -712,6 +721,7 @@ class Function:
     return_: str
     variables: list[tuple[str, str]]
     body: str
+    line: str
 
     @classmethod
     def make(cls, name: str, x: ast1.Function) -> Function:
@@ -737,18 +747,19 @@ class Function:
             body.extend(statement_lines(s, body.cur_indent + 1))
         body = body.to_string()
 
-        return cls(name, params, return_, variables, body)
+        line = make_line(x.pos)
+        return cls(name, params, return_, variables, body, line)
 
 
 @attrs.define
 class Source:
     module: str
+    enums: list[EnumType]
     configs: list[Config]
     variables: list[Variable]
-    enums: list[EnumType]
     node_table: Table
     edge_table: Table
-    csr_net: CsrAdjMatrix
+    adj_csr: CsrAdjMatrix
     constant_dists: list[ConstantDist]
     discrete_dists: list[DiscreteDist]
     uniform_dists: list[UniformDist]
@@ -762,12 +773,12 @@ class Source:
     @classmethod
     def make(cls, x: ast1.Source, node_idx_type: str, edge_idx_type: str) -> Source:
         module = x.module
+        enums = [EnumType.make(e) for e in x.enums]
         configs = [Config.make(c) for c in x.configs]
         variables = [Variable.make(v) for v in x.variables]
-        enums = [EnumType.make(e) for e in x.enums]
         node_table = Table.from_node_table(x.node_table)
         edge_table = Table.from_edge_table(x.edge_table, node_idx_type)
-        csr_net = CsrAdjMatrix.make(node_idx_type, edge_idx_type)
+        adj_csr = CsrAdjMatrix.make(node_idx_type, edge_idx_type)
 
         constant_dists: list[ConstantDist] = []
         discrete_dists: list[DiscreteDist] = []
@@ -807,16 +818,16 @@ class Source:
             name = ref(f)
             functions.append(Function.make(name, f))
 
-        functions.append(Function.make("main", x.main_function))
+        functions.append(Function.make("do_main", x.main_function))
 
         return cls(
             module=module,
+            enums=enums,
             configs=configs,
             variables=variables,
-            enums=enums,
             node_table=node_table,
             edge_table=edge_table,
-            csr_net=csr_net,
+            adj_csr=adj_csr,
             constant_dists=constant_dists,
             discrete_dists=discrete_dists,
             uniform_dists=uniform_dists,
