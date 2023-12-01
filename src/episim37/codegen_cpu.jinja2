@@ -19,34 +19,40 @@ const {{ t.name }} {{ const }} = {{ loop.index0 }};
 {% endmacro %}
 
 {% macro alloc_h5_dataset_body(type, dataset_name, h5_type, count) %}
-uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
-{{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
-assert(ret != nullptr);
+    uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
+    {{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
+    assert(ret != nullptr);
 
-H5::DataSet dataset = file.openDataSet("{{ dataset_name }}");
-H5::DataSpace dataspace = dataset.getSpace();
-int ndims = dataspace.getSimpleExtentNdims();
-std::vector<hsize_t> dims(ndims);
-dataspace.getSimpleExtentDims(&dims[0]);
-assert(dims.size() == 1);
-assert(dims[0] == {{ count }});
-dataset.read(ret, {{ h5_type }});
+    H5::DataSet dataset = file.openDataSet("{{ dataset_name }}");
 
-return ret;
+    // Ensure datatype is correct
+    H5::DataType dataset_type = dataset.getDataType();
+    assert(dataset_type == {{ h5_type }});
+
+    // Ensure count is correct
+    H5::DataSpace dataspace = dataset.getSpace();
+    int ndims = dataspace.getSimpleExtentNdims();
+    std::vector<hsize_t> dims(ndims);
+    dataspace.getSimpleExtentDims(&dims[0]);
+    assert(dims.size() == 1);
+    assert(dims[0] == {{ count }});
+
+    dataset.read(ret, {{ h5_type }});
+
+    return ret;
 {% endmacro %}
 
 {% macro alloc_mem_body(type, count) %}
-uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
-{{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
-assert(ret != nullptr);
+    uint64_t alloc_size = sizeof({{ type }}) * {{ count }};
+    {{ type }}* ret = static_cast<{{ type }}*>(std::malloc(alloc_size));
+    assert(ret != nullptr);
 
-std::fill(ret, ret + {{ count }}, 0);
+    std::fill(ret, ret + {{ count }}, 0);
 
-return ret;
+    return ret;
 {% endmacro %}
 
 {% macro node_table(t) %}
-static
 uint64_t get_num_nodes(H5::H5File &file) {
     uint64_t ret;
     const char *attr_name = "num_nodes";
@@ -57,14 +63,13 @@ uint64_t get_num_nodes(H5::H5File &file) {
 }
 
 {% for f in t.fields %}
-static
 {{ f.type }}*
 alloc_node_{{ f.name }}(uint64_t num_nodes, H5::H5File &file) {
-    {% if f.is_static %}
-    {{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_nodes') }}
-    {% else %}
-    {{ alloc_mem_body(f.type, 'num_nodes') }}
-    {% endif %}
+{% if f.is_static %}
+{{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_nodes') }}
+{% else %}
+{{ alloc_mem_body(f.type, 'num_nodes') }}
+{% endif %}
 }
 
 {% endfor %}
@@ -74,18 +79,15 @@ struct node_table {
     {{ f.type }}* {{ f.name }};
     {% endfor %}
 
-    uint64_t num_nodes;
-
-    node_table(H5::H5File &file):
+    node_table(H5::H5File &file, uint64_t num_nodes):
+    {% set comma = joiner(",") %}
     {% for f in t.fields %}
-    {{ f.name }}{nullptr},
+    {{ comma() }}{{ f.name }}{nullptr}
     {% endfor %}
-    num_nodes{0} {
-        uint64_t n_nodes = get_num_nodes(file);
+    {
         {% for f in t.fields %}
-        {{ f.name }} = alloc_node_{{ f.name }}(n_nodes, file);
+        {{ f.name }} = alloc_node_{{ f.name }}(num_nodes, file);
         {% endfor %}
-        num_nodes = n_nodes;
     }
 
     node_table() = delete;                              // default constructor
@@ -102,7 +104,6 @@ struct node_table {
     {% for f in t.fields %}
     {{ f.name }} = nullptr;
     {% endfor %}
-    num_nodes = 0;
   }
 } ;
 
@@ -116,7 +117,6 @@ struct node {
 {% endmacro %}
 
 {% macro edge_table(t) %}
-static
 uint64_t get_num_edges(H5::H5File &file) {
   uint64_t ret;
   const char *attr_name = "num_edges";
@@ -127,34 +127,42 @@ uint64_t get_num_edges(H5::H5File &file) {
 }
 
 {% for f in t.fields %}
-static
 {{ f.type }}* alloc_edge_{{ f.name }}(uint64_t num_edges, H5::H5File &file) {
-    {% if f.is_static %}
-    {{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_edges') }}
-    {% else %}
-    {{ alloc_mem_body(f.type, 'num_edges') }}
-    {% endif %}
+{% if f.is_static %}
+{{ alloc_h5_dataset_body(f.type, f.dataset_name, f.h5_type, 'num_edges') }}
+{% else %}
+{{ alloc_mem_body(f.type, 'num_edges') }}
+{% endif %}
 }
 
 {% endfor %}
+
+{{ t.target_node_idx.type }}* alloc_edge_target_node_idx(uint64_t num_edges, H5::H5File &file) {
+{{ alloc_h5_dataset_body(t.target_node_idx.type, t.target_node_idx.dataset_name, t.target_node_idx.h5_type, 'num_edges') }}
+}
+
+{{ t.source_node_idx.type }}* alloc_edge_source_node_idx(uint64_t num_edges, H5::H5File &file) {
+{{ alloc_h5_dataset_body(t.source_node_idx.type, t.source_node_idx.dataset_name, t.source_node_idx.h5_type, 'num_edges') }}
+}
 
 struct edge_table {
     {% for f in t.fields %}
     {{ f.type }}* {{ f.name }};
     {% endfor %}
+    {{ t.target_node_idx.type }}* target_node_idx;
+    {{ t.source_node_idx.type }}* source_node_idx;
 
-    uint64_t num_edges;
-
-    edge_table(H5::H5File &file):
+    edge_table(H5::H5File &file, uint64_t num_edges):
+    {% set comma = joiner(", ") %}
     {% for f in t.fields %}
-    {{ f.name }}{nullptr},
+    {{ comma() }}{{ f.name }}{nullptr}
     {% endfor %}
-    num_edges{0} {
-        uint64_t n_edges = get_num_edges(file);
+    {
         {% for f in t.fields %}
-        {{ f.name }} = alloc_edge_{{ f.name }}(n_edges, file);
+        {{ f.name }} = alloc_edge_{{ f.name }}(num_edges, file);
         {% endfor %}
-        num_edges = n_edges;
+        target_node_idx = alloc_edge_target_node_idx(num_edges, file);
+        source_node_idx = alloc_edge_source_node_idx(num_edges, file);
     }
 
     edge_table() = delete;                              // default constructor
@@ -171,7 +179,6 @@ struct edge_table {
     {% for f in t.fields %}
     {{ f.name }} = nullptr;
     {% endfor %}
-    num_edges = 0;
   }
 } ;
 
@@ -185,82 +192,277 @@ struct edge {
 };
 {% endmacro %}
 
-{% macro adj_csr(a) %}
-static
-{{ a.edge_idx_type }}* alloc_adj_csr_data(uint64_t num_edges, H5::H5File &file) {
-{{ alloc_h5_dataset_body(a.edge_idx_type, a.data_dataset_name, a.edge_idx_h5_type, 'num_edges') }}
+{% macro in_inc_csr(a) %}
+{{ a.indptr.type }}* alloc_in_inc_csr_indptr(uint64_t num_nodes_p1, H5::H5File &file) {
+{{ alloc_h5_dataset_body(a.indptr.type, a.indptr.dataset_name, a.indptr.h5_type, 'num_nodes_p1') }}
 }
 
-static
-{{ a.node_idx_type }}* alloc_adj_csr_indices(uint64_t num_nodes, H5::H5File &file) {
-{{ alloc_h5_dataset_body(a.node_idx_type, a.indices_dataset_name, a.node_idx_h5_type, 'num_nodes') }}
-}
+struct in_inc_csr {
+    {{ a.indptr.type }}* indptr;
 
-static
-{{ a.node_idx_type }}* alloc_adj_csr_indptr(uint64_t num_nodes, H5::H5File &file) {
-{{ alloc_h5_dataset_body(a.node_idx_type, a.indptr_dataset_name, a.node_idx_h5_type, 'num_nodes') }}
-}
-
-struct adj_csr {
-    {{ a.edge_idx_type }}* data;
-    {{ a.node_idx_type }}* indices;
-    {{ a.node_idx_type }}* indptr;
-
-    uint64_t num_nodes;
-    uint64_t num_edges;
-
-    adj_csr(H5::H5File &file):
-    data{nullptr},
-    indices{nullptr},
-    indptr{nullptr},
-    num_nodes{0},
-    num_edges{0} {
-        uint64_t n_nodes = get_num_nodes(file);
-        uint64_t n_edges = get_num_edges(file);
-        
-        data = alloc_adj_csr_data(num_edges, file);
-        indices = alloc_adj_csr_indices(num_nodes, file);
-        indptr = alloc_adj_csr_indptr(num_nodes, file);
-
-        num_nodes = n_nodes;
-        num_edges = n_edges;
+    in_inc_csr(H5::H5File &file, uint64_t num_nodes):
+    indptr{nullptr} {
+        indptr = alloc_in_inc_csr_indptr(num_nodes + 1, file);
     }
 
-    adj_csr() = delete;                           // default constructor
-    adj_csr(const adj_csr &) = delete;            // copy constructor
-    adj_csr(adj_csr &&) = delete;                 // move constructor
-    adj_csr &operator=(const adj_csr &) = delete; // copy assignment
-    adj_csr &operator=(adj_csr &&) = delete;      // move assignment
+    in_inc_csr() = delete;                              // default constructor
+    in_inc_csr(const in_inc_csr &) = delete;            // copy constructor
+    in_inc_csr(in_inc_csr &&) = delete;                 // move constructor
+    in_inc_csr &operator=(const in_inc_csr &) = delete; // copy assignment
+    in_inc_csr &operator=(in_inc_csr &&) = delete;      // move assignment
 
-    ~adj_csr() {
-    std::free(data);
-    std::free(indices);
+    ~in_inc_csr() {
     std::free(indptr);
 
-    data = nullptr;
-    indices = nullptr;
     indptr = nullptr;
-
-    num_nodes = 0;
-    num_edges = 0;
   }
 } ;
 
 {% endmacro %}
 
+{% macro constant_dist(d) %}
+double {{ d.name }}() {
+    return {{ d.v }} ;
+}
+{% endmacro %}
+
+{% macro discrete_dist(d) %}
+{% set comma = joiner(", ") %}
+double {{ d.name }}_PROBS[] = { {% for p in d.probs %}{{ comma() }}{{ p }}{% endfor %} };
+{% set comma = joiner(", ") %}
+int64_t {{ d.name }}_ALIAS[] = { {% for a in d.alias %}{{ comma() }}{{ a }}{% endfor %} };
+{% set comma = joiner(", ") %}
+double {{ d.name }}_VS[] = { {% for v in d.vs %}{{ comma() }}{{ v }}{% endfor %} };
+std::uniform_int_distribution {{ d.name }}_INDEX_DIST { 0, {{ d.probs|length - 1 }} };
+
+double {{ d.name }}() {
+    int64_t i = {{ d.name }}_INDEX_DIST(*RND_STATE);
+    double u = uniform01(*RND_STATE);
+
+    if ({{ d.name }}_PROBS[i] < u) {
+        i = {{ d.name }}_ALIAS[i];
+    }
+
+    return {{ d.name }}_VS[i];
+}
+{% endmacro %}
+
+{% macro normal_dist(d) %}
+std::normal_distribution {{ d.name }}_NORMAL_DIST { {{ d.mean }}, {{ d.std }} };
+
+double {{ d.name }}() {
+    double ret = {{ d.name }}_NORMAL_DIST(*RND_STATE);
+    if (ret > {{ d.max }}) {
+        ret = {{ d.max }};
+    }
+    if (ret < {{ d.min }}) {
+        ret = {{ d.min }};
+    }
+    return ret;
+}
+{% endmacro %}
+
+{% macro uniform_dist(d) %}
+std::uniform_real_distribution {{ d.name }}_UNIFORM_DIST { {{ d.low }}, {{ d.high }} };
+
+double {{ d.name }}() {
+    return {{ d.name }}_UNIFORM_DIST(*RND_STATE);
+}
+{% endmacro %}
+
+{% macro multi_exit_transition(t) %}
+{% set comma = joiner(", ") %}
+double {{ t.name }}_PROBS[] = { {% for p in t.probs %}{{ comma() }}{{ p }}{% endfor %} };
+{% set comma = joiner(", ") %}
+int64_t {{ t.name }}_ALIAS[] = { {% for a in t.alias %}{{ comma() }}{{ a }}{% endfor %} };
+std::uniform_int_distribution {{ t.name }}_INDEX_DIST { 0, {{ t.probs|length - 1 }} };
+
+struct {{ t.name }}_samp {
+    {{ t.state_type }} next_state;
+    double dwell_time;
+
+    {{ t.name }}_samp():
+    next_state{0},
+    dwell_time{0.0}
+    {}
+};
+
+{{ t.name }}_samp {{ t.name }}_sample() {
+    {{ t.name }}_samp ret;
+    int64_t i = {{ t.name }}_INDEX_DIST(*RND_STATE);
+    double u = uniform01(*RND_STATE);
+
+    if ({{ t.name }}_PROBS[i] < u) {
+        i = {{ t.name }}_ALIAS[i];
+    }
+
+    switch (i) {
+    {% for j in range(t.probs|length) %}
+    case {{ j }}:
+        ret.next_state = {{ t.exits[j] }};
+        ret.dwell_time = {{ t.dwell_dists[j] }}();
+        break;
+    {% endfor %}
+    }
+
+    return ret;
+}
+{% endmacro %}
+
+{% macro do_transition(dt) %}
+{% for t in dt.multi %}
+{{ multi_exit_transition(t) }}
+{% endfor %}
+
+void
+{{ dt.name }}_kernel(node_index_t i, node_table *nt, double elapsed) {
+    {{ dt.state_type }} state = nt->{{ dt.state }}[i];
+    {{ dt.state_type }} next_state = nt->{{ dt.next_state }}[i];
+
+    // Nothing has changed
+    if (state == next_state) {
+        return;
+    }
+
+    double dwell_time = nt->{{ dt.dwell_time }}[i];
+    dwell_time -= elapsed;
+    if (dwell_time > 0.0) {
+        nt->{{ dt.dwell_time }}[i] = dwell_time;
+        return;
+    }
+
+    state = next_state;
+    dwell_time = 0.0;
+
+    switch (state) {
+    {% for t in dt.single %}
+    case {{ t.entry }}:
+        next_state = {{ t.exit }};
+        dwell_time = {{ t.dwell_dist }}();
+        break;
+    {% endfor %}
+    {% for t in dt.multi %}
+    case {{ t.entry }}:
+        {{ t.name }}_samp x = {{ t.name }}_sample();
+        next_state = x.next_state;
+        dwell_time = x.dwell_time;
+        break;
+    {% endfor %}
+    }
+
+    nt->{{ dt.state }}[i] = state;
+    nt->{{ dt.next_state }}[i] = next_state;
+    nt->{{ dt.dwell_time }}[i] = dwell_time;
+}
+
+void 
+{{ dt.name }}(double elapsed) {
+    for (node_index_t i = 0; i < NUM_NODES; i++) {
+        {{ dt.name }}_kernel(i, NODE_TABLE, elapsed);
+    }
+}
+
+{% endmacro %}
+
+{% macro do_transmission(dt) %}
+void
+{{ dt.name }}_update_tprob_kernel(edge_index_t i, node_table* nt, edge_table *et) {
+    node_index_t v = et->target_node_idx[i];
+    node_index_t u = et->source_node_idx[i];
+
+    double tprob = {{ dt.enabled }}(edge(et, nt, i));
+    tprob *= {{ dt.susceptibility }}(node(nt, v));
+    tprob *= {{ dt.infectivity }}(node(nt, u));
+    tprob *= {{ dt.transmissibility }}(edge(et, nt, u));
+    if (tprob < 0.0) {
+        tprob = 0.0;
+    }
+    if (tprob > 1.0) {
+        tprob = 1.0;
+    }
+
+    et->{{ dt.tprob }}[i] = tprob;
+}
+
+void
+{{ dt.name }}_transmit_kernel(node_index_t v, node_table* nt, edge_table *et, in_inc_csr *csr) {
+    edge_index_t start = csr->indptr[v];
+    edge_index_t end = csr->indptr[v+1];
+
+    double tprob_sum = 0.0;
+    double tprob = 1.0;
+    for (edge_index_t i = start; i < end; i++) {
+        double p = et->{{ dt.tprob }}[i];
+        tprob_sum += p;
+        tprob *= (1.0 - tprob);
+    }
+    tprob = 1.0 - tprob;
+
+    double prob = uniform01(*RND_STATE);
+    if (prob >= tprob) {
+        nt->{{ dt.tsource }}[v] = NUM_EDGES;
+        return;
+    }
+
+    edge_index_t esel = NUM_EDGES;
+    double esel_weight = uniform01(*RND_STATE) * tprob_sum;
+    tprob_sum = 0.0;
+    for (edge_index_t i = start; i < end; i++) {
+        double p = et->{{ dt.tprob }}[i];
+        tprob_sum += p;
+        if (tprob_sum >= esel_weight) {
+            esel = i;
+            break;
+        }
+    }
+    assert(esel != NUM_EDGES);
+    nt->{{ dt.tsource }}[v] = esel;
+
+    node_index_t u = et->source_node_idx[esel];
+    {{ dt.state_type }} t_state = nt->{{ dt.state }}[v];
+    {{ dt.state_type }} u_state = nt->{{ dt.state }}[u];
+
+    switch (t_state) {
+    {% for entry, cxs in dt.transms %}
+    case {{ entry }}:
+            switch (u_state) {
+            {% for contact, exit in cxs %}
+            case {{ contact }}:
+                nt->{{ dt.state }}[v] = {{ exit }};
+                break;
+            {% endfor %}
+            }
+        break;
+    {% endfor %}
+    }
+}
+
+void
+{{ dt.name }}() {
+    for (edge_index_t i = 0; i < NUM_EDGES; i++) {
+        {{ dt.name}}_update_tprob_kernel(i, NODE_TABLE, EDGE_TABLE);
+    }
+
+    for (node_index_t v = 0; v < NUM_NODES; v++) {
+        {{ dt.name}}_transmit_kernel(v, NODE_TABLE, EDGE_TABLE, IN_INC_CSR);
+    }
+}
+{% endmacro %}
+
 {% macro function_params(params) %}
-{% for name, type in params %}{{ type }} {{ name }}{{ "," if not loop.last else ""}}{% endfor %}
+{% set comma = joiner(", ") %}
+{% for name, type in params %}{{ comma() }}{{ type }} {{ name }}{% endfor %}
 {% endmacro %}
 
 {% macro function_decl(f) %}
-static {{ f.return_ }} {{ f.name}}({{ function_params(f.params) }});
+{{ f.return_ }} {{ f.name}}({{ function_params(f.params) }});
 {% endmacro %}
 
 {% macro function_def(f) %}
 {{ f.line }}
-static {{ f.return_ }} {{ f.name}}({{ function_params(f.params) }}) {
+{{ f.return_ }} {{ f.name}}({{ function_params(f.params) }}) {
 {% for name, type in f.variables %}
-{{ type }} {{ name }};
+    {{ type }} {{ name }};
 {% endfor %}
 
 {{ f.body }}
@@ -274,6 +476,7 @@ static {{ f.return_ }} {{ f.name}}({{ function_params(f.params) }}) {
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <random>
 #include <H5Cpp.h>
 
 typedef {{ s.node_idx_type }} node_index_t;
@@ -295,21 +498,95 @@ typedef {{ s.edge_idx_type }} edge_index_t;
 
 {{ edge_table(s.edge_table) }}
 
-{{ adj_csr(s.adj_csr) }}
+{{ in_inc_csr(s.in_inc_csr) }}
+
+std::mt19937* RND_STATE = nullptr;
+std::uniform_real_distribution uniform01 { 0.0, 1.0 };
+
+node_table *NODE_TABLE = nullptr;
+edge_table *EDGE_TABLE = nullptr;
+in_inc_csr *IN_INC_CSR = nullptr;
+node_index_t NUM_NODES = 0;
+edge_index_t NUM_EDGES = 0;
+
+{% for d in s.constant_dists %}
+{{ constant_dist(d) }}
+{% endfor %}
+
+{% for d in s.discrete_dists %}
+{{ discrete_dist(d) }}
+{% endfor %}
+
+{% for d in s.uniform_dists %}
+{{ uniform_dist(d) }}
+{% endfor %}
+
+{% for d in s.normal_dists %}
+{{ normal_dist(d) }}
+{% endfor %}
 
 {% for f in s.functions %}
 {{ function_decl(f) }}
 {% endfor %}
+
+{% for dt in s.do_transitions %}
+{{ do_transition(dt) }}
+{% endfor %}
+
+{% for dt in s.do_transmissions %}
+{{ do_transmission(dt) }}
+{% endfor %}
+
 
 {% for f in s.functions %}
 {{ function_def(f) }}
 {% endfor %}
 
 int main() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    RND_STATE = &gen;
+
+    {% for c in s.configs %}
+    {
+        const char *p = std::getenv("{{ c.env_var }}");
+        if (p) {
+            {{ c.name }} = {{ c.from_str_fn }}(p);
+        }
+        std::cout << "{{ c.print_name }} = " << std::to_string({{ c.name }}) << std::endl;
+    }
+    {% endfor %}
+
+    const char *data_file_name = "data.h5";
+    {
+        const char *p = std::getenv("DATA_FILE");
+        if (p) {
+            data_file_name = p;
+        }
+        std::cout << "data_file = " << data_file_name << std::endl;
+    }
+
+    H5::H5File data_file(data_file_name, H5F_ACC_RDONLY);
+
+    NUM_NODES = get_num_nodes(data_file);
+    std::cout << "# Nodes: " << NUM_NODES << std::endl;
+    
+    NUM_EDGES = get_num_edges(data_file);
+    std::cout << "# Edges: " << NUM_EDGES << std::endl;
+    
+    node_table nt(data_file, NUM_NODES);
+    NODE_TABLE = &nt;
+    
+    edge_table et(data_file, NUM_EDGES);
+    EDGE_TABLE = &et;
+
+    in_inc_csr csr(data_file, NUM_NODES);
+    IN_INC_CSR = &csr;
+
+    do_main();
     return 0;
 }
 {% endmacro %}
-
 
 {% macro cmake_lists(s) %}
 cmake_minimum_required(VERSION 3.27)

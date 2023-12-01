@@ -631,7 +631,9 @@ class Contagion:
     infectivity: Function
     transmissibility: Function
     enabled: Function
-    node_fields: list[NodeField]
+    state: NodeField
+    next_state: NodeField
+    dwell_time: NodeField
     do_transmission: BuiltinFunction
     do_transition: BuiltinFunction
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
@@ -728,25 +730,26 @@ class Contagion:
             node.pos,
         )
 
-        node_fields = [
-            NodeField(
+        state = NodeField(
                 "state",
                 TypeRef(state_type.get().type, scope),
                 False,
                 False,
                 None,
-            ),
-            NodeField(
+            )
+        scope.define(state.name, state, state.pos)
+
+        next_state = NodeField(
                 "next_state",
                 TypeRef(state_type.get().type, scope),
                 False,
                 False,
                 None,
-            ),
-            NodeField("dwell_time", TypeRef("float", scope), False, False, None),
-        ]
-        for field in node_fields:
-            scope.define(field.name, field, field.pos)
+            )
+        scope.define(next_state.name, next_state, next_state.pos)
+
+        dwell_time = NodeField("dwell_time", TypeRef("float", scope), False, False, None)
+        scope.define(dwell_time.name, dwell_time, dwell_time.pos)
 
         do_transmission = BuiltinFunction("do_transmission", [], None)
         do_transition = BuiltinFunction(
@@ -756,19 +759,21 @@ class Contagion:
         scope.define("do_transition", do_transition, None)
 
         obj = cls(
-            name,
-            state_type.get(),
-            transitions,
-            transmissions,
-            susceptibility.get(),
-            infectivity.get(),
-            transmissibility.get(),
-            enabled.get(),
-            node_fields,
-            do_transmission,
-            do_transition,
-            scope,
-            node.pos,
+            name=name,
+            state_type=state_type.get(),
+            transitions=transitions,
+            transmissions=transmissions,
+            susceptibility=susceptibility.get(),
+            infectivity=infectivity.get(),
+            transmissibility=transmissibility.get(),
+            enabled=enabled.get(),
+            state=state,
+            next_state=next_state,
+            dwell_time=dwell_time,
+            do_transmission=do_transmission,
+            do_transition=do_transition,
+            scope=scope,
+            pos=node.pos,
         )
         parent_scope.define(name, obj, node.pos)
         return obj

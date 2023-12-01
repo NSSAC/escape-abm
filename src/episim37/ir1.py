@@ -122,6 +122,18 @@ def hdf5_type(t: str) -> str:
     return type_map[t]
 
 
+def cstr_to_ctype_fn(t: str) -> str:
+    match t:
+        case ("int8_t" | "int16_t" | "int32_t" | "int64_t"):
+            return "std::stol"
+        case ("uint8_t" | "uint16_t" | "uint32_t" | "uint64_t"):
+            return "std::stoul"
+        case ("float" | "double"):
+            return "std::stod"
+        case _ as unexpected:
+            raise ValueError(unexpected)
+
+
 def make_line(pos: SourcePosition | None) -> str:
     if pos is None:
         return ""
@@ -157,6 +169,10 @@ def h5_typename(t: ast1.EnumType | ast1.BuiltinType) -> str:
             return hdf5_type(enum_base_type(t))
         case _ as unexpected:
             assert_never(unexpected)
+
+
+def internal_field(c: ast1.Contagion, name: str) -> str:
+    return mangle(c.name) + "_" + name
 
 
 def ref(x: ast1.Referable) -> str:
@@ -263,6 +279,9 @@ class EnumType:
 class Config:
     name: str
     type: str
+    from_str_fn: str
+    env_var: str
+    print_name: str
     default: str
     line: str
 
@@ -270,9 +289,11 @@ class Config:
     def make(cls, c: ast1.Config) -> Config:
         name = ref(c)
         type = typename(c.type.resolve())
+        from_str_fn = cstr_to_ctype_fn(type)
+        env_var = c.name.upper()
         default = expression_str(c.default)
         line = make_line(c.pos)
-        return cls(name, type, default, line)
+        return cls(name, type, from_str_fn, env_var, c.name, default, line)
 
 
 @attrs.define
@@ -302,13 +323,19 @@ class Field:
 
 
 @attrs.define
-class Table:
-    name: str
+class StaticField:
+    dataset_name: str
+    type: str
+    h5_type: str
+
+
+@attrs.define
+class NodeTable:
     fields: list[Field]
     line: str
 
     @classmethod
-    def from_node_table(cls, tab: ast1.NodeTable) -> Table:
+    def make(cls, tab: ast1.NodeTable, edge_idx_type: str) -> NodeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
@@ -320,7 +347,7 @@ class Table:
             fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         for contagion in tab.contagions:
-            for field in contagion.node_fields:
+            for field in [contagion.state, contagion.next_state, contagion.dwell_time]:
                 name = mangle([contagion.name, field.name])
                 dataset_name = f"/node/{contagion.name}/{field.name}"
                 type = typename(field.type.resolve())
@@ -329,12 +356,28 @@ class Table:
                 line = make_line(field.pos)
                 fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
-        name = "node"
+        for c in tab.contagions:
+            name = internal_field(c, "transmission_source")
+            dataset_name = f"/node/{name}"
+            type = edge_idx_type
+            h5_type = hdf5_type(edge_idx_type)
+            is_static = False
+            line = make_line(None)
+            fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
+
         line = make_line(tab.pos)
-        return cls(name, fields, line)
+        return cls(fields, line)
+
+
+@attrs.define
+class EdgeTable:
+    fields: list[Field]
+    target_node_idx: StaticField
+    source_node_idx: StaticField
+    line: str
 
     @classmethod
-    def from_edge_table(cls, tab: ast1.EdgeTable, node_idx_type: str) -> Table:
+    def make(cls, tab: ast1.EdgeTable, node_idx_type: str) -> EdgeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
@@ -345,52 +388,42 @@ class Table:
             line = make_line(field.pos)
             fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
-        fields.extend(
-            [
-                Field(
-                    name="target_node_idx",
-                    dataset_name="/edge/_target_node_idx",
-                    type=node_idx_type,
-                    h5_type=hdf5_type(node_idx_type),
-                    is_static=True,
-                    line="",
-                ),
-                Field(
-                    name="source_node_idx",
-                    dataset_name="/edge/_source_node_idx",
-                    type=node_idx_type,
-                    h5_type=hdf5_type(node_idx_type),
-                    is_static=True,
-                    line="",
-                ),
-            ]
+        for c in tab.contagions:
+            name = internal_field(c, "transmission_prob")
+            dataset_name = f"/edge/{name}"
+            type = "double"
+            h5_type = hdf5_type("double")
+            is_static = False
+            line = make_line(None)
+            fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
+
+        target_node_idx = StaticField(
+            dataset_name="/edge/_target_node_idx",
+            type=node_idx_type,
+            h5_type=hdf5_type(node_idx_type),
+        )
+        source_node_idx = StaticField(
+            dataset_name="/edge/_source_node_idx",
+            type=node_idx_type,
+            h5_type=hdf5_type(node_idx_type),
         )
 
-        name = "edge"
         line = make_line(tab.pos)
-        return cls(name, fields, line)
+        return cls(fields, target_node_idx, source_node_idx, line)
 
 
 @attrs.define
-class CsrAdjMatrix:
-    node_idx_type: str
-    edge_idx_type: str
-    node_idx_h5_type: str
-    edge_idx_h5_type: str
-    data_dataset_name: str
-    indices_dataset_name: str
-    indptr_dataset_name: str
+class CsrIncMatrix:
+    indptr: StaticField
 
     @classmethod
-    def make(cls, node_idx_type: str, edge_idx_type: str) -> CsrAdjMatrix:
+    def make(cls, edge_idx_type: str) -> CsrIncMatrix:
         return cls(
-            node_idx_type,
-            edge_idx_type,
-            hdf5_type(node_idx_type),
-            hdf5_type(edge_idx_type),
-            "/adj/csr/data",
-            "/adj/csr/indices",
-            "/adj/csr/indptr",
+            indptr=StaticField(
+                "/incoming/incidence/csr/indptr",
+                edge_idx_type,
+                hdf5_type(edge_idx_type),
+            ),
         )
 
 
@@ -482,6 +515,8 @@ class SingleEdgeTransition:
 
 @attrs.define
 class MultiEdgeTransition:
+    name: str
+    state_type: str
     entry: str
     probs: list[str]
     alias: list[str]
@@ -489,8 +524,11 @@ class MultiEdgeTransition:
     dwell_dists: list[str]
 
     @classmethod
-    def make(cls, ts: list[ast1.Transition]) -> MultiEdgeTransition:
+    def make(
+        cls, parent_name: str, state_type: str, ts: list[ast1.Transition]
+    ) -> MultiEdgeTransition:
         entry = ref(ts[0].entry.resolve())
+        name = parent_name + f"_{entry}"
 
         ps = [t.p for t in ts]
         table = AliasTable.make(ps)
@@ -499,13 +537,16 @@ class MultiEdgeTransition:
 
         exits = [ref(t.exit.resolve()) for t in ts]
         dwell_dists = [mangle(t.dwell.resolve().name) for t in ts]
-        return cls(entry, probs, alias, exits, dwell_dists)
+        return cls(name, state_type, entry, probs, alias, exits, dwell_dists)
 
 
 @attrs.define
 class DoTransition:
     name: str
-    type: str
+    state_type: str
+    state: str
+    next_state: str
+    dwell_time: str
     single: list[tuple[str, SingleEdgeTransition]]  # entry -> transition
     multi: list[tuple[str, MultiEdgeTransition]]  # entry -> transition
     notrans: list[str]  # entry
@@ -513,7 +554,7 @@ class DoTransition:
     @classmethod
     def make(cls, c: ast1.Contagion) -> DoTransition:
         name = ref((c, c.do_transition))
-        type = typename(c.state_type.resolve())
+        state_type = typename(c.state_type.resolve())
 
         entry_transi = defaultdict(list)
         for transi in c.transitions:
@@ -525,7 +566,7 @@ class DoTransition:
             if len(vs) == 1:
                 single.append(SingleEdgeTransition.make(vs[0]))
             else:
-                multi.append(MultiEdgeTransition.make(vs))
+                multi.append(MultiEdgeTransition.make(name, state_type, vs))
 
         notrans = []
         for const in c.state_type.resolve().consts:
@@ -533,13 +574,21 @@ class DoTransition:
             if const not in entry_transi:
                 notrans.append(const)
 
-        return cls(name, type, single, multi, notrans)
+        state = mangle([c.name, c.state.name])
+        next_state = mangle([c.name, c.next_state.name])
+        dwell_time = mangle([c.name, c.dwell_time.name])
+        return cls(
+            name, state_type, state, next_state, dwell_time, single, multi, notrans
+        )
 
 
 @attrs.define
 class DoTransmission:
     name: str
-    type: str
+    state_type: str
+    state: str
+    tprob: str
+    tsource: str
     transms: list[tuple[str, list[tuple[str, str]]]]  # entry -> [contact, exit]
     susceptibility: str
     infectivity: str
@@ -549,7 +598,7 @@ class DoTransmission:
     @classmethod
     def make(cls, c: ast1.Contagion):
         name = ref((c, c.do_transmission))
-        type = typename(c.state_type.resolve())
+        state_type = typename(c.state_type.resolve())
 
         transms = defaultdict(list)
         for t in c.transmissions:
@@ -564,8 +613,18 @@ class DoTransmission:
         transmissibility = ref((c, c.transmissibility))
         enabled = ref((c, c.enabled))
 
+        state = mangle([c.name, c.state.name])
         return cls(
-            name, type, transms, susceptibility, infectivity, transmissibility, enabled
+            name,
+            state_type,
+            state,
+            internal_field(c, "transmission_prob"),
+            internal_field(c, "transmission_source"),
+            transms,
+            susceptibility,
+            infectivity,
+            transmissibility,
+            enabled,
         )
 
 
@@ -699,7 +758,9 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
                 if isinstance(arg, str):
                     args.append(arg)
                 else:
-                    args.append(expression_str(arg))
+                    arg = expression_str(arg)
+                    arg = f"std::to_string({arg})"
+                    args.append(arg)
             args = f" << {s.sep} << ".join(args)
             line = "std::cout << " + args + f" << {s.end} << std::flush;"
             lines.append(line)
@@ -757,9 +818,9 @@ class Source:
     enums: list[EnumType]
     configs: list[Config]
     variables: list[Variable]
-    node_table: Table
-    edge_table: Table
-    adj_csr: CsrAdjMatrix
+    node_table: NodeTable
+    edge_table: EdgeTable
+    in_inc_csr: CsrIncMatrix
     constant_dists: list[ConstantDist]
     discrete_dists: list[DiscreteDist]
     uniform_dists: list[UniformDist]
@@ -776,9 +837,9 @@ class Source:
         enums = [EnumType.make(e) for e in x.enums]
         configs = [Config.make(c) for c in x.configs]
         variables = [Variable.make(v) for v in x.variables]
-        node_table = Table.from_node_table(x.node_table)
-        edge_table = Table.from_edge_table(x.edge_table, node_idx_type)
-        adj_csr = CsrAdjMatrix.make(node_idx_type, edge_idx_type)
+        node_table = NodeTable.make(x.node_table, edge_idx_type)
+        edge_table = EdgeTable.make(x.edge_table, node_idx_type)
+        in_inc_csr = CsrIncMatrix.make(edge_idx_type)
 
         constant_dists: list[ConstantDist] = []
         discrete_dists: list[DiscreteDist] = []
@@ -827,7 +888,7 @@ class Source:
             variables=variables,
             node_table=node_table,
             edge_table=edge_table,
-            adj_csr=adj_csr,
+            in_inc_csr=in_inc_csr,
             constant_dists=constant_dists,
             discrete_dists=discrete_dists,
             uniform_dists=uniform_dists,
