@@ -7,11 +7,16 @@ config enable_day_30_pcr_test: bool = True
 config num_ticks: int = 10
 var cur_tick: int = 0
 
+enum race_t
+    asian, ameican
+end
+
 node
     pid: int node key static
     is_in_school: bool static
     home_isolation_start: int
     home_isolation_end: int
+    race: race_t
 end
 
 edge
@@ -128,50 +133,81 @@ def is_school_day() -> bool:
     end
 end
 
+def is_susceptible(n: node) -> bool:
+    return n.c1.state == S
+end
+
+def is_positive_inschool_node(n: node) -> bool:
+    return (
+        (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
+        and n.is_in_school
+        and not is_isolating(n)
+    )
+end
+
+def set_seed(n: node):
+    n.c1.state = E
+end
+
+def start_isolation_a(n: node):
+    n.home_isolation_start = cur_tick+1
+    n.home_isolation_end = cur_tick+15
+end
+
+def start_isolation_b(n: node):
+    n.home_isolation_start = cur_tick+2
+    n.home_isolation_end = cur_tick+16
+end
+
+def get_node_state(n: node) -> c1_state_t:
+    return n.c1.state
+end
+
+# output
+    # node reduction mean_age using get_node_age
+    # node histogram state_count c1_state_t
+    # node histogram state_age_count range [0, 100]
+# end
+
 def main():
-    #print("len(nodes)=", len(ALL_NODES))
-    #print("len(edges)=", len(ALL_EDGES))
+    nodeset susceptibles
+    nodeset seed_nodes
+    nodeset positive_inschool_nodes
+    nodeset will_start_isolation
+
+    # setup_output(num_ticks)
 
     while cur_tick < num_ticks:
         cur_tick += 1
         print("cur_tick = ", cur_tick)
 
-        # c1.do_transmission()
-        # c1.do_transition(1.0)
+        c1.do_transmission()
+        c1.do_transition(1.0)
 
-        # seed nodes
-        # if tick < 10:
-        #     susceptibles : nodeset = { n : n.c1.state == S }
-        #     seed_nodes : nodeset = sample approx 5 from susceptible
-        #     foreach n in seed_nodes:
-        #         n.c1.state = E
-        #     end
-        # end
+        if cur_tick < 10:
+            # select susceptibles using is_susceptible
+            # select seed_nodes sample approx 5 from susceptible
+            # foreach node in seed_nodes run set_seed
+            pass
+        end
 
-        # if (enable_day_30_antigen_test or enable_day_30_pcr_test) and tick >= 30:
-        #     positive_inschool_nodes : nodeset = { n :
-        #         (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
-        #         and
-        #         n.is_in_school
-        #         and
-        #         not is_isolating(n)
-        #     }
-        # end
+        if (enable_day_30_antigen_test or enable_day_30_pcr_test) and cur_tick >= 30:
+            # select positive_inschool_nodes using is_positive_inschool_node
+            pass
+        end
 
-        # if enable_day_30_antigen_test and tick >= 30:
-        #     will_start_isolation : nodeset = sample relative 0.8 from positive_inschool_nodes
-        #     foreach n in will_start_isolation_antigen:
-        #         n.home_isolation_start = tick+1
-        #         n.home_isolation_end = tick+15
-        #     end
-        # end
+        if enable_day_30_antigen_test and cur_tick >= 30:
+            # select will_start_isolation sample relative 0.8 from positive_inschool_nodes
+            # foreach node in will_start_isolation run start_isolation_a
+            pass
+        end
 
-        # if enable_day_30_pcr_test and tick >= 30:
-        #     will_start_isolation : nodeset = sample relative 0.95 from positive_inschool_nodes
-        #     foreach n in will_start_isolation_antigen:
-        #         n.home_isolation_start = tick+2
-        #         n.home_isolation_end = tick+16
-        #     end
-        # end
+        if enable_day_30_pcr_test and cur_tick >= 30:
+            # select will_start_isolation sample relative 0.95 from positive_inschool_nodes
+            # foreach node in will_start_isolation run start_isolation_b
+            pass
+        end
+
+        # save mean_age(cur_tick)
     end
 end

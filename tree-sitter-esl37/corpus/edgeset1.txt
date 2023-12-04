@@ -1,0 +1,40 @@
+=========
+Edgeset 1
+=========
+
+__test statement:
+    edgeset seed_edges
+    update seed_edges = { e : uniform() < 0.1 }
+    foreach e in seed_edges:
+        e.active = True
+    end
+end
+
+---
+
+(source_file
+    (test_statement
+        (edgeset (identifier))
+        (update_set
+            (identifier)
+            (filter_expression
+                (identifier)
+                (binary_expression
+                    (function_call
+                        (reference (identifier))
+                    )
+                    (float)
+                )
+            )
+        )
+        (foreach_loop
+            (identifier)
+            (identifier)
+            (update_statement
+                (reference (identifier) (identifier))
+                (boolean)
+            )
+        )
+    )
+)
+

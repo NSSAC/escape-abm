@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypeVar, Generic
+from typing import Any, TypeVar, Generic, Literal, cast
 
 import attrs
 import click
@@ -289,6 +289,29 @@ class Variable:
         init = parse_expression(node.field("init"), scope)
         obj = cls(var, type, init, None, node.pos)
         scope.define(var, obj, node.pos)
+        return obj
+
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
+        match self.type:
+            case TypeRef("node"):
+                self.scope = node_table.scope
+            case TypeRef("edge"):
+                self.scope = edge_table.scope
+
+
+@attrs.define
+class Param:
+    name: str
+    type: TypeRef
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Param:
+        name = node.field("name").text
+        type = TypeRef.make(node.field("type"), scope)
+        obj = cls(name, type, None, node.pos)
+        scope.define(name, obj, node.pos)
         return obj
 
     def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
@@ -731,24 +754,26 @@ class Contagion:
         )
 
         state = NodeField(
-                "state",
-                TypeRef(state_type.get().type, scope),
-                False,
-                False,
-                None,
-            )
+            "state",
+            TypeRef(state_type.get().type, scope),
+            False,
+            False,
+            None,
+        )
         scope.define(state.name, state, state.pos)
 
         next_state = NodeField(
-                "next_state",
-                TypeRef(state_type.get().type, scope),
-                False,
-                False,
-                None,
-            )
+            "next_state",
+            TypeRef(state_type.get().type, scope),
+            False,
+            False,
+            None,
+        )
         scope.define(next_state.name, next_state, next_state.pos)
 
-        dwell_time = NodeField("dwell_time", TypeRef("float", scope), False, False, None)
+        dwell_time = NodeField(
+            "dwell_time", TypeRef("float", scope), False, False, None
+        )
         scope.define(dwell_time.name, dwell_time, dwell_time.pos)
 
         do_transmission = BuiltinFunction("do_transmission", [], None)
@@ -973,26 +998,139 @@ class PrintStatement:
 
 
 @attrs.define
-class Param:
+class FilterExpression:
+    var: str
+    condition: Expression
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> FilterExpression:
+        var = node.field("var").text
+        condition = parse_expression(node.field("condition"), scope)
+        return cls(var, condition)
+
+
+SampleType = Literal["appprox", "relative"]
+
+
+@attrs.define
+class SampleExpression:
+    type: SampleType
+    amount: int | float
+    parent: SetRef
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> SampleExpression:
+        type = node.field("type").text
+        type = cast(SampleType, type)
+        amount = make_literal(node.field("amount"), int | float)
+        parent = SetRef.make(node.field("parent"), scope)
+        return cls(type, amount, parent)
+
+
+@attrs.define
+class SetRef:
     name: str
-    type: TypeRef
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Param:
+    def make(cls, node: PTNode, scope: Scope) -> SetRef:
+        return cls(node.text, scope, node.pos)
+
+    def resolve(self) -> NodeSet | EdgeSet:
+        assert self.scope is not None
+
+        v = self.scope.resolve(self.name, self.pos)
+        if isinstance(v, NodeSet | EdgeSet):
+            return v
+
+        raise Error(
+            "Invalid value",
+            "Expected a reference to a nodeset or edgeset",
+            self.pos,
+        )
+
+
+@attrs.define
+class NodeSet:
+    name: str
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> NodeSet:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
-        obj = cls(name, type, None, node.pos)
+        obj = cls(name, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
-    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
-        match self.type:
-            case TypeRef("node"):
-                self.scope = node_table.scope
-            case TypeRef("edge"):
-                self.scope = edge_table.scope
+
+@attrs.define
+class EdgeSet:
+    name: str
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> EdgeSet:
+        name = node.field("name").text
+        obj = cls(name, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
+
+
+@attrs.define
+class UpdateSet:
+    set: SetRef
+    expression: FilterExpression | SampleExpression
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> UpdateSet:
+        set = SetRef.make(node.field("name"), scope)
+        init = node.field("expression")
+        match init.type:
+            case "filter_expression":
+                init = FilterExpression.make(init, scope)
+            case "sample_expression":
+                init = SampleExpression.make(init, scope)
+            case _ as unexpected:
+                raise UnexpectedValue(unexpected, init.pos)
+
+        obj = cls(set, init, node.pos)
+        return obj
+
+
+@attrs.define
+class ForeachLoop:
+    var: Param
+    set: SetRef
+    body: list[Statement]
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, parent_scope: Scope) -> ForeachLoop:
+        name = f"foreach_{node.pos.line}"
+        scope = Scope(name=name, parent=parent_scope)
+
+        var = node.field("var")
+        var = Param(var.text, TypeRef("unknown", scope), pos=var.pos)
+        set = SetRef.make(node.field("set"), scope)
+        body = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child, scope))
+
+        obj = cls(var, set, body, scope, node.pos)
+        parent_scope.define(name, obj, node.pos)
+        return obj
+
+    def fix_var_type(self):
+        match self.set.resolve():
+            case NodeSet():
+                self.var.type.type = "node"
+            case EdgeSet():
+                self.var.type.type = "edge"
+            case _ as unexpected:
+                raise ValueError(unexpected)
 
 
 @attrs.define
@@ -1000,8 +1138,10 @@ class Function:
     name: str
     params: list[Param]
     variables: list[Variable]
+    nodesets: list[NodeSet]
+    edgesets: list[EdgeSet]
     return_: TypeRef | None
-    body: list[Variable | Statement]
+    body: list[Statement]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -1020,17 +1160,25 @@ class Function:
         else:
             return_ = TypeRef.make(return_node, scope)
 
-        variables = []
         body = []
         for child in node.field("body").named_children:
-            if child.type == "variable":
-                var = Variable.make(child, scope)
-                variables.append(var)
-                body.append(var)
-            else:
-                body.append(parse_statement(child, scope))
+            body.append(parse_statement(child, scope))
 
-        obj = cls(name, params, variables, return_, body, scope, node.pos)
+        variables = []
+        nodesets = []
+        edgesets = []
+        for s in scope.names.values():
+            match s:
+                case Variable():
+                    variables.append(s)
+                case NodeSet():
+                    nodesets.append(s)
+                case EdgeSet():
+                    edgesets.append(s)
+
+        obj = cls(
+            name, params, variables, nodesets, edgesets, return_, body, scope, node.pos
+        )
         parent_scope.define(name, obj, node.pos)
         return obj
 
@@ -1040,112 +1188,151 @@ class Function:
         for var in self.variables:
             var.link_tables(node_table, edge_table)
 
+    def fix_foreach_var_type(self):
+        assert self.scope is not None
+
+        for s in self.scope.names.values():
+            match s:
+                case ForeachLoop():
+                    s.fix_var_type()
+
+
+def is_node_func(f: Function) -> bool:
+    match f.params:
+        case [Param(_, TypeRef("node"))]:
+            return True
+        case _:
+            return False
+
+
+def is_edge_func(f: Function) -> bool:
+    match f.params:
+        case [Param(_, TypeRef("edge"))]:
+            return True
+        case _:
+            return False
+
+
+def is_int_func(f: Function) -> bool:
+    match f.return_:
+        case TypeRef("int"):
+            return True
+        case _:
+            return False
+
+
+def is_float_func(f: Function) -> bool:
+    match f.return_:
+        case TypeRef("float"):
+            return True
+        case _:
+            return False
+
+
+def is_bool_func(f: Function) -> bool:
+    match f.return_:
+        case TypeRef("bool"):
+            return True
+        case _:
+            return False
+
+
+def is_void_func(f: Function) -> bool:
+    return f.return_ is None
+
+
+def is_kernel_func(f: Function) -> bool:
+    match f.params:
+        case [Param(_, TypeRef("node"))]:
+            return True
+        case [Param(_, TypeRef("edge"))]:
+            return True
+        case _:
+            return False
+
+
+def is_filter_func(f: Function) -> bool:
+    return is_kernel_func(f) and is_bool_func(f)
+
+
+def is_kernel_proc(f: Function) -> bool:
+    return is_kernel_func(f) and is_void_func(f)
+
 
 def make_main(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    match f.params:
-        case []:
-            pass
-        case _:
-            raise Error("Bad main", "Main function must not have any parameters", f.pos)
-    match f.return_:
-        case None:
-            pass
-        case _:
-            raise Error("Bad main", "Main function must not have a return type", f.pos)
+    if f.params:
+        raise Error("Bad main", "Main function must not have any parameters", f.pos)
+    if f.return_ is not None:
+        raise Error("Bad main", "Main function must not have a return type", f.pos)
     return f
 
 
 def make_susceptibility(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    match f.params:
-        case [Param(_, TypeRef("node"))]:
-            pass
-        case _:
-            raise Error(
-                "Bad susceptibility",
-                "Susceptibility function must have one parameter of type `node'",
-                f.pos,
-            )
-    match f.return_:
-        case TypeRef("float"):
-            pass
-        case _:
-            raise Error(
-                "Bad susceptibility",
-                "Susceptibility function must have a return type `float'",
-                f.pos,
-            )
+    if not is_node_func(f):
+        raise Error(
+            "Bad susceptibility",
+            "Susceptibility function must have one parameter of type `node'",
+            f.pos,
+        )
+    if not is_float_func(f):
+        raise Error(
+            "Bad susceptibility",
+            "Susceptibility function must have a return type `float'",
+            f.pos,
+        )
     return f
 
 
 def make_infectivity(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    match f.params:
-        case [Param(_, TypeRef("node"))]:
-            pass
-        case _:
-            raise Error(
-                "Bad infectivity",
-                "Infectivity function must have one parameter of type `node'",
-                f.pos,
-            )
-
-    match f.return_:
-        case TypeRef("float"):
-            pass
-        case _:
-            raise Error(
-                "Bad infectivity",
-                "Infectivity function must have a return type `float'",
-                f.pos,
-            )
+    if not is_node_func(f):
+        raise Error(
+            "Bad infectivity",
+            "Infectivity function must have one parameter of type `node'",
+            f.pos,
+        )
+    if not is_float_func(f):
+        raise Error(
+            "Bad infectivity",
+            "Infectivity function must have a return type `float'",
+            f.pos,
+        )
     return f
 
 
 def make_transmissibility(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    match f.params:
-        case [Param(_, TypeRef("edge"))]:
-            pass
-        case _:
-            raise Error(
-                "Bad transmissibility",
-                "Transmissibility function must have one parameter of type `edge'",
-                f.pos,
-            )
-    match f.return_:
-        case TypeRef("float"):
-            pass
-        case _:
-            raise Error(
-                "Bad transmissibility",
-                "Transmissibility function must have a return type `float'",
-                f.pos,
-            )
+    if not is_edge_func(f):
+        raise Error(
+            "Bad transmissibility",
+            "Transmissibility function must have one parameter of type `edge'",
+            f.pos,
+        )
+    if not is_float_func(f):
+        raise Error(
+            "Bad transmissibility",
+            "Transmissibility function must have a return type `float'",
+            f.pos,
+        )
     return f
 
 
 def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    match f.params:
-        case [Param(_, TypeRef("edge"))]:
-            pass
-        case _:
-            raise Error(
-                "Bad enabled (edge)",
-                "Enabled (edge) function must have one parameter of type `edge'",
-                f.pos,
-            )
-    match f.return_:
-        case TypeRef("bool"):
-            pass
-        case _:
-            raise Error(
-                "Bad enabled (edge)",
-                "Enabled (edge) function must have a return type `bool'",
-                f.pos,
-            )
+    if not is_edge_func(f):
+        raise Error(
+            "Bad enabled (edge)",
+            "Enabled (edge) function must have one parameter of type `edge'",
+            f.pos,
+        )
+    if not is_bool_func(f):
+        raise Error(
+            "Bad enabled (edge)",
+            "Enabled (edge) function must have a return type `bool'",
+            f.pos,
+        )
     return f
 
 
@@ -1246,15 +1433,17 @@ class Source:
         node_table.get().link_contagions(contagions)
         edge_table.get().link_contagions(contagions)
         edge_table.get().link_node_table(node_table.get())
-        
+
         for func in functions:
             func.link_tables(node_table.get(), edge_table.get())
+            func.fix_foreach_var_type()
         for contagion in contagions:
             contagion.susceptibility.link_tables(node_table.get(), edge_table.get())
             contagion.infectivity.link_tables(node_table.get(), edge_table.get())
             contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
             contagion.enabled.link_tables(node_table.get(), edge_table.get())
         main_function.get().link_tables(node_table.get(), edge_table.get())
+        main_function.get().fix_foreach_var_type()
 
         return cls(
             module=module,
@@ -1306,7 +1495,7 @@ def parse_expression(node: PTNode, scope: Scope) -> Expression:
             raise UnexpectedValue(unexpected, node.pos)
 
 
-Statement = (
+HostStatement = (
     PassStatement
     | ReturnStatement
     | IfStatement
@@ -1314,10 +1503,16 @@ Statement = (
     | CallStatement
     | UpdateStatement
     | PrintStatement
+    | Variable
+    | NodeSet
+    | EdgeSet
 )
 
+DeviceStatement = UpdateSet | ForeachLoop
 
-StatementParts = Statement | ElseSection | ElifSection | Variable
+Statement = HostStatement | DeviceStatement
+
+StatementParts = Statement | ElseSection | ElifSection
 
 
 def parse_statement(node: PTNode, scope: Scope) -> Statement:
@@ -1336,6 +1531,16 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
             return UpdateStatement.make(node, scope)
         case "print_statement":
             return PrintStatement.make(node, scope)
+        case "variable":
+            return Variable.make(node, scope)
+        case "nodeset":
+            return NodeSet.make(node, scope)
+        case "edgeset":
+            return EdgeSet.make(node, scope)
+        case "update_set":
+            return UpdateSet.make(node, scope)
+        case "foreach_loop":
+            return ForeachLoop.make(node, scope)
         case unexpected:
             raise UnexpectedValue(unexpected, node.pos)
 
@@ -1384,7 +1589,9 @@ def resolve_ref(r: Reference) -> Referable:
     try:
         ret = check_type(ret, Referable)
     except Exception as e:
-        raise Error("Invalid reference", f"'{r_str}' is not a valid reference; ({e})", r.pos)
+        raise Error(
+            "Invalid reference", f"'{r_str}' is not a valid reference; ({e})", r.pos
+        )
 
     return ret
 

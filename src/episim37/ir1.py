@@ -769,6 +769,14 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
             left = ref(s)
             right = expression_str(s.init)
             lines.append(f"{left} = {right};")
+        case ast1.NodeSet():
+            pass
+        case ast1.EdgeSet():
+            pass
+        case ast1.UpdateSet():
+            pass
+        case ast1.ForeachLoop():
+            pass
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -781,6 +789,8 @@ class Function:
     params: list[tuple[str, str]]
     return_: str
     variables: list[tuple[str, str]]
+    nodesets: list[str]
+    edgesets: list[str]
     body: str
     line: str
 
@@ -803,13 +813,21 @@ class Function:
             v_type = typename(v.type.resolve())
             variables.append((v_name, v_type))
 
+        nodesets = []
+        for v in x.nodesets:
+            nodesets.append(mangle(v.name))
+
+        edgesets = []
+        for v in x.edgesets:
+            edgesets.append(mangle(v.name))
+
         body = IndentedLines(cur_indent=1)
         for s in x.body:
             body.extend(statement_lines(s, body.cur_indent + 1))
         body = body.to_string()
 
         line = make_line(x.pos)
-        return cls(name, params, return_, variables, body, line)
+        return cls(name, params, return_, variables, nodesets, edgesets, body, line)
 
 
 @attrs.define

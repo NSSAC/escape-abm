@@ -427,6 +427,22 @@
     }
   },
   {
+    "type": "edgeset",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "elif_section",
     "named": true,
     "fields": {
@@ -439,7 +455,19 @@
             "named": true
           },
           {
+            "type": "edgeset",
+            "named": true
+          },
+          {
+            "type": "foreach_loop",
+            "named": true
+          },
+          {
             "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "nodeset",
             "named": true
           },
           {
@@ -455,7 +483,15 @@
             "named": true
           },
           {
+            "type": "update_set",
+            "named": true
+          },
+          {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "variable",
             "named": true
           },
           {
@@ -517,7 +553,19 @@
             "named": true
           },
           {
+            "type": "edgeset",
+            "named": true
+          },
+          {
+            "type": "foreach_loop",
+            "named": true
+          },
+          {
             "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "nodeset",
             "named": true
           },
           {
@@ -533,7 +581,15 @@
             "named": true
           },
           {
+            "type": "update_set",
+            "named": true
+          },
+          {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "variable",
             "named": true
           },
           {
@@ -563,6 +619,140 @@
         ]
       },
       "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "filter_expression",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "function_call",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "reference",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      },
+      "var": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "foreach_loop",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "call_statement",
+            "named": true
+          },
+          {
+            "type": "edgeset",
+            "named": true
+          },
+          {
+            "type": "foreach_loop",
+            "named": true
+          },
+          {
+            "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "nodeset",
+            "named": true
+          },
+          {
+            "type": "pass_statement",
+            "named": true
+          },
+          {
+            "type": "print_statement",
+            "named": true
+          },
+          {
+            "type": "return_statement",
+            "named": true
+          },
+          {
+            "type": "update_set",
+            "named": true
+          },
+          {
+            "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "variable",
+            "named": true
+          },
+          {
+            "type": "while_loop",
+            "named": true
+          }
+        ]
+      },
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "var": {
         "multiple": false,
         "required": true,
         "types": [
@@ -633,7 +823,19 @@
           "named": true
         },
         {
+          "type": "edgeset",
+          "named": true
+        },
+        {
+          "type": "foreach_loop",
+          "named": true
+        },
+        {
           "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "nodeset",
           "named": true
         },
         {
@@ -646,6 +848,10 @@
         },
         {
           "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "update_set",
           "named": true
         },
         {
@@ -775,7 +981,19 @@
             "named": true
           },
           {
+            "type": "edgeset",
+            "named": true
+          },
+          {
+            "type": "foreach_loop",
+            "named": true
+          },
+          {
             "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "nodeset",
             "named": true
           },
           {
@@ -791,7 +1009,15 @@
             "named": true
           },
           {
+            "type": "update_set",
+            "named": true
+          },
+          {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "variable",
             "named": true
           },
           {
@@ -901,6 +1127,22 @@
         ]
       },
       "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "nodeset",
+    "named": true,
+    "fields": {
+      "name": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1144,6 +1386,50 @@
     }
   },
   {
+    "type": "sample_expression",
+    "named": true,
+    "fields": {
+      "amount": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "parent": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "approx",
+            "named": false
+          },
+          {
+            "type": "relative",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "source_file",
     "named": true,
     "fields": {},
@@ -1251,7 +1537,19 @@
           "named": true
         },
         {
+          "type": "edgeset",
+          "named": true
+        },
+        {
+          "type": "foreach_loop",
+          "named": true
+        },
+        {
           "type": "if_statement",
+          "named": true
+        },
+        {
+          "type": "nodeset",
           "named": true
         },
         {
@@ -1267,7 +1565,15 @@
           "named": true
         },
         {
+          "type": "update_set",
+          "named": true
+        },
+        {
           "type": "update_statement",
+          "named": true
+        },
+        {
+          "type": "variable",
           "named": true
         },
         {
@@ -1502,6 +1808,36 @@
     }
   },
   {
+    "type": "update_set",
+    "named": true,
+    "fields": {
+      "expression": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "filter_expression",
+            "named": true
+          },
+          {
+            "type": "sample_expression",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "update_statement",
     "named": true,
     "fields": {
@@ -1662,7 +1998,19 @@
             "named": true
           },
           {
+            "type": "edgeset",
+            "named": true
+          },
+          {
+            "type": "foreach_loop",
+            "named": true
+          },
+          {
             "type": "if_statement",
+            "named": true
+          },
+          {
+            "type": "nodeset",
             "named": true
           },
           {
@@ -1678,7 +2026,15 @@
             "named": true
           },
           {
+            "type": "update_set",
+            "named": true
+          },
+          {
             "type": "update_statement",
+            "named": true
+          },
+          {
+            "type": "variable",
             "named": true
           },
           {
@@ -1848,8 +2204,8 @@
     "named": false
   },
   {
-    "type": "comment",
-    "named": true
+    "type": "approx",
+    "named": false
   },
   {
     "type": "config",
@@ -1888,6 +2244,10 @@
     "named": true
   },
   {
+    "type": "edgeset",
+    "named": false
+  },
+  {
     "type": "elif",
     "named": false
   },
@@ -1912,6 +2272,14 @@
     "named": true
   },
   {
+    "type": "foreach",
+    "named": false
+  },
+  {
+    "type": "from",
+    "named": false
+  },
+  {
     "type": "high",
     "named": false
   },
@@ -1921,6 +2289,10 @@
   },
   {
     "type": "if",
+    "named": false
+  },
+  {
+    "type": "in",
     "named": false
   },
   {
@@ -1952,6 +2324,10 @@
     "named": true
   },
   {
+    "type": "nodeset",
+    "named": false
+  },
+  {
     "type": "normal",
     "named": false
   },
@@ -1976,7 +2352,15 @@
     "named": false
   },
   {
+    "type": "relative",
+    "named": false
+  },
+  {
     "type": "return",
+    "named": false
+  },
+  {
+    "type": "sample",
     "named": false
   },
   {
@@ -2008,6 +2392,10 @@
     "named": false
   },
   {
+    "type": "update",
+    "named": false
+  },
+  {
     "type": "v",
     "named": false
   },
@@ -2017,6 +2405,14 @@
   },
   {
     "type": "while",
+    "named": false
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "}",
     "named": false
   }
 ]

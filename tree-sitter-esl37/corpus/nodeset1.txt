@@ -1,0 +1,40 @@
+=========
+Nodeset 1
+=========
+
+__test statement:
+    nodeset seed_nodes
+    update seed_nodes = { n : uniform() < 0.1 }
+    foreach n in seed_nodes:
+        n.state = E
+    end
+end
+
+---
+
+(source_file
+    (test_statement
+        (nodeset (identifier))
+        (update_set
+            (identifier)
+            (filter_expression
+                (identifier)
+                (binary_expression
+                    (function_call
+                        (reference (identifier))
+                    )
+                    (float)
+                )
+            )
+        )
+        (foreach_loop
+            (identifier)
+            (identifier)
+            (update_statement
+                (reference (identifier) (identifier))
+                (reference (identifier))
+            )
+        )
+    )
+)
+

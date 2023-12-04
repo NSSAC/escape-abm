@@ -207,11 +207,7 @@ module.exports = grammar({
             field('type', $.identifier),
         ),
 
-        function_body: $ => repeat1(choice(
-            $.variable,
-            // $.const_statement,
-            $._statement
-        )),
+        function_body: $ => repeat1($._statement),
 
         test_statement: $ => seq(
             '__test', 'statement', ':',
@@ -228,10 +224,12 @@ module.exports = grammar({
             // $.for_loop,
             $.call_statement,
             $.update_statement,
-            // $.nodeset_statement,
-            // $.edgeset_statement,
-            // $.foreach_loop,
-            $.print_statement
+            $.print_statement,
+            $.variable,
+            $.nodeset,
+            $.edgeset,
+            $.update_set,
+            $.foreach_loop,
         ),
 
         pass_statement: $ => seq(
@@ -353,47 +351,48 @@ module.exports = grammar({
             $._terminator,
         ),
 
-        // nodeset_statement: $ => seq(
-        //     field('name', $.identifier),
-        //     ':',
-        //     'nodeset',
-        //     '=',
-        //     choice($.filter_expression, $.sample_expression),
-        // ),
+        nodeset: $ => seq(
+            'nodeset',
+            field('name', $.identifier),
+        ),
 
-        // edgeset_statement: $ => seq(
-        //     field('name', $.identifier),
-        //     ':',
-        //     'edgeset',
-        //     '=',
-        //     choice($.filter_expression, $.sample_expression),
-        // ),
+        edgeset: $ => seq(
+            'edgeset',
+            field('name', $.identifier),
+        ),
 
-        // filter_expression: $ => seq(
-        //     '{',
-        //     field('var', $.identifier),
-        //     ':',
-        //     field('condition', $._expression),
-        //     '}'
-        // ),
+        update_set: $ => seq(
+            'update',
+            field('name', $.identifier),
+            '=',
+            field('expression', choice($.filter_expression, $.sample_expression)),
+        ),
 
-        // sample_expression: $ => seq(
-        //     'sample',
-        //     field('type', choice('approx', 'relative')),
-        //     field('amount', $._number),
-        //     'from',
-        //     field('parent', $.identifier)
-        // ),
+        filter_expression: $ => seq(
+            '{',
+            field('var', $.identifier),
+            ':',
+            field('condition', $._expression),
+            '}'
+        ),
 
-        // foreach_loop: $ => seq(
-        //     'foreach',
-        //     field('var', $.identifier),
-        //     'in',
-        //     field('set', $.reference),
-        //     ':',
-        //     field('body', repeat1($._statement)),
-        //     'end'
-        // ),
+        sample_expression: $ => seq(
+            'sample',
+            field('type', choice('approx', 'relative')),
+            field('amount', $._number),
+            'from',
+            field('parent', $.identifier)
+        ),
+
+        foreach_loop: $ => seq(
+            'foreach',
+            field('var', $.identifier),
+            'in',
+            field('set', $.identifier),
+            ':',
+            field('body', repeat1($._statement)),
+            'end'
+        ),
 
         print_statement: $ => seq(
             'print', '(',
@@ -465,7 +464,7 @@ module.exports = grammar({
 
         identifier: _ => /[a-zA-Z][_a-zA-Z0-9]*/,
 
-        comment: _ => token(seq('#', /.*/)),
+        _comment: _ => token(seq('#', /.*/)),
 
         _number: $ => choice($.integer, $.float),
 
@@ -531,7 +530,7 @@ module.exports = grammar({
     },
 
     extras: $ => [
-        $.comment,
+        $._comment,
         $._whitespace
     ]
 });
