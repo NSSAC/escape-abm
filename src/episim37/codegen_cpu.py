@@ -51,7 +51,7 @@ def do_build(
     ir1 = mk_ir1(ast1, node_idx_type, edge_idx_type)
 
     if output is None:
-        output = Path.cwd() / ir1.module
+        output = input.parent
     output.mkdir(parents=True, exist_ok=True)
 
     with open(output / "simulator.cpp", "wt") as fobj:
