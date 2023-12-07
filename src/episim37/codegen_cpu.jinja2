@@ -78,6 +78,89 @@ struct rnd_state {
     }
 };
 
+struct thread_node_range {
+  size_type* ptr;
+
+  thread_node_range(edge_index_type* indptr, size_type num_nodes, size_type num_threads):
+  ptr{nullptr} {
+    ptr = alloc_mem<size_type>(num_threads + 1);
+
+    edge_index_type *cum_in_neighbors = alloc_mem<edge_index_type>(num_nodes);
+    size_type total_load = 0;
+    for (size_type i = 0; i < num_nodes; i++) {
+        total_load += indptr[i+1] - indptr[i];
+        cum_in_neighbors[i] = total_load;
+    }
+
+    auto thread_load = total_load / num_threads;
+    thread_load += (total_load % num_threads != 0);
+    ptr[0] = 0;
+
+    #pragma omp parallel
+    {
+	const auto thread_idx = omp_get_thread_num();
+	auto needle = thread_load * (thread_idx + 1);
+	if (needle > total_load) {
+	    needle = total_load;
+	}
+
+	auto end = std::upper_bound(cum_in_neighbors, cum_in_neighbors + num_nodes, needle);
+	ptr[thread_idx + 1] = end - cum_in_neighbors;
+    }
+
+    assert(ptr[0] == 0);
+    assert(ptr[num_threads] == num_nodes);
+    for (size_type i = 0; i < num_threads; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
+
+    free_mem(&cum_in_neighbors);
+  }
+
+  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
+  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
+
+  ~thread_node_range() {
+    free_mem(&ptr);
+  }
+};
+
+struct thread_edge_range {
+  size_type* ptr;
+
+  thread_edge_range(size_type num_edges, size_type num_threads):
+  ptr{nullptr} {
+    ptr = alloc_mem<size_type>(num_threads + 1);
+
+    auto thread_load = num_edges / num_threads;
+    thread_load += (num_edges % num_threads != 0);
+
+    ptr[0] = 0;
+    #pragma omp parallel
+    {
+	const auto thread_idx = omp_get_thread_num();
+	auto end = thread_load * (thread_idx + 1);
+	if (end > num_edges) {
+	    end = num_edges;
+	}
+	ptr[thread_idx +1] = end;
+    }
+
+    assert(ptr[0] == 0);
+    assert(ptr[num_threads] == num_edges);
+    for (size_type i = 0; i < num_threads; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
+
+  }
+
+  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
+  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
+
+  ~thread_edge_range() {
+    free_mem(&ptr);
+  }
+};
 {% endmacro %}
 
 {% macro enum_type(t) %}
@@ -96,6 +179,28 @@ const {{ t.name }} {{ const }} = {{ loop.index0 }};
 {% macro global_variable(v) %}
 {{ v.line }}
 {{ v.type }} {{ v.var }} = {{ v.init }};
+{% endmacro %}
+
+{% macro in_inc_csr(a) %}
+struct in_inc_csr {
+    {{ a.indptr.type }}* indptr;
+
+    in_inc_csr(const H5::H5File &file, const size_type num_nodes):
+    indptr{nullptr} {
+        indptr = alloc_mem<{{ a.indptr.type }}>(num_nodes + 1);
+        read_dataset(file, "{{ a.indptr.dataset_name }}", {{ a.indptr.h5_type}}, num_nodes + 1, indptr);
+    }
+
+    in_inc_csr() = delete;                              // default constructor
+    in_inc_csr(const in_inc_csr &) = delete;            // copy constructor
+    in_inc_csr(in_inc_csr &&) = delete;                 // move constructor
+    in_inc_csr &operator=(const in_inc_csr &) = delete; // copy assignment
+    in_inc_csr &operator=(in_inc_csr &&) = delete;      // move assignment
+
+    ~in_inc_csr() {
+        free_mem(&indptr);
+    }
+} ;
 {% endmacro %}
 
 {% macro node_table(t) %}
@@ -237,37 +342,6 @@ struct edgeset {
 };
 {% endmacro %}
 
-{% macro in_inc_csr(a) %}
-struct in_inc_csr {
-    {{ a.indptr.type }}* indptr;
-    edge_index_type *cum_in_neighbors;
-
-    in_inc_csr(const H5::H5File &file, const size_type num_nodes):
-    indptr{nullptr},
-    cum_in_neighbors{nullptr} {
-        indptr = alloc_mem<{{ a.indptr.type }}>(num_nodes + 1);
-        read_dataset(file, "{{ a.indptr.dataset_name }}", {{ a.indptr.h5_type}}, num_nodes + 1, indptr);
-
-        cum_in_neighbors = alloc_mem<edge_index_type>(num_nodes);
-        size_type total_load = 0;
-        for (size_type i = 0; i < num_nodes; i++) {
-            total_load += indptr[i+1] - indptr[i];
-            cum_in_neighbors[i] = total_load;
-        }
-    }
-
-    in_inc_csr() = delete;                              // default constructor
-    in_inc_csr(const in_inc_csr &) = delete;            // copy constructor
-    in_inc_csr(in_inc_csr &&) = delete;                 // move constructor
-    in_inc_csr &operator=(const in_inc_csr &) = delete; // copy assignment
-    in_inc_csr &operator=(in_inc_csr &&) = delete;      // move assignment
-
-    ~in_inc_csr() {
-    free_mem(&indptr);
-    free_mem(&cum_in_neighbors);
-  }
-} ;
-{% endmacro %}
 
 {% macro constant_dist(d) %}
 float_type {{ d.name }}(rnd_state_type *const rnd) {
@@ -394,8 +468,8 @@ void
         const auto thread_idx = omp_get_thread_num();
         const auto rnd = &(RND_STATE->rnd[thread_idx]);
 
-        const auto start = THREAD_NODE_RANGE[thread_idx];
-        const auto end = THREAD_NODE_RANGE[thread_idx + 1];
+        const auto start = NODE_RANGE->start(thread_idx);
+        const auto end = NODE_RANGE->end(thread_idx);
         for (size_type i = start; i < end; i++) {
             {{ dt.name }}_kernel(i, NODE_TABLE, rnd, elapsed);
         }
@@ -483,15 +557,15 @@ void
     {
         const auto thread_idx = omp_get_thread_num();
         const auto rnd = &(RND_STATE->rnd[thread_idx]);
-        
-        const auto e_start = THREAD_EDGE_RANGE[thread_idx];
-        const auto e_end = THREAD_EDGE_RANGE[thread_idx + 1];
+
+        const auto e_start = EDGE_RANGE->start(thread_idx);
+        const auto e_end = EDGE_RANGE->end(thread_idx);
         for (size_type i = e_start; i < e_end; i++) {
             {{ dt.name}}_update_tprob_kernel(i, NODE_TABLE, EDGE_TABLE);
         }
 
-        const auto n_start = THREAD_NODE_RANGE[thread_idx];
-        const auto n_end = THREAD_NODE_RANGE[thread_idx + 1];
+        const auto n_start = NODE_RANGE->start(thread_idx);
+        const auto n_end = NODE_RANGE->end(thread_idx);
         for (size_type v = n_start; v < n_end; v++) {
             {{ dt.name}}_transmit_kernel(v, NODE_TABLE, EDGE_TABLE, IN_INC_CSR, rnd);
         }
@@ -599,14 +673,16 @@ typedef std::mt19937 rnd_state_type;
 rnd_state* RND_STATE = nullptr;
 std::uniform_real_distribution<float_type> uniform01 { 0.0, 1.0 };
 
-node_table*NODE_TABLE = nullptr;
-edge_table* EDGE_TABLE = nullptr;
-in_inc_csr* IN_INC_CSR = nullptr;
 size_type NUM_NODES = 0;
 size_type NUM_EDGES = 0;
 
-size_type* THREAD_EDGE_RANGE;
-size_type* THREAD_NODE_RANGE;
+in_inc_csr* IN_INC_CSR = nullptr;
+thread_edge_range* EDGE_RANGE = nullptr;
+thread_node_range* NODE_RANGE = nullptr;
+node_table *NODE_TABLE = nullptr;
+edge_table* EDGE_TABLE = nullptr;
+
+H5::H5File* OUTPUT_FILE = nullptr;
 
 // ----------------------------------------------------------------------------
 // Constant distributions
@@ -694,80 +770,51 @@ int main() {
     }
     {% endfor %}
 
-    const char *data_file_name = "data.h5";
+    const char *input_file_name = "input.h5";
     {
-        const char *p = std::getenv("DATA_FILE");
+        const char *p = std::getenv("INPUT_FILE");
         if (p) {
-            data_file_name = p;
+            input_file_name = p;
         }
-        std::cout << "### data_file = " << data_file_name << std::endl;
+        std::cout << "### input_file = " << input_file_name << std::endl;
     }
 
-    H5::H5File data_file(data_file_name, H5F_ACC_RDONLY);
+    const char *output_file_name = "output.h5";
+    {
+        const char *p = std::getenv("OUTPUT_FILE");
+        if (p) {
+            output_file_name = p;
+        }
+        std::cout << "### output_file = " << output_file_name << std::endl;
+    }
 
-    NUM_NODES = get_num_nodes(data_file);
+    H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
+
+    NUM_NODES = get_num_nodes(input_file);
     std::cout << "### num_nodes: " << NUM_NODES << std::endl;
 
-    NUM_EDGES = get_num_edges(data_file);
+    NUM_EDGES = get_num_edges(input_file);
     std::cout << "### num_edges: " << NUM_EDGES << std::endl;
 
-    in_inc_csr csr(data_file, NUM_NODES);
+    in_inc_csr csr(input_file, NUM_NODES);
     IN_INC_CSR = &csr;
 
-    size_type thread_node_range[num_threads + 1];
-    {
-        auto total_load = csr.cum_in_neighbors[NUM_NODES-1];
-        auto thread_load = total_load / num_threads;
-        thread_load += (total_load % num_threads != 0);
+    thread_edge_range edge_range(NUM_EDGES, num_threads);
+    EDGE_RANGE = &edge_range;
 
-        thread_node_range[0] = 0;
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
-            auto needle = thread_load * (thread_idx + 1);
-            if (needle > total_load) {
-                needle = total_load;
-            }
+    thread_node_range node_range(csr.indptr, NUM_NODES, num_threads);
+    NODE_RANGE = &node_range;
 
-            auto end = std::upper_bound(csr.cum_in_neighbors, csr.cum_in_neighbors + NUM_NODES, needle);
-            thread_node_range[thread_idx +1] = end - csr.cum_in_neighbors;
-        }
-    }
-    THREAD_NODE_RANGE = thread_node_range;
-    assert(THREAD_NODE_RANGE[0] == 0);
-    assert(THREAD_NODE_RANGE[num_threads] == NUM_NODES);
-    for (size_type i = 0; i < num_threads; i++) {
-        assert(THREAD_NODE_RANGE[i] <= THREAD_NODE_RANGE[i+1]);
-    }
-
-    size_type thread_edge_range[num_threads + 1];
-    {
-        auto thread_load = NUM_EDGES / num_threads;
-        thread_load += (NUM_EDGES % num_threads != 0);
-
-        thread_edge_range[0] = 0;
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
-            auto end = thread_load * (thread_idx + 1);
-            if (end > NUM_EDGES) {
-                end = NUM_EDGES;
-            }
-            thread_edge_range[thread_idx +1] = end;
-        }
-    }
-    THREAD_EDGE_RANGE = thread_edge_range;
-    assert(THREAD_EDGE_RANGE[0] == 0);
-    assert(THREAD_EDGE_RANGE[num_threads] == NUM_EDGES);
-    for (size_type i = 0; i < num_threads; i++) {
-        assert(THREAD_EDGE_RANGE[i] <= THREAD_EDGE_RANGE[i+1]);
-    }
-
-    node_table nt(data_file, NUM_NODES);
+    node_table nt(input_file, NUM_NODES);
     NODE_TABLE = &nt;
 
-    edge_table et(data_file, NUM_EDGES);
+    edge_table et(input_file, NUM_EDGES);
     EDGE_TABLE = &et;
+
+    input_file.close();
+
+    H5::H5File output_file(output_file_name, H5F_ACC_TRUNC);
+    OUTPUT_FILE = &output_file;
 
     const auto init_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> init_seconds{init_end - init_start};
@@ -779,6 +826,9 @@ int main() {
     const std::chrono::duration<double> main_seconds{main_end - main_start};
     std::cout << "### main time (s): " << main_seconds.count() << std::endl;
 
+    output_file.close();
+    OUTPUT_FILE = nullptr;
+
     return 0;
 }
 {% endmacro %}
@@ -786,7 +836,7 @@ int main() {
 {% macro cmake_lists(s) %}
 cmake_minimum_required(VERSION 3.27)
 
-project({{s.module}} VERSION 0.0.1)
+project({{ s.module }} VERSION 0.0.1)
 
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 find_package(OpenMP REQUIRED COMPONENTS C CXX)
