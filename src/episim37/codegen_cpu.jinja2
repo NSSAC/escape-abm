@@ -27,21 +27,29 @@ void free_mem(T **p) {
 template <typename T>
 T get_attribute(const H5::H5File &file, const char* attr_name) {
     T ret;
-    const H5::Attribute attr = file.openAttribute(attr_name);
+
+    H5::Attribute attr = file.openAttribute(attr_name);
     attr.read(attr.getDataType(), &ret);
+    attr.close();
+
     return ret;
 }
 
 template <typename T>
-void read_dataset(const H5::H5File &file, const char* dataset_name, const H5::PredType& h5_type, const size_type count, T *const out) {
-    const H5::DataSet dataset = file.openDataSet(dataset_name);
+void read_dataset(
+        const H5::H5File &file,
+        const char* dataset_name,
+        const H5::PredType& h5_type,
+        const size_type count,
+        T *const out) {
+    H5::DataSet dataset = file.openDataSet(dataset_name);
 
     // Ensure datatype is correct
-    const H5::DataType dataset_type = dataset.getDataType();
+    H5::DataType dataset_type = dataset.getDataType();
     assert(dataset_type == h5_type);
 
     // Ensure count is correct
-    const H5::DataSpace dataspace = dataset.getSpace();
+    H5::DataSpace dataspace = dataset.getSpace();
     const auto ndims = dataspace.getSimpleExtentNdims();
     std::vector<hsize_t> dims(ndims);
     dataspace.getSimpleExtentDims(&dims[0]);
@@ -49,118 +57,11 @@ void read_dataset(const H5::H5File &file, const char* dataset_name, const H5::Pr
     assert(dims[0] == count);
 
     dataset.read(out, h5_type);
+
+    dataspace.close();
+    dataset_type.close();
+    dataset.close();
 }
-
-struct rnd_state {
-    rnd_state_type* rnd;
-
-    rnd_state():
-    rnd{nullptr} {
-        auto num_threads = omp_get_max_threads();
-        rnd = static_cast<rnd_state_type*>(std::malloc(sizeof(rnd_state_type) * num_threads));
-
-        std::random_device rd;
-        auto const now = std::chrono::system_clock::now();
-        auto const now_t = std::chrono::system_clock::to_time_t(now);
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
-
-            rnd_state_type gen(rd());
-            gen.seed(now_t + thread_idx);
-            rnd[thread_idx] = gen;
-        }
-    }
-
-    ~rnd_state() {
-        std::free(rnd);
-        rnd = nullptr;
-    }
-};
-
-struct thread_node_range {
-  size_type* ptr;
-
-  thread_node_range(edge_index_type* indptr, size_type num_nodes, size_type num_threads):
-  ptr{nullptr} {
-    ptr = alloc_mem<size_type>(num_threads + 1);
-
-    edge_index_type *cum_in_neighbors = alloc_mem<edge_index_type>(num_nodes);
-    size_type total_load = 0;
-    for (size_type i = 0; i < num_nodes; i++) {
-        total_load += indptr[i+1] - indptr[i];
-        cum_in_neighbors[i] = total_load;
-    }
-
-    auto thread_load = total_load / num_threads;
-    thread_load += (total_load % num_threads != 0);
-    ptr[0] = 0;
-
-    #pragma omp parallel
-    {
-	const auto thread_idx = omp_get_thread_num();
-	auto needle = thread_load * (thread_idx + 1);
-	if (needle > total_load) {
-	    needle = total_load;
-	}
-
-	auto end = std::upper_bound(cum_in_neighbors, cum_in_neighbors + num_nodes, needle);
-	ptr[thread_idx + 1] = end - cum_in_neighbors;
-    }
-
-    assert(ptr[0] == 0);
-    assert(ptr[num_threads] == num_nodes);
-    for (size_type i = 0; i < num_threads; i++) {
-        assert(ptr[i] <= ptr[i+1]);
-    }
-
-    free_mem(&cum_in_neighbors);
-  }
-
-  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
-  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-
-  ~thread_node_range() {
-    free_mem(&ptr);
-  }
-};
-
-struct thread_edge_range {
-  size_type* ptr;
-
-  thread_edge_range(size_type num_edges, size_type num_threads):
-  ptr{nullptr} {
-    ptr = alloc_mem<size_type>(num_threads + 1);
-
-    auto thread_load = num_edges / num_threads;
-    thread_load += (num_edges % num_threads != 0);
-
-    ptr[0] = 0;
-    #pragma omp parallel
-    {
-	const auto thread_idx = omp_get_thread_num();
-	auto end = thread_load * (thread_idx + 1);
-	if (end > num_edges) {
-	    end = num_edges;
-	}
-	ptr[thread_idx +1] = end;
-    }
-
-    assert(ptr[0] == 0);
-    assert(ptr[num_threads] == num_edges);
-    for (size_type i = 0; i < num_threads; i++) {
-        assert(ptr[i] <= ptr[i+1]);
-    }
-
-  }
-
-  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
-  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-
-  ~thread_edge_range() {
-    free_mem(&ptr);
-  }
-};
 {% endmacro %}
 
 {% macro enum_type(t) %}
@@ -185,10 +86,10 @@ const {{ t.name }} {{ const }} = {{ loop.index0 }};
 struct in_inc_csr {
     {{ a.indptr.type }}* indptr;
 
-    in_inc_csr(const H5::H5File &file, const size_type num_nodes):
+    in_inc_csr(const H5::H5File &file):
     indptr{nullptr} {
-        indptr = alloc_mem<{{ a.indptr.type }}>(num_nodes + 1);
-        read_dataset(file, "{{ a.indptr.dataset_name }}", {{ a.indptr.h5_type}}, num_nodes + 1, indptr);
+        indptr = alloc_mem<{{ a.indptr.type }}>(NUM_NODES + 1);
+        read_dataset(file, "{{ a.indptr.dataset_name }}", {{ a.indptr.h5_type}}, NUM_NODES + 1, indptr);
     }
 
     in_inc_csr() = delete;                              // default constructor
@@ -203,6 +104,94 @@ struct in_inc_csr {
 } ;
 {% endmacro %}
 
+{% macro thread_node_range() %}
+struct thread_node_range {
+  size_type* ptr;
+
+  thread_node_range():
+  ptr{nullptr} {
+    ptr = alloc_mem<size_type>(NUM_THREADS + 1);
+
+    edge_index_type *cum_in_neighbors = alloc_mem<edge_index_type>(NUM_NODES);
+    size_type total_load = 0;
+    for (size_type i = 0; i < NUM_NODES; i++) {
+        total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
+        cum_in_neighbors[i] = total_load;
+    }
+
+    auto thread_load = total_load / NUM_THREADS;
+    thread_load += (total_load % NUM_THREADS != 0);
+    ptr[0] = 0;
+
+    #pragma omp parallel
+    {
+	const auto thread_idx = omp_get_thread_num();
+	auto needle = thread_load * (thread_idx + 1);
+	if (needle > total_load) {
+	    needle = total_load;
+	}
+
+	auto end = std::upper_bound(cum_in_neighbors, cum_in_neighbors + NUM_NODES, needle);
+	ptr[thread_idx + 1] = end - cum_in_neighbors;
+    }
+
+    assert(ptr[0] == 0);
+    assert(ptr[NUM_THREADS] == NUM_NODES);
+    for (size_type i = 0; i < NUM_THREADS; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
+
+    free_mem(&cum_in_neighbors);
+  }
+
+  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
+  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
+
+  ~thread_node_range() {
+    free_mem(&ptr);
+  }
+};
+{% endmacro %}
+
+{% macro thread_edge_range() %}
+struct thread_edge_range {
+  size_type* ptr;
+
+  thread_edge_range():
+  ptr{nullptr} {
+    ptr = alloc_mem<size_type>(NUM_THREADS + 1);
+
+    auto thread_load = NUM_EDGES / NUM_THREADS;
+    thread_load += (NUM_EDGES % NUM_THREADS != 0);
+
+    ptr[0] = 0;
+    #pragma omp parallel
+    {
+	const auto thread_idx = omp_get_thread_num();
+	auto end = thread_load * (thread_idx + 1);
+	if (end > NUM_EDGES) {
+	    end = NUM_EDGES;
+	}
+	ptr[thread_idx +1] = end;
+    }
+
+    assert(ptr[0] == 0);
+    assert(ptr[NUM_THREADS] == NUM_EDGES);
+    for (size_type i = 0; i < NUM_THREADS; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
+
+  }
+
+  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
+  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
+
+  ~thread_edge_range() {
+    free_mem(&ptr);
+  }
+};
+{% endmacro %}
+
 {% macro node_table(t) %}
 size_type get_num_nodes(const H5::H5File &file) {
     return get_attribute<size_type>(file, "num_nodes");
@@ -213,19 +202,19 @@ struct node_table {
     {{ f.type }}* {{ f.name }};
     {% endfor %}
 
-    node_table(const H5::H5File &file, const size_type num_nodes):
+    node_table(const H5::H5File &file):
     {% set comma = joiner(",") %}
     {% for f in t.fields %}
     {{ comma() }}{{ f.name }}{nullptr}
     {% endfor %}
     {
         {% for f in t.fields %}
-        {{ f.name }} = alloc_mem<{{ f.type }}>(num_nodes);
+        {{ f.name }} = alloc_mem<{{ f.type }}>(NUM_NODES);
         {% endfor %}
 
         {% for f in t.fields %}
         {% if f.is_static %}
-        read_dataset(file, "{{ f.dataset_name }}", {{ f.h5_type}}, num_nodes, {{ f.name }});
+        read_dataset(file, "{{ f.dataset_name }}", {{ f.h5_type}}, NUM_NODES, {{ f.name }});
         {% endif %}
         {% endfor %}
     }
@@ -237,28 +226,28 @@ struct node_table {
     node_table &operator=(node_table &&) = delete;      // move assignment
 
     ~node_table() {
-    {% for f in t.fields %}
-    free_mem(&{{ f.name }});
-    {% endfor %}
+        {% for f in t.fields %}
+        free_mem(&{{ f.name }});
+        {% endfor %}
   }
 } ;
 
-struct node {
+struct node_type {
     node_table *n;
     node_index_type i;
 
-    node(node_table *nn, node_index_type ii):
+    node_type(node_table *nn, node_index_type ii):
     n{nn}, i{ii} {}
 };
 
 struct nodeset {
-    uint8_t *p;
+    bool_type *p;
     size_type size;
 
-    nodeset(const size_type n):
+    nodeset():
     p{nullptr}, size{0} {
-        p = alloc_mem<uint8_t>(n);
-        size = n;
+        p = alloc_mem<bool_type>(NUM_NODES);
+        size = 0;
     }
 
     ~nodeset() {
@@ -277,28 +266,28 @@ struct edge_table {
     {% for f in t.fields %}
     {{ f.type }}* {{ f.name }};
     {% endfor %}
-    {{ t.target_node_idx.type }}* target_node_idx;
-    {{ t.source_node_idx.type }}* source_node_idx;
+    {{ t.target_node_index.type }}* target_node_index;
+    {{ t.source_node_index.type }}* source_node_index;
 
-    edge_table(const H5::H5File &file, const size_type num_edges):
+    edge_table(const H5::H5File &file):
     {% set comma = joiner(", ") %}
     {% for f in t.fields %}
     {{ comma() }}{{ f.name }}{nullptr}
     {% endfor %}
     {
         {% for f in t.fields %}
-        {{ f.name }} = alloc_mem<{{ f.type }}>(num_edges);
+        {{ f.name }} = alloc_mem<{{ f.type }}>(NUM_EDGES);
         {% endfor %}
-        target_node_idx = alloc_mem<{{ t.target_node_idx.type }}>(num_edges);
-        source_node_idx = alloc_mem<{{ t.source_node_idx.type }}>(num_edges);
+        target_node_index = alloc_mem<{{ t.target_node_index.type }}>(NUM_EDGES);
+        source_node_index = alloc_mem<{{ t.source_node_index.type }}>(NUM_EDGES);
 
         {% for f in t.fields %}
         {% if f.is_static %}
-        read_dataset(file, "{{ f.dataset_name }}", {{ f.h5_type}}, num_edges, {{ f.name }});
+        read_dataset(file, "{{ f.dataset_name }}", {{ f.h5_type}}, NUM_EDGES, {{ f.name }});
         {% endif %}
         {% endfor %}
-        read_dataset(file, "{{ t.target_node_idx.dataset_name }}", {{ t.target_node_idx.h5_type}}, num_edges, target_node_idx);
-        read_dataset(file, "{{ t.source_node_idx.dataset_name }}", {{ t.source_node_idx.h5_type}}, num_edges, source_node_idx);
+        read_dataset(file, "{{ t.target_node_index.dataset_name }}", {{ t.target_node_index.h5_type}}, NUM_EDGES, target_node_index);
+        read_dataset(file, "{{ t.source_node_index.dataset_name }}", {{ t.source_node_index.h5_type}}, NUM_EDGES, source_node_index);
     }
 
     edge_table() = delete;                              // default constructor
@@ -308,31 +297,31 @@ struct edge_table {
     edge_table &operator=(edge_table &&) = delete;      // move assignment
 
     ~edge_table() {
-    {% for f in t.fields %}
-    free_mem(&{{ f.name }});
-    {% endfor %}
-    free_mem(&target_node_idx);
-    free_mem(&source_node_idx);
-  }
+        {% for f in t.fields %}
+        free_mem(&{{ f.name }});
+        {% endfor %}
+        free_mem(&target_node_index);
+        free_mem(&source_node_index);
+    }
 } ;
 
-struct edge {
+struct edge_type {
     edge_table *e;
     node_table *n;
     edge_index_type i;
 
-    edge(edge_table *ee, node_table *nn, edge_index_type ii):
+    edge_type(edge_table *ee, node_table *nn, edge_index_type ii):
     e{ee}, n{nn}, i{ii} {}
 };
 
 struct edgeset {
-    uint8_t *p;
+    bool_type *p;
     size_type size;
 
-    edgeset(const size_type n):
+    edgeset():
     p{nullptr}, size{0} {
-        p = alloc_mem<uint8_t>(n);
-        size = n;
+        p = alloc_mem<bool_type>(NUM_EDGES);
+        size = 0;
     }
 
     ~edgeset() {
@@ -342,6 +331,216 @@ struct edgeset {
 };
 {% endmacro %}
 
+{% macro contagion_output_type(o) %}
+struct {{ o.name }} {
+    node_index_type* transition_node_idx;
+    {{ o.state_type }}* transition_state;
+    size_type* num_transitions;
+
+    node_index_type* transmission_node_idx;
+    edge_index_type* transmission_source;
+    {{ o.state_type }}* transmission_state;
+    size_type* num_transmissions;
+
+    {{ o.name }}():
+    transition_node_idx{nullptr},
+    transition_state{nullptr},
+    num_transitions{nullptr},
+    transmission_node_idx{nullptr},
+    transmission_source{nullptr},
+    transmission_state{nullptr},
+    num_transmissions{nullptr} {
+        transition_node_idx = alloc_mem<node_index_type>(NUM_NODES);
+        transition_state = alloc_mem<{{ o.state_type }}>(NUM_NODES);
+        num_transitions = alloc_mem<size_type>(NUM_THREADS);
+
+        transmission_node_idx = alloc_mem<node_index_type>(NUM_NODES);
+        transmission_source = alloc_mem<edge_index_type>(NUM_NODES);
+        transmission_state = alloc_mem<{{ o.state_type }}>(NUM_NODES);
+        num_transmissions = alloc_mem<size_type>(NUM_THREADS);
+    }
+
+    void reset_transitions(const size_type thread_idx) {
+        num_transitions[thread_idx] = 0;
+    }
+
+    void add_transition(
+            const size_type thread_idx,
+            const size_type v_start,
+            const size_type v,
+            const {{ o.state_type }} state) {
+        auto idx = v_start + num_transitions[thread_idx];
+        transition_node_idx[idx] = v;
+        transition_state[idx] = state;
+        num_transitions[thread_idx]++;
+    }
+
+    void save_transitions(const int_type tick) {
+        const auto bufsize = 4096;
+        char dataset_name[bufsize];
+
+        auto ret = std::snprintf(dataset_name, bufsize, "/transitions/%ld", tick);
+        assert(ret >= 0);
+        assert(ret <= bufsize);
+        H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+        group.close();
+
+        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
+            auto ret = std::snprintf(dataset_name, bufsize, "/transitions/%ld/%ld", tick, thread_idx);
+            assert(ret >= 0);
+            assert(ret <= bufsize);
+            H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+            group.close();
+
+            hsize_t dims[1] = {num_transitions[thread_idx]};
+            H5::DataSpace dataspace(1, dims);
+
+            auto v_start = NODE_RANGE->start(thread_idx);
+
+            {
+                auto ret = std::snprintf(dataset_name, bufsize, "/transitions/%ld/%ld/node_index", tick, thread_idx);
+                assert(ret >= 0);
+                assert(ret <= bufsize);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, LOCAL_H5_TYPE_NODE_INDEX_TYPE, dataspace);
+
+                auto data = &(transition_node_idx[v_start]);
+                dataset.write(data, LOCAL_H5_TYPE_NODE_INDEX_TYPE);
+                dataset.close();
+            }
+
+            {
+                auto ret = std::snprintf(dataset_name, bufsize, "/transitions/%ld/%ld/state", tick, thread_idx);
+                assert(ret >= 0);
+                assert(ret <= bufsize);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ o.state_h5_type }}, dataspace);
+
+                auto data = &(transition_state[v_start]);
+                dataset.write(data, {{ o.state_h5_type }});
+                dataset.close();
+            }
+
+        }
+    }
+
+    void reset_transmissions(const size_type thread_idx) {
+        num_transmissions[thread_idx] = 0;
+    }
+
+    void add_transmission(
+            const size_type thread_idx,
+            const size_type v_start,
+            const size_type v,
+            const size_type e,
+            const {{ o.state_type }} state) {
+        auto idx = v_start + num_transmissions[thread_idx];
+        transmission_node_idx[idx] = v;
+        transmission_source[idx] = e;
+        transmission_state[idx] = state;
+        num_transmissions[thread_idx]++;
+    }
+
+    void save_transmissions(const int_type tick) {
+        const auto bufsize = 4096;
+        char dataset_name[bufsize];
+
+        auto ret = std::snprintf(dataset_name, bufsize, "/transmissions/%ld", tick);
+        assert(ret >= 0);
+        assert(ret <= bufsize);
+        H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+        group.close();
+
+        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
+            auto ret = std::snprintf(dataset_name, bufsize, "/transmissions/%ld/%ld", tick, thread_idx);
+            assert(ret >= 0);
+            assert(ret <= bufsize);
+            H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+            group.close();
+
+            hsize_t dims[1] = {num_transmissions[thread_idx]};
+            H5::DataSpace dataspace(1, dims);
+
+            auto v_start = NODE_RANGE->start(thread_idx);
+
+            {
+                auto ret = std::snprintf(dataset_name, bufsize, "/transmissions/%ld/%ld/node_index", tick, thread_idx);
+                assert(ret >= 0);
+                assert(ret <= bufsize);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, LOCAL_H5_TYPE_NODE_INDEX_TYPE, dataspace);
+
+                auto data = &(transmission_node_idx[v_start]);
+                dataset.write(data, LOCAL_H5_TYPE_NODE_INDEX_TYPE);
+                dataset.close();
+            }
+
+            {
+                auto ret = std::snprintf(dataset_name, bufsize, "/transmissions/%ld/%ld/source_edge_index", tick, thread_idx);
+                assert(ret >= 0);
+                assert(ret <= bufsize);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, LOCAL_H5_TYPE_EDGE_INDEX_TYPE, dataspace);
+
+                auto data = &(transmission_source[v_start]);
+                dataset.write(data, LOCAL_H5_TYPE_EDGE_INDEX_TYPE);
+                dataset.close();
+            }
+
+            {
+                auto ret = std::snprintf(dataset_name, bufsize, "/transmissions/%ld/%ld/state", tick, thread_idx);
+                assert(ret >= 0);
+                assert(ret <= bufsize);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ o.state_h5_type }}, dataspace);
+
+                auto data = &(transmission_state[v_start]);
+                dataset.write(data, {{ o.state_h5_type }});
+                dataset.close();
+            }
+
+        }
+    }
+
+    ~{{ o.name }}() {
+        free_mem(&transition_node_idx);
+        free_mem(&transition_state);
+        free_mem(&num_transitions);
+
+        free_mem(&transmission_node_idx);
+        free_mem(&transmission_source);
+        free_mem(&transmission_state);
+        free_mem(&num_transmissions);
+    }
+};
+{% endmacro %}
+
+{% macro contagion_output_var(o) %}
+{{ o.name }}* {{ o.gvar_name }} = nullptr;
+{% endmacro %}
+
+{% macro rnd_state() %}
+struct rnd_state {
+    rnd_state_type* rnd;
+
+    rnd_state():
+    rnd{nullptr} {
+        rnd = static_cast<rnd_state_type*>(std::malloc(sizeof(rnd_state_type) * NUM_THREADS));
+
+        std::random_device rd;
+        auto const now = std::chrono::system_clock::now();
+        auto const now_t = std::chrono::system_clock::to_time_t(now);
+        #pragma omp parallel
+        {
+            const auto thread_idx = omp_get_thread_num();
+
+            rnd_state_type gen(rd());
+            gen.seed(now_t + thread_idx);
+            rnd[thread_idx] = gen;
+        }
+    }
+
+    ~rnd_state() {
+        std::free(rnd);
+        rnd = nullptr;
+    }
+};
+{% endmacro %}
 
 {% macro constant_dist(d) %}
 float_type {{ d.name }}(rnd_state_type *const rnd) {
@@ -406,11 +605,15 @@ std::uniform_int_distribution<size_type> {{ t.name }}_INDEX_DIST { 0, {{ t.probs
 {{ multi_exit_transition_vars(t) }}
 {% endfor %}
 
-void
-{{ dt.name }}_kernel(const size_type i, node_table *const nt, rnd_state_type *const rnd, const float_type elapsed) {
-    auto state = nt->{{ dt.state }}[i];
-    auto next_state = nt->{{ dt.next_state }}[i];
-    auto dwell_time = nt->{{ dt.dwell_time }}[i];
+void {{ dt.name }}_node(
+        const size_type v,
+        rnd_state_type *const rnd,
+        const float_type elapsed,
+        const size_type thread_idx,
+        const size_type v_start) {
+    auto state = NODE_TABLE->{{ dt.state }}[v];
+    auto next_state = NODE_TABLE->{{ dt.next_state }}[v];
+    auto dwell_time = NODE_TABLE->{{ dt.dwell_time }}[v];
 
     // Nothing has changed
     if (state == next_state) {
@@ -419,12 +622,13 @@ void
 
     dwell_time -= elapsed;
     if (dwell_time > 0.0) {
-        nt->{{ dt.dwell_time }}[i] = dwell_time;
+        NODE_TABLE->{{ dt.dwell_time }}[v] = dwell_time;
         return;
     }
 
     state = next_state;
     dwell_time = 0.0;
+    {{ dt.output_gvar }}->add_transition(thread_idx, v_start, v, state);
 
     switch (state) {
     {% for t in dt.single %}
@@ -456,38 +660,40 @@ void
     {% endfor %}
     }
 
-    nt->{{ dt.state }}[i] = state;
-    nt->{{ dt.next_state }}[i] = next_state;
-    nt->{{ dt.dwell_time }}[i] = dwell_time;
+    NODE_TABLE->{{ dt.state }}[v] = state;
+    NODE_TABLE->{{ dt.next_state }}[v] = next_state;
+    NODE_TABLE->{{ dt.dwell_time }}[v] = dwell_time;
 }
 
-void
-{{ dt.name }}(const float_type elapsed) {
+void {{ dt.name }}(const int_type tick, const float_type elapsed) {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
         const auto rnd = &(RND_STATE->rnd[thread_idx]);
 
-        const auto start = NODE_RANGE->start(thread_idx);
-        const auto end = NODE_RANGE->end(thread_idx);
-        for (size_type i = start; i < end; i++) {
-            {{ dt.name }}_kernel(i, NODE_TABLE, rnd, elapsed);
+        {{ dt.output_gvar }}->reset_transitions(thread_idx);
+
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+        for (size_type v = v_start; v < v_end; v++) {
+            {{ dt.name }}_node(v, rnd, elapsed, thread_idx, v_start);
         }
     }
+
+    {{ dt.output_gvar }}->save_transitions(tick);
 }
 
 {% endmacro %}
 
 {% macro do_transmission(dt) %}
-void
-{{ dt.name }}_update_tprob_kernel(const size_type i, node_table *const nt, edge_table *const et) {
-    const auto v = et->target_node_idx[i];
-    const auto u = et->source_node_idx[i];
+void {{ dt.name }}_update_tprob(const size_type e) {
+    const auto v = EDGE_TABLE->target_node_index[e];
+    const auto u = EDGE_TABLE->source_node_index[e];
 
-    float_type tprob = {{ dt.enabled }}(edge(et, nt, i));
-    tprob *= {{ dt.susceptibility }}(node(nt, v));
-    tprob *= {{ dt.infectivity }}(node(nt, u));
-    tprob *= {{ dt.transmissibility }}(edge(et, nt, u));
+    float_type tprob = {{ dt.enabled }}(edge_type(EDGE_TABLE, NODE_TABLE, e));
+    tprob *= {{ dt.susceptibility }}(node_type(NODE_TABLE, v));
+    tprob *= {{ dt.infectivity }}(node_type(NODE_TABLE, u));
+    tprob *= {{ dt.transmissibility }}(edge_type(EDGE_TABLE, NODE_TABLE, e));
     if (tprob < 0.0) {
         tprob = 0.0;
     }
@@ -495,18 +701,22 @@ void
         tprob = 1.0;
     }
 
-    et->{{ dt.tprob }}[i] = tprob;
+    EDGE_TABLE->{{ dt.tprob }}[e] = tprob;
 }
 
 void
-{{ dt.name }}_transmit_kernel(const size_type v, node_table *const nt, edge_table *const et, in_inc_csr *const csr, rnd_state_type *const rnd) {
-    const auto start = csr->indptr[v];
-    const auto end = csr->indptr[v+1];
+{{ dt.name }}_transmit(
+        const size_type v,
+        rnd_state_type *const rnd,
+        const size_type thread_idx,
+        const size_type v_start) {
+    const auto start = IN_INC_CSR->indptr[v];
+    const auto end = IN_INC_CSR->indptr[v+1];
 
     float_type tprob_sum = 0.0;
     float_type tprob = 1.0;
-    for (size_type i = start; i < end; i++) {
-        auto p = et->{{ dt.tprob }}[i];
+    for (size_type e = start; e < end; e++) {
+        auto p = EDGE_TABLE->{{ dt.tprob }}[e];
         tprob_sum += p;
         tprob *= (1.0 - p);
     }
@@ -514,27 +724,25 @@ void
 
     auto prob = uniform01(*rnd);
     if (prob >= tprob) {
-        nt->{{ dt.tsource }}[v] = NUM_EDGES;
         return;
     }
 
     auto esel = NUM_EDGES;
     auto esel_weight = uniform01(*rnd) * tprob_sum;
     tprob_sum = 0.0;
-    for (size_type i = start; i < end; i++) {
-        auto p = et->{{ dt.tprob }}[i];
+    for (size_type e = start; e < end; e++) {
+        auto p = EDGE_TABLE->{{ dt.tprob }}[e];
         tprob_sum += p;
         if (tprob_sum >= esel_weight) {
-            esel = i;
+            esel = e;
             break;
         }
     }
     assert(esel != NUM_EDGES);
-    nt->{{ dt.tsource }}[v] = esel;
 
-    const auto u = et->source_node_idx[esel];
-    const auto t_state = nt->{{ dt.state }}[v];
-    const auto u_state = nt->{{ dt.state }}[u];
+    const auto u = EDGE_TABLE->source_node_index[esel];
+    const auto t_state = NODE_TABLE->{{ dt.state }}[v];
+    const auto u_state = NODE_TABLE->{{ dt.state }}[u];
 
     switch (t_state) {
     {% for entry, cxs in dt.transms %}
@@ -542,7 +750,8 @@ void
             switch (u_state) {
             {% for contact, exit in cxs %}
             case {{ contact }}:
-                nt->{{ dt.state }}[v] = {{ exit }};
+                NODE_TABLE->{{ dt.state }}[v] = {{ exit }};
+                {{ dt.output_gvar }}->add_transmission(thread_idx, v_start, v, esel, {{ exit }});
                 break;
             {% endfor %}
             }
@@ -552,24 +761,28 @@ void
 }
 
 void
-{{ dt.name }}() {
+{{ dt.name }}(const int_type tick) {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
         const auto rnd = &(RND_STATE->rnd[thread_idx]);
 
+        {{ dt.output_gvar }}->reset_transmissions(thread_idx);
+
         const auto e_start = EDGE_RANGE->start(thread_idx);
         const auto e_end = EDGE_RANGE->end(thread_idx);
-        for (size_type i = e_start; i < e_end; i++) {
-            {{ dt.name}}_update_tprob_kernel(i, NODE_TABLE, EDGE_TABLE);
+        for (size_type e = e_start; e < e_end; e++) {
+            {{ dt.name}}_update_tprob(e);
         }
 
-        const auto n_start = NODE_RANGE->start(thread_idx);
-        const auto n_end = NODE_RANGE->end(thread_idx);
-        for (size_type v = n_start; v < n_end; v++) {
-            {{ dt.name}}_transmit_kernel(v, NODE_TABLE, EDGE_TABLE, IN_INC_CSR, rnd);
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+        for (size_type v = v_start; v < v_end; v++) {
+            {{ dt.name}}_transmit(v, rnd, thread_idx, v_start);
         }
     }
+
+    {{ dt.output_gvar }}->save_transmissions(tick);
 }
 {% endmacro %}
 
@@ -589,10 +802,10 @@ void
     {{ type }} {{ name }};
 {% endfor %}
 {% for name in f.nodesets %}
-    nodeset {{ name }}(NUM_NODES);
+    nodeset {{ name }};
 {% endfor %}
 {% for name in f.edgesets %}
-    edgeset {{ name }}(NUM_EDGES);
+    edgeset {{ name }};
 {% endfor %}
 
 {{ f.body }}
@@ -612,15 +825,16 @@ void
 #include <H5Cpp.h>
 
 // ----------------------------------------------------------------------------
-// Common utility methods
+// Common types
 // ----------------------------------------------------------------------------
 
+{% for t in s.deferred_types %}
+typedef {{ t.base_ctype }} {{ t.name }};
+{% endfor %}
 
-typedef {{ s.node_idx_type }} node_index_type;
-typedef {{ s.edge_idx_type }} edge_index_type;
-typedef uint64_t size_type;
-typedef double float_type;
-typedef std::mt19937 rnd_state_type;
+{% for t in s.deferred_types %}
+const H5::PredType {{ t.h5_type }} = {{ t.base_h5_type }};
+{% endfor %}
 
 {{ util_methods() }}
 
@@ -648,11 +862,23 @@ typedef std::mt19937 rnd_state_type;
 {{ global_variable(v) }}
 {% endfor %}
 
+size_type NUM_THREADS = 0;
+size_type NUM_NODES = 0;
+size_type NUM_EDGES = 0;
+
 // ----------------------------------------------------------------------------
 // Incidence network (target_node_index, edge_index)
 // ----------------------------------------------------------------------------
 
 {{ in_inc_csr(s.in_inc_csr) }}
+
+in_inc_csr* IN_INC_CSR = nullptr;
+
+{{ thread_node_range() }}
+{{ thread_edge_range() }}
+
+thread_edge_range* EDGE_RANGE = nullptr;
+thread_node_range* NODE_RANGE = nullptr;
 
 // ----------------------------------------------------------------------------
 // Node table
@@ -660,29 +886,40 @@ typedef std::mt19937 rnd_state_type;
 
 {{ node_table(s.node_table) }}
 
+node_table *NODE_TABLE = nullptr;
+
 // ----------------------------------------------------------------------------
 // Edge table
 // ----------------------------------------------------------------------------
 
 {{ edge_table(s.edge_table) }}
 
+edge_table* EDGE_TABLE = nullptr;
+
 // ----------------------------------------------------------------------------
-// System global variables
+// Contagion output containers
 // ----------------------------------------------------------------------------
+
+H5::H5File* OUTPUT_FILE = nullptr;
+
+{% for o in s.contagion_outputs %}
+{{ contagion_output_type(o) }}
+{% endfor %}
+
+{% for o in s.contagion_outputs %}
+{{ contagion_output_var(o) }}
+{% endfor %}
+
+// ----------------------------------------------------------------------------
+// Random number generator
+// ----------------------------------------------------------------------------
+
+typedef std::mt19937 rnd_state_type;
+
+{{ rnd_state() }}
 
 rnd_state* RND_STATE = nullptr;
 std::uniform_real_distribution<float_type> uniform01 { 0.0, 1.0 };
-
-size_type NUM_NODES = 0;
-size_type NUM_EDGES = 0;
-
-in_inc_csr* IN_INC_CSR = nullptr;
-thread_edge_range* EDGE_RANGE = nullptr;
-thread_node_range* NODE_RANGE = nullptr;
-node_table *NODE_TABLE = nullptr;
-edge_table* EDGE_TABLE = nullptr;
-
-H5::H5File* OUTPUT_FILE = nullptr;
 
 // ----------------------------------------------------------------------------
 // Constant distributions
@@ -754,11 +991,8 @@ H5::H5File* OUTPUT_FILE = nullptr;
 
 int main() {
     const auto init_start{std::chrono::steady_clock::now()};
-    const auto num_threads = omp_get_max_threads();
-    std::cout << "### num_threads: " << num_threads << std::endl;
-
-    rnd_state rnd;
-    RND_STATE = &rnd;
+    NUM_THREADS = omp_get_max_threads();
+    std::cout << "### num_threads: " << NUM_THREADS << std::endl;
 
     {% for c in s.configs %}
     {
@@ -796,25 +1030,43 @@ int main() {
     NUM_EDGES = get_num_edges(input_file);
     std::cout << "### num_edges: " << NUM_EDGES << std::endl;
 
-    in_inc_csr csr(input_file, NUM_NODES);
+    in_inc_csr csr(input_file);
     IN_INC_CSR = &csr;
 
-    thread_edge_range edge_range(NUM_EDGES, num_threads);
+    thread_edge_range edge_range;
     EDGE_RANGE = &edge_range;
 
-    thread_node_range node_range(csr.indptr, NUM_NODES, num_threads);
+    thread_node_range node_range;
     NODE_RANGE = &node_range;
 
-    node_table nt(input_file, NUM_NODES);
+    node_table nt(input_file);
     NODE_TABLE = &nt;
 
-    edge_table et(input_file, NUM_EDGES);
+    edge_table et(input_file);
     EDGE_TABLE = &et;
 
     input_file.close();
 
     H5::H5File output_file(output_file_name, H5F_ACC_TRUNC);
     OUTPUT_FILE = &output_file;
+
+    {
+        H5::Group group = OUTPUT_FILE->createGroup("/transitions");
+        group.close();
+    }
+
+    {
+        H5::Group group = OUTPUT_FILE->createGroup("/transmissions");
+        group.close();
+    }
+
+    {% for o in s.contagion_outputs %}
+    {{ o.name }} {{ o.gvar_name | lower }};
+    {{ o.gvar_name }} = &{{ o.gvar_name | lower }};
+    {% endfor %}
+
+    rnd_state rnd;
+    RND_STATE = &rnd;
 
     const auto init_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> init_seconds{init_end - init_start};

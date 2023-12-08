@@ -181,8 +181,8 @@ def main():
         cur_tick += 1
         print("cur_tick = ", cur_tick)
 
-        c1.do_transmission()
-        c1.do_transition(1.0)
+        c1.do_transmission(cur_tick)
+        c1.do_transition(cur_tick, 1.0)
 
         if cur_tick < 10:
             # select susceptibles using is_susceptible

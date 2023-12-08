@@ -42,13 +42,11 @@ def gen_cmake_lists(source: Source) -> str:
     return template.render(source=source)
 
 
-def do_build(
-    output: Path | None, input: Path, node_idx_type: str, edge_idx_type: str
-) -> Path:
+def do_build(output: Path | None, input: Path) -> Path:
     input_bytes = input.read_bytes()
     pt = mk_pt(str(input), input_bytes)
     ast1 = mk_ast1(input, pt)
-    ir1 = mk_ir1(ast1, node_idx_type, edge_idx_type)
+    ir1 = mk_ir1(ast1)
 
     if output is None:
         output = input.parent
@@ -81,11 +79,8 @@ def codegen_cpu():
 )
 def build(output: Path | None, input: Path):
     """Build simulator."""
-    node_idx_type = "uint32_t"
-    edge_idx_type = "uint64_t"
-
     try:
-        do_build(output, input, node_idx_type, edge_idx_type)
+        do_build(output, input)
     except (ParseTreeConstructionError, ASTConstructionError, IRConstructionError) as e:
         e.rich_print()
 
@@ -109,9 +104,6 @@ def verbose_run(cmd, *args, **kwargs):
 )
 def run(input: Path):
     """Build and run simulator."""
-    node_idx_type = "uint32_t"
-    edge_idx_type = "uint64_t"
-
     try:
         with TemporaryDirectory(
             prefix=f"{input.stem}-", suffix="-episim37"
@@ -120,7 +112,7 @@ def run(input: Path):
             rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
 
             rich.print("[cyan]Creating simulator[/cyan]")
-            output = do_build(output, input, node_idx_type, edge_idx_type)
+            output = do_build(output, input)
 
             rich.print("[cyan]Running cmake[/cyan]")
             cmd = "cmake ."

@@ -73,12 +73,14 @@ def enum_base_type(t: ast1.EnumType) -> str:
 
 
 def ctype(t: str) -> str:
+    """ESL type to C type."""
+
     # fmt: off
     type_map = {
-        "int":   "int64_t",
-        "uint":  "uint64_t",
-        "float": "double",
-        "bool":  "uint8_t",
+        "int":   "int_type",
+        "uint":  "uint_type",
+        "float": "float_type",
+        "bool":  "bool_type",
 
         "u8":  "uint8_t",
         "u16": "uint16_t",
@@ -93,8 +95,8 @@ def ctype(t: str) -> str:
         "f32": "float",
         "f64": "double",
 
-        "node":  "node",
-        "edge":  "edge",
+        "node":  "node_type",
+        "edge":  "edge_type",
     }
     # fmt: on
 
@@ -102,6 +104,8 @@ def ctype(t: str) -> str:
 
 
 def hdf5_type(t: str) -> str:
+    """C type to HDF5 type."""
+
     # fmt: off
     type_map = {
         "uint8_t": "H5::PredType::NATIVE_UINT8",
@@ -119,16 +123,29 @@ def hdf5_type(t: str) -> str:
     }
     # fmt: on
 
-    return type_map[t]
+    if t in type_map:
+        return type_map[t]
+
+    return "LOCAL_H5_TYPE_" + t.upper()
 
 
 def cstr_to_ctype_fn(t: str) -> str:
     match t:
-        case ("int8_t" | "int16_t" | "int32_t" | "int64_t"):
+        case ("int_type" | "int8_t" | "int16_t" | "int32_t" | "int64_t"):
             return "std::stol"
-        case ("uint8_t" | "uint16_t" | "uint32_t" | "uint64_t"):
+        case (
+            "uint_type"
+            | "bool_type"
+            | "size_type"
+            | "node_index_type"
+            | "edge_index_type"
+            | "uint8_t"
+            | "uint16_t"
+            | "uint32_t"
+            | "uint64_t"
+        ):
             return "std::stoul"
-        case ("float" | "double"):
+        case ("float_type", "float" | "double"):
             return "std::stod"
         case _ as unexpected:
             raise ValueError(unexpected)
@@ -141,14 +158,11 @@ def make_line(pos: SourcePosition | None) -> str:
     return f'#line {pos.line} "{pos.source}"'
 
 
-def mangle(x: str | list[str]) -> str:
-    match x:
-        case str():
-            return "_" + x
-        case list():
-            return "_" + "__".join(x)
-        case _ as unexpected:
-            assert_never(unexpected)
+def mangle(*args: str) -> str:
+    if len(args) == 1:
+        return "_" + args[0]
+
+    return "_" + "__".join(args)
 
 
 def typename(t: ast1.EnumType | ast1.BuiltinType) -> str:
@@ -171,10 +185,6 @@ def h5_typename(t: ast1.EnumType | ast1.BuiltinType) -> str:
             assert_never(unexpected)
 
 
-def internal_field(c: ast1.Contagion, name: str) -> str:
-    return mangle(c.name) + "_" + name
-
-
 def ref(x: ast1.Referable) -> str:
     match x:
         case ast1.EnumConstant():
@@ -190,9 +200,9 @@ def ref(x: ast1.Referable) -> str:
         case ast1.Function():
             return mangle(x.name)
         case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
-            return mangle([c.name, f.name])
+            return mangle(c.name, f.name)
         case [ast1.Contagion() as c, ast1.Function() as f]:
-            return mangle([c.name, f.name])
+            return mangle(c.name, f.name)
         case [ast1.Param() | ast1.Variable() as n, ast1.NodeField() as f]:
             n_ref = ref(n)
             f_ref = mangle(f.name)
@@ -207,20 +217,20 @@ def ref(x: ast1.Referable) -> str:
             ast1.NodeField() as f,
         ]:
             n_ref = ref(n)
-            f_ref = mangle([c.name, f.name])
+            f_ref = mangle(c.name, f.name)
             return f"{n_ref}.n->{f_ref}[{n_ref}.i]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.SourceNodeAccessor(),
         ]:
             e_ref = ref(e)
-            return f"node({e_ref}.n, {e_ref}.e->source_node_idx[{e_ref}.i])"
+            return f"node_type({e_ref}.n, {e_ref}.e->source_node_index[{e_ref}.i])"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.TargetNodeAccessor(),
         ]:
             e_ref = ref(e)
-            return f"node({e_ref}.n, {e_ref}.e->target_node_idx[{e_ref}.i])"
+            return f"node_type({e_ref}.n, {e_ref}.e->target_node_index[{e_ref}.i])"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.SourceNodeAccessor(),
@@ -228,7 +238,7 @@ def ref(x: ast1.Referable) -> str:
         ]:
             e_ref = ref(e)
             f_ref = mangle(f.name)
-            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_idx[{e_ref}.i]]"
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_index[{e_ref}.i]]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.SourceNodeAccessor(),
@@ -236,8 +246,8 @@ def ref(x: ast1.Referable) -> str:
             ast1.NodeField() as f,
         ]:
             e_ref = ref(e)
-            f_ref = mangle([c.name, f.name])
-            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_idx[{e_ref}.i]]"
+            f_ref = mangle(c.name, f.name)
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->source_node_index[{e_ref}.i]]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.TargetNodeAccessor(),
@@ -245,7 +255,7 @@ def ref(x: ast1.Referable) -> str:
         ]:
             e_ref = ref(e)
             f_ref = mangle(f.name)
-            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_idx[{e_ref}.i]]"
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_index[{e_ref}.i]]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.TargetNodeAccessor(),
@@ -253,8 +263,8 @@ def ref(x: ast1.Referable) -> str:
             ast1.NodeField() as f,
         ]:
             e_ref = ref(e)
-            f_ref = mangle([c.name, f.name])
-            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_idx[{e_ref}.i]]"
+            f_ref = mangle(c.name, f.name)
+            return f"{e_ref}.n->{f_ref}[{e_ref}.e->target_node_index[{e_ref}.i]]"
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -330,12 +340,27 @@ class StaticField:
 
 
 @attrs.define
+class CsrIncMatrix:
+    indptr: StaticField
+
+    @classmethod
+    def make(cls) -> CsrIncMatrix:
+        return cls(
+            indptr=StaticField(
+                "/incoming/incidence/csr/indptr",
+                "edge_index_type",
+                hdf5_type("edge_index_type"),
+            ),
+        )
+
+
+@attrs.define
 class NodeTable:
     fields: list[Field]
     line: str
 
     @classmethod
-    def make(cls, tab: ast1.NodeTable, edge_idx_type: str) -> NodeTable:
+    def make(cls, tab: ast1.NodeTable) -> NodeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
@@ -348,22 +373,13 @@ class NodeTable:
 
         for contagion in tab.contagions:
             for field in [contagion.state, contagion.next_state, contagion.dwell_time]:
-                name = mangle([contagion.name, field.name])
+                name = mangle(contagion.name, field.name)
                 dataset_name = f"/node/{contagion.name}/{field.name}"
                 type = typename(field.type.resolve())
                 h5_type = h5_typename(field.type.resolve())
                 is_static = field.is_static
                 line = make_line(field.pos)
                 fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
-
-        for c in tab.contagions:
-            name = internal_field(c, "transmission_source")
-            dataset_name = f"/node/{name}"
-            type = edge_idx_type
-            h5_type = hdf5_type(edge_idx_type)
-            is_static = False
-            line = make_line(None)
-            fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         line = make_line(tab.pos)
         return cls(fields, line)
@@ -372,12 +388,12 @@ class NodeTable:
 @attrs.define
 class EdgeTable:
     fields: list[Field]
-    target_node_idx: StaticField
-    source_node_idx: StaticField
+    target_node_index: StaticField
+    source_node_index: StaticField
     line: str
 
     @classmethod
-    def make(cls, tab: ast1.EdgeTable, node_idx_type: str) -> EdgeTable:
+    def make(cls, tab: ast1.EdgeTable) -> EdgeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
@@ -389,42 +405,43 @@ class EdgeTable:
             fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
         for c in tab.contagions:
-            name = internal_field(c, "transmission_prob")
+            name = mangle(c.name) + "_transmission_prob"
             dataset_name = f"/edge/{name}"
-            type = "double"
-            h5_type = hdf5_type("double")
+            type = "float_type"
+            h5_type = hdf5_type("float_type")
             is_static = False
             line = make_line(None)
             fields.append(Field(name, dataset_name, type, h5_type, is_static, line))
 
-        target_node_idx = StaticField(
-            dataset_name="/edge/_target_node_idx",
-            type=node_idx_type,
-            h5_type=hdf5_type(node_idx_type),
+        target_node_index = StaticField(
+            dataset_name="/edge/_target_node_index",
+            type="node_index_type",
+            h5_type=hdf5_type("node_index_type"),
         )
-        source_node_idx = StaticField(
-            dataset_name="/edge/_source_node_idx",
-            type=node_idx_type,
-            h5_type=hdf5_type(node_idx_type),
+        source_node_index = StaticField(
+            dataset_name="/edge/_source_node_index",
+            type="node_index_type",
+            h5_type=hdf5_type("node_index_type"),
         )
 
         line = make_line(tab.pos)
-        return cls(fields, target_node_idx, source_node_idx, line)
+        return cls(fields, target_node_index, source_node_index, line)
 
 
 @attrs.define
-class CsrIncMatrix:
-    indptr: StaticField
+class ContagionOutput:
+    name: str
+    state_type: str
+    state_h5_type: str
+    gvar_name: str
 
     @classmethod
-    def make(cls, edge_idx_type: str) -> CsrIncMatrix:
-        return cls(
-            indptr=StaticField(
-                "/incoming/incidence/csr/indptr",
-                edge_idx_type,
-                hdf5_type(edge_idx_type),
-            ),
-        )
+    def make(cls, c: ast1.Contagion) -> ContagionOutput:
+        name = mangle(c.name) + "_output_type"
+        state_type = typename(c.state_type.resolve())
+        state_h5_type = h5_typename(c.state_type.resolve())
+        gvar_name = mangle(c.name) + "_OUTPUT"
+        return cls(name, state_type, state_h5_type, gvar_name)
 
 
 @attrs.define
@@ -544,6 +561,8 @@ class MultiEdgeTransition:
 class DoTransition:
     name: str
     state_type: str
+    output_type: str
+    output_gvar: str
     state: str
     next_state: str
     dwell_time: str
@@ -552,7 +571,7 @@ class DoTransition:
     notrans: list[str]  # entry
 
     @classmethod
-    def make(cls, c: ast1.Contagion) -> DoTransition:
+    def make(cls, c: ast1.Contagion, o: ContagionOutput) -> DoTransition:
         name = ref((c, c.do_transition))
         state_type = typename(c.state_type.resolve())
 
@@ -574,11 +593,20 @@ class DoTransition:
             if const not in entry_transi:
                 notrans.append(const)
 
-        state = mangle([c.name, c.state.name])
-        next_state = mangle([c.name, c.next_state.name])
-        dwell_time = mangle([c.name, c.dwell_time.name])
+        state = mangle(c.name, c.state.name)
+        next_state = mangle(c.name, c.next_state.name)
+        dwell_time = mangle(c.name, c.dwell_time.name)
         return cls(
-            name, state_type, state, next_state, dwell_time, single, multi, notrans
+            name=name,
+            state_type=state_type,
+            output_type=o.name,
+            output_gvar=o.gvar_name,
+            state=state,
+            next_state=next_state,
+            dwell_time=dwell_time,
+            single=single,
+            multi=multi,
+            notrans=notrans,
         )
 
 
@@ -586,9 +614,10 @@ class DoTransition:
 class DoTransmission:
     name: str
     state_type: str
+    output_type: str
+    output_gvar: str
     state: str
     tprob: str
-    tsource: str
     transms: list[tuple[str, list[tuple[str, str]]]]  # entry -> [contact, exit]
     susceptibility: str
     infectivity: str
@@ -596,7 +625,7 @@ class DoTransmission:
     enabled: str
 
     @classmethod
-    def make(cls, c: ast1.Contagion):
+    def make(cls, c: ast1.Contagion, o: ContagionOutput):
         name = ref((c, c.do_transmission))
         state_type = typename(c.state_type.resolve())
 
@@ -613,18 +642,20 @@ class DoTransmission:
         transmissibility = ref((c, c.transmissibility))
         enabled = ref((c, c.enabled))
 
-        state = mangle([c.name, c.state.name])
+        state = mangle(c.name, c.state.name)
+        tprob = mangle(c.name) + "_transmission_prob"
         return cls(
-            name,
-            state_type,
-            state,
-            internal_field(c, "transmission_prob"),
-            internal_field(c, "transmission_source"),
-            transms,
-            susceptibility,
-            infectivity,
-            transmissibility,
-            enabled,
+            name=name,
+            state_type=state_type,
+            output_type=o.name,
+            output_gvar=o.gvar_name,
+            state=state,
+            tprob=tprob,
+            transms=transms,
+            susceptibility=susceptibility,
+            infectivity=infectivity,
+            transmissibility=transmissibility,
+            enabled=enabled,
         )
 
 
@@ -831,14 +862,35 @@ class Function:
 
 
 @attrs.define
+class DeferredType:
+    name: str
+    base_ctype: str
+    h5_type: str
+    base_h5_type: str
+
+
+DEFERRED_TYPES = {
+    "int_type": "int64_t",
+    "uint_type": "uint64_t",
+    "float_type": "double",
+    "bool_type": "uint8_t",
+    "size_type": "uint64_t",
+    "node_index_type": "uint32_t",
+    "edge_index_type": "uint64_t",
+}
+
+
+@attrs.define
 class Source:
     module: str
+    deferred_types: list[DeferredType]
     enums: list[EnumType]
     configs: list[Config]
     variables: list[Variable]
     node_table: NodeTable
     edge_table: EdgeTable
     in_inc_csr: CsrIncMatrix
+    contagion_outputs: list[ContagionOutput]
     constant_dists: list[ConstantDist]
     discrete_dists: list[DiscreteDist]
     uniform_dists: list[UniformDist]
@@ -846,18 +898,23 @@ class Source:
     do_transitions: list[DoTransition]
     do_transmissions: list[DoTransmission]
     functions: list[Function]
-    node_idx_type: str
-    edge_idx_type: str
 
     @classmethod
-    def make(cls, x: ast1.Source, node_idx_type: str, edge_idx_type: str) -> Source:
+    def make(cls, x: ast1.Source) -> Source:
         module = x.module
+
+        deferred_types = []
+        for type, base_ctype in DEFERRED_TYPES.items():
+            deferred_types.append(
+                DeferredType(type, base_ctype, hdf5_type(type), hdf5_type(base_ctype))
+            )
+
         enums = [EnumType.make(e) for e in x.enums]
         configs = [Config.make(c) for c in x.configs]
         variables = [Variable.make(v) for v in x.variables]
-        node_table = NodeTable.make(x.node_table, edge_idx_type)
-        edge_table = EdgeTable.make(x.edge_table, node_idx_type)
-        in_inc_csr = CsrIncMatrix.make(edge_idx_type)
+        node_table = NodeTable.make(x.node_table)
+        edge_table = EdgeTable.make(x.edge_table)
+        in_inc_csr = CsrIncMatrix.make()
 
         constant_dists: list[ConstantDist] = []
         discrete_dists: list[DiscreteDist] = []
@@ -876,8 +933,13 @@ class Source:
                 case _ as unexpected:
                     assert_never(unexpected)
 
-        do_transitions = [DoTransition.make(c) for c in x.contagions]
-        do_transmissions = [DoTransmission.make(c) for c in x.contagions]
+        contagion_outputs = [ContagionOutput.make(c) for c in x.contagions]
+        do_transitions = [
+            DoTransition.make(c, o) for c, o in zip(x.contagions, contagion_outputs)
+        ]
+        do_transmissions = [
+            DoTransmission.make(c, o) for c, o in zip(x.contagions, contagion_outputs)
+        ]
 
         functions: list[Function] = []
         for c in x.contagions:
@@ -901,12 +963,14 @@ class Source:
 
         return cls(
             module=module,
+            deferred_types=deferred_types,
             enums=enums,
             configs=configs,
             variables=variables,
             node_table=node_table,
             edge_table=edge_table,
             in_inc_csr=in_inc_csr,
+            contagion_outputs=contagion_outputs,
             constant_dists=constant_dists,
             discrete_dists=discrete_dists,
             uniform_dists=uniform_dists,
@@ -914,14 +978,12 @@ class Source:
             do_transitions=do_transitions,
             do_transmissions=do_transmissions,
             functions=functions,
-            node_idx_type=node_idx_type,
-            edge_idx_type=edge_idx_type,
         )
 
 
-def mk_ir1(source: ast1.Source, node_idx_type: str, edge_idx_type: str) -> Source:
+def mk_ir1(source: ast1.Source) -> Source:
     """Make ir1 from ast1."""
-    return Source.make(source, node_idx_type, edge_idx_type)
+    return Source.make(source)
 
 
 @click.command()
@@ -932,13 +994,10 @@ def mk_ir1(source: ast1.Source, node_idx_type: str, edge_idx_type: str) -> Sourc
 def print_ir1(filename: Path):
     """Print the IR1."""
     file_bytes = filename.read_bytes()
-    node_idx_type = "uint32_t"
-    edge_idx_type = "uint64_t"
-
     try:
         pt = mk_pt(str(filename), file_bytes)
         ast1 = mk_ast1(filename, pt)
-        ir1 = mk_ir1(ast1, node_idx_type, edge_idx_type)
+        ir1 = mk_ir1(ast1)
         rich.print(ir1)
     except (ParseTreeConstructionError, ASTConstructionError, IRConstructionError) as e:
         e.rich_print()
