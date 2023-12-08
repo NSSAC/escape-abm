@@ -2,9 +2,11 @@
 Nodeset 1
 =========
 
+nodeset seed_nodes
 __test statement:
-    nodeset seed_nodes
-    update seed_nodes = { n : uniform() < 0.1 }
+    select seed_nodes using uniform01
+    select seed_nodes sample approx 5 from susceptible
+    select will_start_isolation sample relative 0.8 from positive_inschool_nodes
     foreach n in seed_nodes:
         n.state = E
     end
@@ -13,19 +15,21 @@ end
 ---
 
 (source_file
+    (nodeset (identifier))
     (test_statement
-        (nodeset (identifier))
-        (update_set
+        (select_using
             (identifier)
-            (filter_expression
-                (identifier)
-                (binary_expression
-                    (function_call
-                        (reference (identifier))
-                    )
-                    (float)
-                )
-            )
+            (identifier)
+        )
+        (select_approx
+            (identifier)
+            (integer)
+            (identifier)
+        )
+        (select_relative
+            (identifier)
+            (float)
+            (identifier)
         )
         (foreach_loop
             (identifier)

@@ -455,19 +455,11 @@
             "named": true
           },
           {
-            "type": "edgeset",
-            "named": true
-          },
-          {
             "type": "foreach_loop",
             "named": true
           },
           {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset",
             "named": true
           },
           {
@@ -483,7 +475,15 @@
             "named": true
           },
           {
-            "type": "update_set",
+            "type": "select_approx",
+            "named": true
+          },
+          {
+            "type": "select_relative",
+            "named": true
+          },
+          {
+            "type": "select_using",
             "named": true
           },
           {
@@ -553,19 +553,11 @@
             "named": true
           },
           {
-            "type": "edgeset",
-            "named": true
-          },
-          {
             "type": "foreach_loop",
             "named": true
           },
           {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset",
             "named": true
           },
           {
@@ -581,7 +573,15 @@
             "named": true
           },
           {
-            "type": "update_set",
+            "type": "select_approx",
+            "named": true
+          },
+          {
+            "type": "select_relative",
+            "named": true
+          },
+          {
+            "type": "select_using",
             "named": true
           },
           {
@@ -631,60 +631,6 @@
     }
   },
   {
-    "type": "filter_expression",
-    "named": true,
-    "fields": {
-      "condition": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expression",
-            "named": true
-          },
-          {
-            "type": "boolean",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "function_call",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "parenthesized_expression",
-            "named": true
-          },
-          {
-            "type": "reference",
-            "named": true
-          },
-          {
-            "type": "unary_expression",
-            "named": true
-          }
-        ]
-      },
-      "var": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "foreach_loop",
     "named": true,
     "fields": {
@@ -697,19 +643,11 @@
             "named": true
           },
           {
-            "type": "edgeset",
-            "named": true
-          },
-          {
             "type": "foreach_loop",
             "named": true
           },
           {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset",
             "named": true
           },
           {
@@ -725,7 +663,15 @@
             "named": true
           },
           {
-            "type": "update_set",
+            "type": "select_approx",
+            "named": true
+          },
+          {
+            "type": "select_relative",
+            "named": true
+          },
+          {
+            "type": "select_using",
             "named": true
           },
           {
@@ -823,19 +769,11 @@
           "named": true
         },
         {
-          "type": "edgeset",
-          "named": true
-        },
-        {
           "type": "foreach_loop",
           "named": true
         },
         {
           "type": "if_statement",
-          "named": true
-        },
-        {
-          "type": "nodeset",
           "named": true
         },
         {
@@ -851,7 +789,15 @@
           "named": true
         },
         {
-          "type": "update_set",
+          "type": "select_approx",
+          "named": true
+        },
+        {
+          "type": "select_relative",
+          "named": true
+        },
+        {
+          "type": "select_using",
           "named": true
         },
         {
@@ -981,19 +927,11 @@
             "named": true
           },
           {
-            "type": "edgeset",
-            "named": true
-          },
-          {
             "type": "foreach_loop",
             "named": true
           },
           {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset",
             "named": true
           },
           {
@@ -1009,7 +947,15 @@
             "named": true
           },
           {
-            "type": "update_set",
+            "type": "select_approx",
+            "named": true
+          },
+          {
+            "type": "select_relative",
+            "named": true
+          },
+          {
+            "type": "select_using",
             "named": true
           },
           {
@@ -1386,7 +1332,7 @@
     }
   },
   {
-    "type": "sample_expression",
+    "type": "select_approx",
     "named": true,
     "fields": {
       "amount": {
@@ -1413,17 +1359,79 @@
           }
         ]
       },
-      "type": {
+      "set": {
         "multiple": false,
         "required": true,
         "types": [
           {
-            "type": "approx",
-            "named": false
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "select_relative",
+    "named": true,
+    "fields": {
+      "amount": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "float",
+            "named": true
           },
           {
-            "type": "relative",
-            "named": false
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "parent": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "select_using",
+    "named": true,
+    "fields": {
+      "funcion": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
           }
         ]
       }
@@ -1454,6 +1462,10 @@
           "named": true
         },
         {
+          "type": "edgeset",
+          "named": true
+        },
+        {
           "type": "enum",
           "named": true
         },
@@ -1463,6 +1475,10 @@
         },
         {
           "type": "node",
+          "named": true
+        },
+        {
+          "type": "nodeset",
           "named": true
         },
         {
@@ -1537,19 +1553,11 @@
           "named": true
         },
         {
-          "type": "edgeset",
-          "named": true
-        },
-        {
           "type": "foreach_loop",
           "named": true
         },
         {
           "type": "if_statement",
-          "named": true
-        },
-        {
-          "type": "nodeset",
           "named": true
         },
         {
@@ -1565,7 +1573,15 @@
           "named": true
         },
         {
-          "type": "update_set",
+          "type": "select_approx",
+          "named": true
+        },
+        {
+          "type": "select_relative",
+          "named": true
+        },
+        {
+          "type": "select_using",
           "named": true
         },
         {
@@ -1808,36 +1824,6 @@
     }
   },
   {
-    "type": "update_set",
-    "named": true,
-    "fields": {
-      "expression": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "filter_expression",
-            "named": true
-          },
-          {
-            "type": "sample_expression",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "update_statement",
     "named": true,
     "fields": {
@@ -1998,19 +1984,11 @@
             "named": true
           },
           {
-            "type": "edgeset",
-            "named": true
-          },
-          {
             "type": "foreach_loop",
             "named": true
           },
           {
             "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "nodeset",
             "named": true
           },
           {
@@ -2026,7 +2004,15 @@
             "named": true
           },
           {
-            "type": "update_set",
+            "type": "select_approx",
+            "named": true
+          },
+          {
+            "type": "select_relative",
+            "named": true
+          },
+          {
+            "type": "select_using",
             "named": true
           },
           {
@@ -2364,6 +2350,10 @@
     "named": false
   },
   {
+    "type": "select",
+    "named": false
+  },
+  {
     "type": "state type",
     "named": false
   },
@@ -2392,7 +2382,7 @@
     "named": false
   },
   {
-    "type": "update",
+    "type": "using",
     "named": false
   },
   {
@@ -2405,14 +2395,6 @@
   },
   {
     "type": "while",
-    "named": false
-  },
-  {
-    "type": "{",
-    "named": false
-  },
-  {
-    "type": "}",
     "named": false
   }
 ]

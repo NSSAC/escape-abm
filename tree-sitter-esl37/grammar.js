@@ -25,6 +25,8 @@ module.exports = grammar({
             $.edge,
             $.distributions,
             $.contagion,
+            $.nodeset,
+            $.edgeset,
             $.function,
             $.test_statement,
             $.test_expression
@@ -226,9 +228,9 @@ module.exports = grammar({
             $.update_statement,
             $.print_statement,
             $.variable,
-            $.nodeset,
-            $.edgeset,
-            $.update_set,
+            $.select_using,
+            $.select_approx,
+            $.select_relative,
             $.foreach_loop,
         ),
 
@@ -361,27 +363,32 @@ module.exports = grammar({
             field('name', $.identifier),
         ),
 
-        update_set: $ => seq(
-            'update',
-            field('name', $.identifier),
-            '=',
-            field('expression', choice($.filter_expression, $.sample_expression)),
+        select_using: $ => seq(
+            'select',
+            field('set', $.identifier),
+            'using',
+            field('funcion', $.identifier),
+            $._terminator,
         ),
 
-        filter_expression: $ => seq(
-            '{',
-            field('var', $.identifier),
-            ':',
-            field('condition', $._expression),
-            '}'
-        ),
-
-        sample_expression: $ => seq(
-            'sample',
-            field('type', choice('approx', 'relative')),
+        select_approx: $ => seq(
+            'select',
+            field('set', $.identifier),
+            'sample', 'approx',
             field('amount', $._number),
             'from',
-            field('parent', $.identifier)
+            field('parent', $.identifier),
+            $._terminator,
+        ),
+
+        select_relative: $ => seq(
+            'select',
+            field('set', $.identifier),
+            'sample', 'relative',
+            field('amount', $._number),
+            'from',
+            field('parent', $.identifier),
+            $._terminator,
         ),
 
         foreach_loop: $ => seq(
