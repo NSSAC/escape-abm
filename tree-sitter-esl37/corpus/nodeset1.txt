@@ -7,9 +7,7 @@ __test statement:
     select seed_nodes using uniform01
     select seed_nodes sample approx 5 from susceptible
     select will_start_isolation sample relative 0.8 from positive_inschool_nodes
-    foreach n in seed_nodes:
-        n.state = E
-    end
+    foreach node in seed_nodes run some_function
 end
 
 ---
@@ -31,13 +29,9 @@ end
             (float)
             (identifier)
         )
-        (foreach_loop
+        (foreach_statement
             (identifier)
             (identifier)
-            (update_statement
-                (reference (identifier) (identifier))
-                (reference (identifier))
-            )
         )
     )
 )

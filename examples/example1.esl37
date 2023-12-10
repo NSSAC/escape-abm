@@ -7,16 +7,11 @@ config enable_day_30_pcr_test: bool = True
 config num_ticks: int = 10
 var cur_tick: int = 0
 
-enum race_t
-    asian, ameican
-end
-
 node
     pid: int node key static
     is_in_school: bool static
     home_isolation_start: int
     home_isolation_end: int
-    race: race_t
 end
 
 edge
@@ -163,20 +158,12 @@ def get_node_state(n: node) -> c1_state_t:
     return n.c1.state
 end
 
-# output
-    # node reduction mean_age using get_node_age
-    # node histogram state_count c1_state_t
-    # node histogram state_age_count range [0, 100]
-# end
+nodeset susceptibles
+nodeset seed_nodes
+nodeset positive_inschool_nodes
+nodeset will_start_isolation
 
 def main():
-    nodeset susceptibles
-    nodeset seed_nodes
-    nodeset positive_inschool_nodes
-    nodeset will_start_isolation
-
-    # setup_output(num_ticks)
-
     while cur_tick < num_ticks:
         cur_tick += 1
         print("cur_tick = ", cur_tick)
@@ -185,29 +172,25 @@ def main():
         c1.do_transition(cur_tick, 1.0)
 
         if cur_tick < 10:
-            # select susceptibles using is_susceptible
-            # select seed_nodes sample approx 5 from susceptible
-            # foreach node in seed_nodes run set_seed
-            pass
+            select susceptibles using is_susceptible
+            select seed_nodes sample approx 5 from susceptibles
+            foreach node in seed_nodes run set_seed
         end
 
+        select susceptibles using is_susceptible
+
         if (enable_day_30_antigen_test or enable_day_30_pcr_test) and cur_tick >= 30:
-            # select positive_inschool_nodes using is_positive_inschool_node
-            pass
+            select positive_inschool_nodes using is_positive_inschool_node
         end
 
         if enable_day_30_antigen_test and cur_tick >= 30:
-            # select will_start_isolation sample relative 0.8 from positive_inschool_nodes
-            # foreach node in will_start_isolation run start_isolation_a
-            pass
+            select will_start_isolation sample relative 0.8 from positive_inschool_nodes
+            foreach node in will_start_isolation run start_isolation_a
         end
 
         if enable_day_30_pcr_test and cur_tick >= 30:
-            # select will_start_isolation sample relative 0.95 from positive_inschool_nodes
-            # foreach node in will_start_isolation run start_isolation_b
-            pass
+            select will_start_isolation sample relative 0.95 from positive_inschool_nodes
+            foreach node in will_start_isolation run start_isolation_b
         end
-
-        # save mean_age(cur_tick)
     end
 end

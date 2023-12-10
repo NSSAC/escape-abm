@@ -199,6 +199,10 @@ def ref(x: ast1.Referable) -> str:
             return mangle(x.name)
         case ast1.Function():
             return mangle(x.name)
+        case ast1.NodeSet():
+            return mangle(x.name)
+        case ast1.EdgeSet():
+            return mangle(x.name)
         case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
             return mangle(c.name, f.name)
         case [ast1.Contagion() as c, ast1.Function() as f]:
@@ -659,6 +663,66 @@ class DoTransmission:
         )
 
 
+@attrs.define
+class SelectUsing:
+    name: str
+    set_name: str
+    function_name: str
+
+    @classmethod
+    def make(cls, s: ast1.SelectUsing) -> SelectUsing:
+        name = s.name
+        set_name = ref(s.set.resolve())
+        function_name = ref(s.function.resolve())
+        return cls(name, set_name, function_name)
+
+
+@attrs.define
+class SelectApprox:
+    name: str
+    set_name: str
+    amount: str
+    parent_set_name: str
+
+    @classmethod
+    def make(cls, s: ast1.SelectApprox) -> SelectApprox:
+        name = s.name
+        set_name = ref(s.set.resolve())
+        amount = str(s.amount)
+        parent_set_name = ref(s.parent.resolve())
+        return cls(name, set_name, amount, parent_set_name)
+
+
+@attrs.define
+class SelectRelative:
+    name: str
+    set_name: str
+    amount: str
+    parent_set_name: str
+
+    @classmethod
+    def make(cls, s: ast1.SelectRelative) -> SelectRelative:
+        name = s.name
+        set_name = ref(s.set.resolve())
+        amount = str(s.amount)
+        parent_set_name = ref(s.parent.resolve())
+        return cls(name, set_name, amount, parent_set_name)
+
+
+@attrs.define
+class ForeachStatement:
+    name: str
+    set_name: str
+    function_name: str
+
+    @classmethod
+    def make(cls, s: ast1.ForeachStatement) -> ForeachStatement:
+        name = s.name
+        set_name = ref(s.set.resolve())
+        function_name = ref(s.function.resolve())
+        return cls(name, set_name, function_name)
+
+
 def cpp_operator(t: str) -> str:
     match t:
         case "or":
@@ -800,14 +864,18 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
             left = ref(s)
             right = expression_str(s.init)
             lines.append(f"{left} = {right};")
-        case ast1.NodeSet():
-            pass
-        case ast1.EdgeSet():
-            pass
-        case ast1.UpdateSet():
-            pass
-        case ast1.ForeachLoop():
-            pass
+        case ast1.SelectUsing():
+            lines.append(make_line(s.pos))
+            lines.append(f"{s.name}();")
+        case ast1.SelectApprox():
+            lines.append(make_line(s.pos))
+            lines.append(f"{s.name}();")
+        case ast1.SelectRelative():
+            lines.append(make_line(s.pos))
+            lines.append(f"{s.name}();")
+        case ast1.ForeachStatement():
+            lines.append(make_line(s.pos))
+            lines.append(f"{s.name}();")
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -820,8 +888,6 @@ class Function:
     params: list[tuple[str, str]]
     return_: str
     variables: list[tuple[str, str]]
-    nodesets: list[str]
-    edgesets: list[str]
     body: str
     line: str
 
@@ -844,21 +910,13 @@ class Function:
             v_type = typename(v.type.resolve())
             variables.append((v_name, v_type))
 
-        nodesets = []
-        for v in x.nodesets:
-            nodesets.append(mangle(v.name))
-
-        edgesets = []
-        for v in x.edgesets:
-            edgesets.append(mangle(v.name))
-
         body = IndentedLines(cur_indent=1)
         for s in x.body:
             body.extend(statement_lines(s, body.cur_indent + 1))
         body = body.to_string()
 
         line = make_line(x.pos)
-        return cls(name, params, return_, variables, nodesets, edgesets, body, line)
+        return cls(name, params, return_, variables, body, line)
 
 
 @attrs.define
@@ -897,7 +955,17 @@ class Source:
     normal_dists: list[NormalDist]
     do_transitions: list[DoTransition]
     do_transmissions: list[DoTransmission]
+    nodesets: list[str]
+    edgesets: list[str]
     functions: list[Function]
+    select_using_node: list[SelectUsing]
+    select_using_edge: list[SelectUsing]
+    select_approx_node: list[SelectApprox]
+    select_approx_edge: list[SelectApprox]
+    select_relative_node: list[SelectRelative]
+    select_relative_edge: list[SelectRelative]
+    foreach_node_statement: list[ForeachStatement]
+    foreach_edge_statement: list[ForeachStatement]
 
     @classmethod
     def make(cls, x: ast1.Source) -> Source:
@@ -941,6 +1009,9 @@ class Source:
             DoTransmission.make(c, o) for c, o in zip(x.contagions, contagion_outputs)
         ]
 
+        nodesets = [ref(s) for s in x.nodesets]
+        edgesets = [ref(s) for s in x.edgesets]
+
         functions: list[Function] = []
         for c in x.contagions:
             name = ref((c, c.susceptibility))
@@ -955,11 +1026,81 @@ class Source:
             name = ref((c, c.enabled))
             functions.append(Function.make(name, c.enabled))
 
+        select_using_node: list[SelectUsing] = []
+        select_using_edge: list[SelectUsing] = []
+        select_approx_node: list[SelectApprox] = []
+        select_approx_edge: list[SelectApprox] = []
+        select_relative_node: list[SelectRelative] = []
+        select_relative_edge: list[SelectRelative] = []
+        foreach_node_statement: list[ForeachStatement] = []
+        foreach_edge_statement: list[ForeachStatement] = []
+
         for f in x.functions:
             name = ref(f)
             functions.append(Function.make(name, f))
 
+            for s in f.device_statements:
+                match s:
+                    case ast1.SelectUsing():
+                        if s.type.type == "node":
+                            select_using_node.append(SelectUsing.make(s))
+                        elif s.type.type == "edge":
+                            select_using_edge.append(SelectUsing.make(s))
+                        else:
+                            raise ValueError(s.type.type)
+                    case ast1.SelectApprox():
+                        if s.type.type == "node":
+                            select_approx_node.append(SelectApprox.make(s))
+                        elif s.type.type == "edge":
+                            select_approx_edge.append(SelectApprox.make(s))
+                        else:
+                            raise ValueError(s.type.type)
+                    case ast1.SelectRelative():
+                        if s.type.type == "node":
+                            select_relative_node.append(SelectRelative.make(s))
+                        elif s.type.type == "edge":
+                            select_relative_edge.append(SelectRelative.make(s))
+                        else:
+                            raise ValueError(s.type.type)
+                    case ast1.ForeachStatement():
+                        if s.type == "node":
+                            foreach_node_statement.append(ForeachStatement.make(s))
+                        elif s.type == "edge":
+                            foreach_edge_statement.append(ForeachStatement.make(s))
+                        else:
+                            raise ValueError(s.type)
+
         functions.append(Function.make("do_main", x.main_function))
+        for s in x.main_function.device_statements:
+            match s:
+                case ast1.SelectUsing():
+                    if s.type.type == "node":
+                        select_using_node.append(SelectUsing.make(s))
+                    elif s.type.type == "edge":
+                        select_using_edge.append(SelectUsing.make(s))
+                    else:
+                        raise ValueError(s.type.type)
+                case ast1.SelectApprox():
+                    if s.type.type == "node":
+                        select_approx_node.append(SelectApprox.make(s))
+                    elif s.type.type == "edge":
+                        select_approx_edge.append(SelectApprox.make(s))
+                    else:
+                        raise ValueError(s.type.type)
+                case ast1.SelectRelative():
+                    if s.type.type == "node":
+                        select_relative_node.append(SelectRelative.make(s))
+                    elif s.type.type == "edge":
+                        select_relative_edge.append(SelectRelative.make(s))
+                    else:
+                        raise ValueError(s.type.type)
+                case ast1.ForeachStatement():
+                    if s.type == "node":
+                        foreach_node_statement.append(ForeachStatement.make(s))
+                    elif s.type == "edge":
+                        foreach_edge_statement.append(ForeachStatement.make(s))
+                    else:
+                        raise ValueError(s.type)
 
         return cls(
             module=module,
@@ -977,7 +1118,17 @@ class Source:
             normal_dists=normal_dists,
             do_transitions=do_transitions,
             do_transmissions=do_transmissions,
+            nodesets=nodesets,
+            edgesets=edgesets,
             functions=functions,
+            select_using_node=select_using_node,
+            select_using_edge=select_using_edge,
+            select_approx_node=select_approx_node,
+            select_approx_edge=select_approx_edge,
+            select_relative_node=select_relative_node,
+            select_relative_edge=select_relative_edge,
+            foreach_node_statement=foreach_node_statement,
+            foreach_edge_statement=foreach_edge_statement,
         )
 
 

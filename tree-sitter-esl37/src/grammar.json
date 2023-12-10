@@ -1184,7 +1184,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "foreach_loop"
+          "name": "foreach_statement"
         }
       ]
     },
@@ -1544,7 +1544,7 @@
         },
         {
           "type": "FIELD",
-          "name": "funcion",
+          "name": "function",
           "content": {
             "type": "SYMBOL",
             "name": "identifier"
@@ -1654,7 +1654,7 @@
         }
       ]
     },
-    "foreach_loop": {
+    "foreach_statement": {
       "type": "SEQ",
       "members": [
         {
@@ -1663,10 +1663,19 @@
         },
         {
           "type": "FIELD",
-          "name": "var",
+          "name": "type",
           "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "node"
+              },
+              {
+                "type": "STRING",
+                "value": "edge"
+              }
+            ]
           }
         },
         {
@@ -1683,22 +1692,19 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "run"
         },
         {
           "type": "FIELD",
-          "name": "body",
+          "name": "function",
           "content": {
-            "type": "REPEAT1",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_statement"
-            }
+            "type": "SYMBOL",
+            "name": "identifier"
           }
         },
         {
-          "type": "STRING",
-          "value": "end"
+          "type": "SYMBOL",
+          "name": "_terminator"
         }
       ]
     },

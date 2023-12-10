@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypeVar, Generic, Literal, cast
+from typing import Any, TypeVar, Generic, Literal, cast, assert_never
 
 import attrs
 import click
@@ -776,9 +776,16 @@ class Contagion:
         )
         scope.define(dwell_time.name, dwell_time, dwell_time.pos)
 
-        do_transmission = BuiltinFunction("do_transmission", [], None)
+        do_transmission = BuiltinFunction(
+            "do_transmission", [Param("tick", TypeRef("int", scope))], None
+        )
         do_transition = BuiltinFunction(
-            "do_transition", [Param("elapsed", TypeRef("float", scope))], None
+            "do_transition",
+            [
+                Param("tick", TypeRef("int", scope)),
+                Param("elapsed", TypeRef("float", scope)),
+            ],
+            None,
         )
         scope.define("do_transmission", do_transmission, None)
         scope.define("do_transition", do_transition, None)
@@ -1078,59 +1085,84 @@ class EdgeSet:
 
 
 @attrs.define
-class UpdateSet:
+class SelectUsing:
+    name: str
+    type: TypeRef
     set: SetRef
-    expression: FilterExpression | SampleExpression
+    function: FunctionRef
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> UpdateSet:
-        set = SetRef.make(node.field("name"), scope)
-        init = node.field("expression")
-        match init.type:
-            case "filter_expression":
-                init = FilterExpression.make(init, scope)
-            case "sample_expression":
-                init = SampleExpression.make(init, scope)
-            case _ as unexpected:
-                raise UnexpectedValue(unexpected, init.pos)
-
-        obj = cls(set, init, node.pos)
+    def make(cls, node: PTNode, scope: Scope) -> SelectUsing:
+        set = SetRef.make(node.field("set"), scope)
+        function = FunctionRef.make(node.field("function"), scope)
+        name = f"select_{set.name}_using__{function.name}_{node.pos.line}"
+        type = TypeRef("unknown", scope, None)
+        obj = cls(name, type, set, function, node.pos)
+        scope.define(name, obj, node.pos)
         return obj
 
 
 @attrs.define
-class ForeachLoop:
-    var: Param
+class SelectApprox:
+    name: str
+    type: TypeRef
     set: SetRef
-    body: list[Statement]
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    amount: int | float
+    parent: SetRef
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, parent_scope: Scope) -> ForeachLoop:
-        name = f"foreach_{node.pos.line}"
-        scope = Scope(name=name, parent=parent_scope)
-
-        var = node.field("var")
-        var = Param(var.text, TypeRef("unknown", scope), pos=var.pos)
+    def make(cls, node: PTNode, scope: Scope) -> SelectApprox:
         set = SetRef.make(node.field("set"), scope)
-        body = []
-        for child in node.fields("body"):
-            body.append(parse_statement(child, scope))
-
-        obj = cls(var, set, body, scope, node.pos)
-        parent_scope.define(name, obj, node.pos)
+        amount = make_literal(node.field("amount"), int | float)
+        parent = SetRef.make(node.field("parent"), scope)
+        name = f"select_{set.name}_from_{parent.name}_approx_{node.pos.line}"
+        type = TypeRef("unknown", scope, None)
+        obj = cls(name, type, set, amount, parent, node.pos)
+        scope.define(name, obj, node.pos)
         return obj
 
-    def fix_var_type(self):
-        match self.set.resolve():
-            case NodeSet():
-                self.var.type.type = "node"
-            case EdgeSet():
-                self.var.type.type = "edge"
-            case _ as unexpected:
-                raise ValueError(unexpected)
+
+@attrs.define
+class SelectRelative:
+    name: str
+    type: TypeRef
+    set: SetRef
+    amount: int | float
+    parent: SetRef
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> SelectRelative:
+        set = SetRef.make(node.field("set"), scope)
+        amount = make_literal(node.field("amount"), int | float)
+        parent = SetRef.make(node.field("parent"), scope)
+        name = f"select_{set.name}_from_{parent.name}_relative_{node.pos.line}"
+        type = TypeRef("unknown", scope, None)
+        obj = cls(name, type, set, amount, parent, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
+
+
+@attrs.define
+class ForeachStatement:
+    name: str
+    type: Literal["node", "edge"]
+    set: SetRef
+    function: FunctionRef
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> ForeachStatement:
+        type = node.field("type").text
+        type = cast(Literal["node", "edge"], type)
+        set = SetRef.make(node.field("set"), scope)
+        function = FunctionRef.make(node.field("function"), scope)
+        name = f"foreach_{type}_in_{set.name}_run_{function.name}_{node.pos.line}"
+        obj = cls(name, type, set, function, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
 
 
 @attrs.define
@@ -1138,10 +1170,9 @@ class Function:
     name: str
     params: list[Param]
     variables: list[Variable]
-    nodesets: list[NodeSet]
-    edgesets: list[EdgeSet]
     return_: TypeRef | None
     body: list[Statement]
+    device_statements: list[DeviceStatement]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -1150,7 +1181,7 @@ class Function:
         name = node.field("name").text
         scope = Scope(name=name, parent=parent_scope)
 
-        params = []
+        params: list[Param] = []
         for child in node.field("params").named_children:
             params.append(Param.make(child, scope))
 
@@ -1160,24 +1191,22 @@ class Function:
         else:
             return_ = TypeRef.make(return_node, scope)
 
-        body = []
+        body: list[Statement] = []
         for child in node.field("body").named_children:
-            body.append(parse_statement(child, scope))
+            stmt = parse_statement(child, scope)
+            body.append(stmt)
 
-        variables = []
-        nodesets = []
-        edgesets = []
+        variables: list[Variable] = []
+        device_statements: list[DeviceStatement] = []
         for s in scope.names.values():
             match s:
                 case Variable():
                     variables.append(s)
-                case NodeSet():
-                    nodesets.append(s)
-                case EdgeSet():
-                    edgesets.append(s)
+                case SelectUsing() | SelectApprox() | SelectRelative() | ForeachStatement():
+                    device_statements.append(s)
 
         obj = cls(
-            name, params, variables, nodesets, edgesets, return_, body, scope, node.pos
+            name, params, variables, return_, body, device_statements, scope, node.pos
         )
         parent_scope.define(name, obj, node.pos)
         return obj
@@ -1188,13 +1217,115 @@ class Function:
         for var in self.variables:
             var.link_tables(node_table, edge_table)
 
-    def fix_foreach_var_type(self):
+    def fix_device_statement_type(self):
+        for s in self.device_statements:
+            match s:
+                case SelectUsing() | SelectApprox() | SelectRelative():
+                    match s.set.resolve():
+                        case NodeSet():
+                            s.type.type = "node"
+                        case EdgeSet():
+                            s.type.type = "edge"
+                        case _ as unexpected:
+                            assert_never(unexpected)
+
+        for s in self.device_statements:
+            match s:
+                case SelectUsing():
+                    func = s.function.resolve()
+                    if s.type.type == "node":
+                        if not is_node_func(func):
+                            raise Error(
+                                "Invalid function type",
+                                "Nodeset update functions must have a single parameter of type node",
+                                s.pos,
+                            )
+                    elif s.type.type == "edge":
+                        if not is_edge_func(func):
+                            raise Error(
+                                "Invalid function type",
+                                "Edgeset update functions must have a single parameter of type edge",
+                                s.pos,
+                            )
+
+                    if not is_bool_func(func):
+                        raise Error(
+                            "Invalid function type",
+                            "Sets can can only be updated using functions that return a single bool value",
+                            s.pos,
+                        )
+                case SelectApprox() | SelectRelative():
+                    if s.type.type == "node":
+                        if not isinstance(s.parent.resolve(), NodeSet):
+                            raise Error(
+                                "Invalid source set type",
+                                "Nodesets can only be sampled from other nodesets",
+                                s.pos,
+                            )
+                    elif s.type.type == "edge":
+                        if not isinstance(s.parent.resolve(), EdgeSet):
+                            raise Error(
+                                "Invalid source set type",
+                                "Edgesets can only be sampled from other edgesets",
+                                s.pos,
+                            )
+                case ForeachStatement():
+                    if s.type == "node":
+                        if not isinstance(s.set.resolve(), NodeSet):
+                            raise Error(
+                                "Invalid set type",
+                                "Foreach node statement must be run on nodesets",
+                                s.pos,
+                            )
+                        if not is_node_func(s.function.resolve()):
+                            raise Error(
+                                "Invalid function type",
+                                "Foreach node statements must run functions with a single parameter of type node.",
+                                s.pos,
+                            )
+                    elif s.type == "edge":
+                        if not isinstance(s.set.resolve(), EdgeSet):
+                            raise Error(
+                                "Invalid set type",
+                                "Foreach edge statement must be run on edgesets.",
+                                s.pos,
+                            )
+                        if not is_node_func(s.function.resolve()):
+                            raise Error(
+                                "Invalid function type",
+                                "Foreach edge statements must run functions with a single parameter of type edge.",
+                                s.pos,
+                            )
+                    if not is_void_func(s.function.resolve()):
+                        raise Error(
+                            "Invalid function type",
+                            "Foreach statements must run functions that do not return values.",
+                            s.pos,
+                        )
+
+
+@attrs.define
+class FunctionRef:
+    name: str
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> FunctionRef:
+        return cls(node.text, scope, node.pos)
+
+    def resolve(self) -> Function:
         assert self.scope is not None
 
-        for s in self.scope.names.values():
-            match s:
-                case ForeachLoop():
-                    s.fix_var_type()
+        v = self.scope.resolve(self.name, self.pos)
+        if isinstance(v, Function):
+            return v
+
+        raise Error(
+            "Invalid value",
+            "Expected a reference to a function",
+            self.pos,
+        )
 
 
 def is_node_func(f: Function) -> bool:
@@ -1361,6 +1492,8 @@ class Source:
     edge_table: EdgeTable
     distributions: list[Distribution]
     contagions: list[Contagion]
+    nodesets: list[NodeSet]
+    edgesets: list[EdgeSet]
     functions: list[Function]
     main_function: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
@@ -1378,6 +1511,8 @@ class Source:
         edge_table: UniqueObject[EdgeTable] = UniqueObject()
         distributions: list[Distribution] = []
         contagions: list[Contagion] = []
+        nodesets: list[NodeSet] = []
+        edgesets: list[EdgeSet] = []
         functions: list[Function] = []
         main_function: UniqueObject[Function] = UniqueObject()
 
@@ -1409,6 +1544,10 @@ class Source:
                         distributions.append(parse_distribution(d, scope))
                 case "contagion":
                     contagions.append(Contagion.make(child, scope))
+                case "nodeset":
+                    nodesets.append(NodeSet.make(child, scope))
+                case "edgeset":
+                    edgesets.append(EdgeSet.make(child, scope))
                 case "function":
                     if child.field("name").text == "main":
                         main_function.dup_error(
@@ -1436,14 +1575,14 @@ class Source:
 
         for func in functions:
             func.link_tables(node_table.get(), edge_table.get())
-            func.fix_foreach_var_type()
+            func.fix_device_statement_type()
         for contagion in contagions:
             contagion.susceptibility.link_tables(node_table.get(), edge_table.get())
             contagion.infectivity.link_tables(node_table.get(), edge_table.get())
             contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
             contagion.enabled.link_tables(node_table.get(), edge_table.get())
         main_function.get().link_tables(node_table.get(), edge_table.get())
-        main_function.get().fix_foreach_var_type()
+        main_function.get().fix_device_statement_type()
 
         return cls(
             module=module,
@@ -1454,6 +1593,8 @@ class Source:
             edge_table=edge_table.get(),
             distributions=distributions,
             contagions=contagions,
+            nodesets=nodesets,
+            edgesets=edgesets,
             functions=functions,
             main_function=main_function.get(),
             scope=scope,
@@ -1504,11 +1645,9 @@ HostStatement = (
     | UpdateStatement
     | PrintStatement
     | Variable
-    | NodeSet
-    | EdgeSet
 )
 
-DeviceStatement = UpdateSet | ForeachLoop
+DeviceStatement = SelectUsing | SelectApprox | SelectRelative | ForeachStatement
 
 Statement = HostStatement | DeviceStatement
 
@@ -1533,14 +1672,14 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
             return PrintStatement.make(node, scope)
         case "variable":
             return Variable.make(node, scope)
-        case "nodeset":
-            return NodeSet.make(node, scope)
-        case "edgeset":
-            return EdgeSet.make(node, scope)
-        case "update_set":
-            return UpdateSet.make(node, scope)
-        case "foreach_loop":
-            return ForeachLoop.make(node, scope)
+        case "select_using":
+            return SelectUsing.make(node, scope)
+        case "select_relative":
+            return SelectRelative.make(node, scope)
+        case "select_approx":
+            return SelectApprox.make(node, scope)
+        case "foreach_statement":
+            return ForeachStatement.make(node, scope)
         case unexpected:
             raise UnexpectedValue(unexpected, node.pos)
 
@@ -1552,6 +1691,8 @@ Referable = (
     | Variable
     | BuiltinFunction
     | Function
+    | NodeSet
+    | EdgeSet
     | tuple[Contagion, BuiltinFunction]
     | tuple[Contagion, Function]
     | tuple[Param | Variable, NodeField]

@@ -231,7 +231,7 @@ module.exports = grammar({
             $.select_using,
             $.select_approx,
             $.select_relative,
-            $.foreach_loop,
+            $.foreach_statement,
         ),
 
         pass_statement: $ => seq(
@@ -367,7 +367,7 @@ module.exports = grammar({
             'select',
             field('set', $.identifier),
             'using',
-            field('funcion', $.identifier),
+            field('function', $.identifier),
             $._terminator,
         ),
 
@@ -391,14 +391,14 @@ module.exports = grammar({
             $._terminator,
         ),
 
-        foreach_loop: $ => seq(
+        foreach_statement: $ => seq(
             'foreach',
-            field('var', $.identifier),
+            field('type', choice('node', 'edge')),
             'in',
             field('set', $.identifier),
-            ':',
-            field('body', repeat1($._statement)),
-            'end'
+            'run',
+            field('function', $.identifier),
+            $._terminator,
         ),
 
         print_statement: $ => seq(

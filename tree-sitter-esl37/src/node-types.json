@@ -455,7 +455,7 @@
             "named": true
           },
           {
-            "type": "foreach_loop",
+            "type": "foreach_statement",
             "named": true
           },
           {
@@ -553,7 +553,7 @@
             "named": true
           },
           {
-            "type": "foreach_loop",
+            "type": "foreach_statement",
             "named": true
           },
           {
@@ -631,59 +631,15 @@
     }
   },
   {
-    "type": "foreach_loop",
+    "type": "foreach_statement",
     "named": true,
     "fields": {
-      "body": {
-        "multiple": true,
+      "function": {
+        "multiple": false,
         "required": true,
         "types": [
           {
-            "type": "call_statement",
-            "named": true
-          },
-          {
-            "type": "foreach_loop",
-            "named": true
-          },
-          {
-            "type": "if_statement",
-            "named": true
-          },
-          {
-            "type": "pass_statement",
-            "named": true
-          },
-          {
-            "type": "print_statement",
-            "named": true
-          },
-          {
-            "type": "return_statement",
-            "named": true
-          },
-          {
-            "type": "select_approx",
-            "named": true
-          },
-          {
-            "type": "select_relative",
-            "named": true
-          },
-          {
-            "type": "select_using",
-            "named": true
-          },
-          {
-            "type": "update_statement",
-            "named": true
-          },
-          {
-            "type": "variable",
-            "named": true
-          },
-          {
-            "type": "while_loop",
+            "type": "identifier",
             "named": true
           }
         ]
@@ -698,13 +654,17 @@
           }
         ]
       },
-      "var": {
+      "type": {
         "multiple": false,
         "required": true,
         "types": [
           {
-            "type": "identifier",
-            "named": true
+            "type": "edge",
+            "named": false
+          },
+          {
+            "type": "node",
+            "named": false
           }
         ]
       }
@@ -769,7 +729,7 @@
           "named": true
         },
         {
-          "type": "foreach_loop",
+          "type": "foreach_statement",
           "named": true
         },
         {
@@ -927,7 +887,7 @@
             "named": true
           },
           {
-            "type": "foreach_loop",
+            "type": "foreach_statement",
             "named": true
           },
           {
@@ -1415,7 +1375,7 @@
     "type": "select_using",
     "named": true,
     "fields": {
-      "funcion": {
+      "function": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1553,7 +1513,7 @@
           "named": true
         },
         {
-          "type": "foreach_loop",
+          "type": "foreach_statement",
           "named": true
         },
         {
@@ -1984,7 +1944,7 @@
             "named": true
           },
           {
-            "type": "foreach_loop",
+            "type": "foreach_statement",
             "named": true
           },
           {
@@ -2343,6 +2303,10 @@
   },
   {
     "type": "return",
+    "named": false
+  },
+  {
+    "type": "run",
     "named": false
   },
   {

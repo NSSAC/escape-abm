@@ -4,9 +4,7 @@ Edgeset 1
 
 edgeset seed_edges
 __test statement:
-    foreach e in seed_edges:
-        e.active = True
-    end
+    foreach edge in seed_edges run enable_edge
 end
 
 ---
@@ -14,13 +12,9 @@ end
 (source_file
     (edgeset (identifier))
     (test_statement
-        (foreach_loop
+        (foreach_statement
             (identifier)
             (identifier)
-            (update_statement
-                (reference (identifier) (identifier))
-                (boolean)
-            )
         )
     )
 )

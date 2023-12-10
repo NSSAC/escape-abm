@@ -801,12 +801,6 @@ void
 {% for name, type in f.variables %}
     {{ type }} {{ name }};
 {% endfor %}
-{% for name in f.nodesets %}
-    nodeset {{ name }};
-{% endfor %}
-{% for name in f.edgesets %}
-    edgeset {{ name }};
-{% endfor %}
 
 {{ f.body }}
 }
@@ -978,12 +972,240 @@ std::uniform_real_distribution<float_type> uniform01 { 0.0, 1.0 };
 {% endfor %}
 
 // ----------------------------------------------------------------------------
+// Nodesets and edgesets
+// ----------------------------------------------------------------------------
+
+{% for name in s.nodesets %}
+nodeset* {{ name }} = nullptr;
+{% endfor %}
+
+{% for name in s.edgesets %}
+edgeset* {{ name }} = nullptr;
+{% endfor %}
+
+// ----------------------------------------------------------------------------
+// Device functions
+// ----------------------------------------------------------------------------
+
+{% for f in s.select_using_node %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type v = v_start; v < v_end; v++) {
+            const auto b = {{ f.function_name }}(node_type(NODE_TABLE, v));
+            {{ f.set_name }}->p[v] = b;
+            size += b;
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.select_using_edge %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto e_start = EDGE_RANGE->start(thread_idx);
+        const auto e_end = EDGE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type e = e_start; e < e_end; v++) {
+            const auto b = {{ f.function_name }}(edge_type(EDGE_TABLE, NODE_TABLE, e));
+            {{ f.set_name }}->p[e] = b;
+            size += b;
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.select_approx_node %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+    const float_type prob = float_type({{ f.amount }}) / {{ f.parent_set_name }}->size;
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type v = v_start; v < v_end; v++) {
+            {{ f.set_name }}->p[v] = 0;
+            if ({{ f.parent_set_name }}->p[v]) {
+                const auto p = uniform01(*rnd);
+                if (p < prob) {
+                    {{ f.set_name }}->p[v] = 1;
+                    size += 1;
+                }
+            }
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.select_approx_edge %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+    const float_type prob = float_type({{ f.amount }}) / {{ f.parent_set_name }}->size;
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto e_start = EDGE_RANGE->start(thread_idx);
+        const auto e_end = EDGE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type e = e_start; e < e_end; e++) {
+            {{ f.set_name }}->p[e] = 0;
+            if ({{ f.parent_set_name }}->p[e]) {
+                const auto p = uniform01(*rnd);
+                if (p < prob) {
+                    {{ f.set_name }}->p[e] = 1;
+                    size += 1;
+                }
+            }
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.select_relative_node %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type v = v_start; v < v_end; v++) {
+            {{ f.set_name }}->p[v] = 0;
+            if ({{ f.parent_set_name }}->p[v]) {
+                const auto p = uniform01(*rnd);
+                if (p < {{ f.amount }}) {
+                    {{ f.set_name }}->p[v] = 1;
+                    size += 1;
+                }
+            }
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.select_relative_edge %}
+void {{ f.name }}() {
+    {{ f.set_name }}->size = 0;
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+        const auto e_start = EDGE_RANGE->start(thread_idx);
+        const auto e_end = EDGE_RANGE->end(thread_idx);
+
+        size_type size = 0;
+        for (size_type e = e_start; e < e_end; e++) {
+            {{ f.set_name }}->p[e] = 0;
+            if ({{ f.parent_set_name }}->p[e]) {
+                const auto p = uniform01(*rnd);
+                if (p < {{ f.amount }}) {
+                    {{ f.set_name }}->p[e] = 1;
+                    size += 1;
+                }
+            }
+        }
+
+        #pragma omp atomic
+        {{ f.set_name }}->size += size;
+    }
+
+    std::cout << "{{ f.name }} " << {{ f.set_name }}->size << std::endl;
+}
+{% endfor %}
+
+{% for f in s.foreach_node_statement %}
+void {{ f.name }}() {
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto v_start = NODE_RANGE->start(thread_idx);
+        const auto v_end = NODE_RANGE->end(thread_idx);
+
+        for (size_type v = v_start; v < v_end; v++) {
+            if ({{ f.set_name }}->p[v]) {
+               {{ f.function_name }}(node_type(NODE_TABLE, v));
+            }
+        }
+    }
+}
+{% endfor %}
+
+{% for f in s.foreach_edge_statement %}
+void {{ f.name }}() {
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto e_start = EDGE_RANGE->start(thread_idx);
+        const auto e_end = EDGE_RANGE->end(thread_idx);
+
+        for (size_type e = e_start; e < e_end; e++) {
+            if ({{ f.set_name }}->p[e]) {
+               {{ f.function_name }}(edge_type(EDGE_TABLE, NODE_TABLE, e));
+            }
+        }
+    }
+}
+{% endfor %}
+
+// ----------------------------------------------------------------------------
 // Function definitions
 // ----------------------------------------------------------------------------
 
 {% for f in s.functions %}
 {{ function_def(f) }}
 {% endfor %}
+
 
 // ----------------------------------------------------------------------------
 // Main
@@ -1067,6 +1289,18 @@ int main() {
 
     rnd_state rnd;
     RND_STATE = &rnd;
+
+    {% for name in s.nodesets %}
+    nodeset {{ name }}_local;
+    {{ name }} = &{{ name }}_local;
+
+    {% endfor %}
+
+    {% for name in s.edgesets %}
+    edgeset {{ name }}_local;
+    {{ name }} = &{{ name }}_local;
+
+    {% endfor %}
 
     const auto init_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> init_seconds{init_end - init_start};
