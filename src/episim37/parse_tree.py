@@ -52,6 +52,9 @@ class SourcePosition:
         return cls(source, source_bytes, start, end, byte_range)
 
 
+FILTERED_NODES = ["comment"]
+
+
 class PTNode:
     """Parse tree node."""
 
@@ -77,19 +80,19 @@ class PTNode:
             raise ValueError(
                 f"Node of type '{self.type}' doesn't have a field named '{name}'"
             )
-        return self.__class__(self.source, self.source_bytes, child)
+        return PTNode(self.source, self.source_bytes, child)
 
     def maybe_field(self, name: str) -> PTNode | None:
         child = self.node.child_by_field_name(name)
         if child is None:
             return None
         else:
-            return self.__class__(self.source, self.source_bytes, child)
+            return PTNode(self.source, self.source_bytes, child)
 
     def fields(self, name: str) -> list[PTNode]:
         children = self.node.children_by_field_name(name)
         children = [
-            self.__class__(self.source, self.source_bytes, child)
+            PTNode(self.source, self.source_bytes, child)
             for child in children
             if child.is_named
         ]
@@ -98,15 +101,17 @@ class PTNode:
     @property
     def children(self) -> list[PTNode]:
         return [
-            self.__class__(self.source, self.source_bytes, child)
+            PTNode(self.source, self.source_bytes, child)
             for child in self.node.children
+            if child.type not in FILTERED_NODES
         ]
 
     @property
     def named_children(self) -> list[PTNode]:
         return [
-            self.__class__(self.source, self.source_bytes, child)
+            PTNode(self.source, self.source_bytes, child)
             for child in self.node.named_children
+            if child.type not in FILTERED_NODES
         ]
 
     def __rich_repr__(self):
