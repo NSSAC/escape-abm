@@ -9,7 +9,7 @@ import attrs
 import click
 import rich
 import rich.markup
-from typeguard import check_type
+from typeguard import TypeCheckError, check_type
 
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError, SourcePosition
 
@@ -91,20 +91,20 @@ class Scope:
         elif self.parent is not None:
             return self.parent.resolve(k, pos)
 
-        raise Error("Undefined reference", f"{k} is not defined", pos)
+        raise Error("Undefined reference", f"{k} is not defined.", pos)
 
     def define(self, k: str, v: Any, pos: SourcePosition | None):
         if k in self.names:
             raise Error(
                 "Already defined",
-                f"{k} has been already defined",
+                f"{k} has been already defined.",
                 pos,
             )
 
         self.names[k] = v
 
 
-def make_literal(n: PTNode, types: type) -> Any:
+def make_literal(n: PTNode, types: type) -> int | float | bool:
     match n.type:
         case "integer":
             v = int(n.text)
@@ -112,8 +112,6 @@ def make_literal(n: PTNode, types: type) -> Any:
             v = float(n.text)
         case "boolean":
             v = n.text == True
-        case "string":
-            v = n.text
         case _ as unexpected:
             raise UnexpectedValue(unexpected, n.pos)
 
@@ -147,7 +145,7 @@ class BuiltinTypeRef:
 
         raise Error(
             "Invalid type",
-            "Expected a built type",
+            "Expected a built in type.",
             self.pos,
         )
 
@@ -157,6 +155,7 @@ class BuiltinFunction:
     name: str
     params: list[Param]
     return_: TypeRef | None
+    is_device: bool
 
 
 @attrs.define
@@ -184,7 +183,7 @@ class EnumConstantRef:
 
         raise Error(
             "Invalid value",
-            "Expected an enumeration constant",
+            "Expected an enumeration constant.",
             self.pos,
         )
 
@@ -228,7 +227,7 @@ class EnumTypeRef:
 
         raise Error(
             "Invalid type",
-            "Expected an enumerated type",
+            "Expected an enumerated type.",
             self.pos,
         )
 
@@ -252,7 +251,7 @@ class TypeRef:
 
         raise Error(
             "Invalid type",
-            "Expected a built in or enumerated type",
+            "Expected a built in or enumerated type.",
             self.pos,
         )
 
@@ -275,51 +274,20 @@ class Config:
 
 
 @attrs.define
-class Variable:
-    var: str
-    type: TypeRef
-    init: Expression
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Variable:
-        var = node.field("var").text
-        type = TypeRef.make(node.field("type"), scope)
-        init = parse_expression(node.field("init"), scope)
-        obj = cls(var, type, init, None, node.pos)
-        scope.define(var, obj, node.pos)
-        return obj
-
-    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
-        match self.type:
-            case TypeRef("node"):
-                self.scope = node_table.scope
-            case TypeRef("edge"):
-                self.scope = edge_table.scope
-
-
-@attrs.define
-class Param:
+class Global:
     name: str
-    type: TypeRef
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    type: BuiltinTypeRef
+    default: int | float | bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Param:
+    def make(cls, node: PTNode, scope: Scope) -> Global:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
-        obj = cls(name, type, None, node.pos)
+        type = BuiltinTypeRef.make(node.field("type"), scope)
+        default = make_literal(node.field("default"), int | float | bool)
+        obj = cls(name, type, default, node.pos)
         scope.define(name, obj, node.pos)
         return obj
-
-    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
-        match self.type:
-            case TypeRef("node"):
-                self.scope = node_table.scope
-            case TypeRef("edge"):
-                self.scope = edge_table.scope
 
 
 @attrs.define
@@ -363,7 +331,7 @@ class NodeTable:
         key = [f for f in fields if f.is_node_key]
         if len(key) != 1:
             raise Error(
-                "Node key error",
+                "Key error",
                 "One and only one node key field must be specified.",
                 node.pos,
             )
@@ -439,7 +407,7 @@ class EdgeTable:
         target_key = [f for f in fields if f.is_target_node_key]
         if len(target_key) != 1:
             raise Error(
-                "Edge target key error",
+                "Key error",
                 "One and only one target node key field must be specified.",
                 node.pos,
             )
@@ -448,7 +416,7 @@ class EdgeTable:
         source_key = [f for f in fields if f.is_source_node_key]
         if len(source_key) != 1:
             raise Error(
-                "Edge source key error",
+                "Key error",
                 "One and only one source node key field must be specified.",
                 node.pos,
             )
@@ -603,7 +571,7 @@ class DistRef:
 
         raise Error(
             "Invalid value",
-            "Expected a reference to a distribution",
+            "Expected a reference to a distribution.",
             self.pos,
         )
 
@@ -655,10 +623,7 @@ class Contagion:
     transmissibility: Function
     enabled: Function
     state: NodeField
-    next_state: NodeField
-    dwell_time: NodeField
-    do_transmission: BuiltinFunction
-    do_transition: BuiltinFunction
+    step: BuiltinFunction
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -680,76 +645,76 @@ class Contagion:
                 case "contagion_state_type":
                     state_type.dup_error(
                         "Multiple state types",
-                        "Contagion state type is multiply defined",
+                        "Contagion state type is multiply defined.",
                         child.pos,
                     )
                     state_type.set(EnumTypeRef.make(child.field("type"), scope))
                 case "transitions":
-                    for gc in child.fields("body"):
-                        transitions.append(Transition.make(gc, scope))
+                    for grand_child in child.fields("body"):
+                        transitions.append(Transition.make(grand_child, scope))
                 case "transmissions":
-                    for gc in child.fields("body"):
-                        transmissions.append(Transmission.make(gc, scope))
+                    for grand_child in child.fields("body"):
+                        transmissions.append(Transmission.make(grand_child, scope))
                 case "function":
                     match child.field("name").text:
                         case "susceptibility":
                             susceptibility.dup_error(
                                 "Multiple susceptibility",
-                                "Susceptibility function is multiply defined",
+                                "Susceptibility function is multiply defined.",
                                 child.pos,
                             )
                             susceptibility.set(make_susceptibility(child, scope))
                         case "infectivity":
                             infectivity.dup_error(
                                 "Multiple infectivity",
-                                "Infectivity function is multiply defined",
+                                "Infectivity function is multiply defined.",
                                 child.pos,
                             )
                             infectivity.set(make_infectivity(child, scope))
                         case "transmissibility":
                             transmissibility.dup_error(
                                 "Multiple transmissibility",
-                                "Transmissibility function is multiply defined",
+                                "Transmissibility function is multiply defined.",
                                 child.pos,
                             )
                             transmissibility.set(make_transmissibility(child, scope))
                         case "enabled":
                             enabled.dup_error(
                                 "Multiple enabled",
-                                "Enabled (edge) function is multiply defined",
+                                "Enabled (edge) function is multiply defined.",
                                 child.pos,
                             )
                             enabled.set(make_enabled(child, scope))
                         case _:
                             raise Error(
                                 "Invalid function",
-                                f"{child.field('name').text} is not a valid contagion function",
+                                f"{child.field('name').text} is not a valid contagion function.",
                                 child.field("type").pos,
                             )
                 case _ as unexpected:
                     raise UnexpectedValue(unexpected, child.pos)
 
         state_type.missing_error(
-            "State type undefined", "State type has not been defined", node.pos
+            "State type undefined", "State type has not been defined.", node.pos
         )
         susceptibility.missing_error(
             "Susceptibility undefined",
-            "Susceptibility function has not been defined",
+            "Susceptibility function has not been defined.",
             node.pos,
         )
         infectivity.missing_error(
             "Infectivity undefined",
-            "Infectivity function has not been defined",
+            "Infectivity function has not been defined.",
             node.pos,
         )
         transmissibility.missing_error(
             "Transmissibility undefined",
-            "Transmissibility function has not been defined",
+            "Transmissibility function has not been defined.",
             node.pos,
         )
         enabled.missing_error(
             "Edge enabled undefined",
-            "Enabled (edge) function has not been defined",
+            "Enabled (edge) function has not been defined.",
             node.pos,
         )
 
@@ -762,33 +727,16 @@ class Contagion:
         )
         scope.define(state.name, state, state.pos)
 
-        next_state = NodeField(
-            "next_state",
-            TypeRef(state_type.get().type, scope),
-            False,
-            False,
-            None,
-        )
-        scope.define(next_state.name, next_state, next_state.pos)
-
-        dwell_time = NodeField(
-            "dwell_time", TypeRef("float", scope), False, False, None
-        )
-        scope.define(dwell_time.name, dwell_time, dwell_time.pos)
-
-        do_transmission = BuiltinFunction(
-            "do_transmission", [Param("tick", TypeRef("int", scope))], None
-        )
-        do_transition = BuiltinFunction(
-            "do_transition",
+        step = BuiltinFunction(
+            "step",
             [
                 Param("tick", TypeRef("int", scope)),
                 Param("elapsed", TypeRef("float", scope)),
             ],
             None,
+            True,
         )
-        scope.define("do_transmission", do_transmission, None)
-        scope.define("do_transition", do_transition, None)
+        scope.define("step", step, None)
 
         obj = cls(
             name=name,
@@ -800,15 +748,62 @@ class Contagion:
             transmissibility=transmissibility.get(),
             enabled=enabled.get(),
             state=state,
-            next_state=next_state,
-            dwell_time=dwell_time,
-            do_transmission=do_transmission,
-            do_transition=do_transition,
+            step=step,
             scope=scope,
             pos=node.pos,
         )
         parent_scope.define(name, obj, node.pos)
         return obj
+
+
+@attrs.define
+class NodeSet:
+    name: str
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> NodeSet:
+        name = node.text
+        obj = cls(name, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
+
+
+@attrs.define
+class EdgeSet:
+    name: str
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> EdgeSet:
+        name = node.text
+        obj = cls(name, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
+
+
+@attrs.define
+class SetRef:
+    name: str
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> SetRef:
+        return cls(node.text, scope, node.pos)
+
+    def resolve(self) -> NodeSet | EdgeSet:
+        assert self.scope is not None
+
+        v = self.scope.resolve(self.name, self.pos)
+        if isinstance(v, NodeSet | EdgeSet):
+            return v
+
+        raise Error(
+            "Invalid value",
+            "Expected a reference to a nodeset or edgeset.",
+            self.pos,
+        )
 
 
 @attrs.define
@@ -866,12 +861,75 @@ class Reference:
 class FunctionCall:
     function: Reference
     args: list[Expression]
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
         function = Reference.make(node.field("function"), scope)
         args = [parse_expression(c, scope) for c in node.fields("arg")]
-        return cls(function, args)
+
+        r_str = ".".join(function.names)
+        call_name = f"_function_call_{r_str}_{node.pos.line}_{node.pos.col}"
+        obj = cls(function, args, node.pos)
+        scope.define(call_name, obj, node.pos)
+        return obj
+
+    def type_check(self):
+        function = self.function.resolve()
+        r_str = ".".join(self.function.names)
+        try:
+            function = check_type(function, Callable)
+        except TypeCheckError:
+            raise Error(
+                "Invalid reference", f"{r_str!r} is not a valid callable.", self.pos
+            )
+
+        match function:
+            case BuiltinFunction() | Function():
+                n_params = len(function.params)
+                n_args = len(self.args)
+                if n_params != n_args:
+                    raise Error(
+                        "Invalid args",
+                        f"Expected {n_params} args; got {n_args}.",
+                        self.pos,
+                    )
+            case [_, BuiltinFunction() | Function() as f]:
+                n_params = len(f.params)
+                n_args = len(self.args)
+                if n_params != n_args:
+                    raise Error(
+                        "Invalid args",
+                        f"Expected {n_params} args; got {n_args}.",
+                        self.pos,
+                    )
+            case _ as unexpected:
+                assert_never(unexpected)
+
+
+@attrs.define
+class Variable:
+    name: str
+    type: TypeRef
+    init: Expression
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Variable:
+        var = node.field("name").text
+        type = TypeRef.make(node.field("type"), scope)
+        init = parse_expression(node.field("init"), scope)
+        obj = cls(var, type, init, None, node.pos)
+        scope.define(var, obj, node.pos)
+        return obj
+
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
+        match self.type:
+            case TypeRef("node"):
+                self.scope = node_table.scope
+            case TypeRef("edge"):
+                self.scope = edge_table.scope
 
 
 @attrs.define
@@ -1005,89 +1063,8 @@ class PrintStatement:
 
 
 @attrs.define
-class FilterExpression:
-    var: str
-    condition: Expression
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> FilterExpression:
-        var = node.field("var").text
-        condition = parse_expression(node.field("condition"), scope)
-        return cls(var, condition)
-
-
-SampleType = Literal["appprox", "relative"]
-
-
-@attrs.define
-class SampleExpression:
-    type: SampleType
-    amount: int | float
-    parent: SetRef
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> SampleExpression:
-        type = node.field("type").text
-        type = cast(SampleType, type)
-        amount = make_literal(node.field("amount"), int | float)
-        parent = SetRef.make(node.field("parent"), scope)
-        return cls(type, amount, parent)
-
-
-@attrs.define
-class SetRef:
-    name: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> SetRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> NodeSet | EdgeSet:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.name, self.pos)
-        if isinstance(v, NodeSet | EdgeSet):
-            return v
-
-        raise Error(
-            "Invalid value",
-            "Expected a reference to a nodeset or edgeset",
-            self.pos,
-        )
-
-
-@attrs.define
-class NodeSet:
-    name: str
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> NodeSet:
-        name = node.field("name").text
-        obj = cls(name, node.pos)
-        scope.define(name, obj, node.pos)
-        return obj
-
-
-@attrs.define
-class EdgeSet:
-    name: str
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> EdgeSet:
-        name = node.field("name").text
-        obj = cls(name, node.pos)
-        scope.define(name, obj, node.pos)
-        return obj
-
-
-@attrs.define
 class SelectUsing:
     name: str
-    type: TypeRef
     set: SetRef
     function: FunctionRef
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -1097,16 +1074,38 @@ class SelectUsing:
         set = SetRef.make(node.field("set"), scope)
         function = FunctionRef.make(node.field("function"), scope)
         name = f"select_{set.name}_using__{function.name}_{node.pos.line}"
-        type = TypeRef("unknown", scope, None)
-        obj = cls(name, type, set, function, node.pos)
+        obj = cls(name, set, function, node.pos)
         scope.define(name, obj, node.pos)
         return obj
+
+    def type_check(self):
+        func = self.function.resolve()
+        match self.set.resolve():
+            case NodeSet():
+                if not is_node_func(func):
+                    raise Error(
+                        "Invalid function type",
+                        "Nodeset update functions must have a single parameter of type node.",
+                        self.pos,
+                    )
+            case EdgeSet():
+                if not is_edge_func(func):
+                    raise Error(
+                        "Invalid function type",
+                        "Edgeset update functions must have a single parameter of type edge.",
+                        self.pos,
+                    )
+        if not is_bool_func(func):
+            raise Error(
+                "Invalid function type",
+                "Sets can can only be updated using functions that return a single bool value.",
+                self.pos,
+            )
 
 
 @attrs.define
 class SelectApprox:
     name: str
-    type: TypeRef
     set: SetRef
     amount: int | float
     parent: SetRef
@@ -1118,16 +1117,35 @@ class SelectApprox:
         amount = make_literal(node.field("amount"), int | float)
         parent = SetRef.make(node.field("parent"), scope)
         name = f"select_{set.name}_from_{parent.name}_approx_{node.pos.line}"
-        type = TypeRef("unknown", scope, None)
-        obj = cls(name, type, set, amount, parent, node.pos)
+        obj = cls(name, set, amount, parent, node.pos)
         scope.define(name, obj, node.pos)
         return obj
+
+    def type_check(self):
+        set_type = type(self.set.resolve())
+        parent_type = type(self.parent.resolve())
+        if set_type == parent_type:
+            return
+
+        if set_type == NodeSet:
+            raise Error(
+                "Invalid source set type",
+                "Nodesets can only be sampled from other nodesets.",
+                self.pos,
+            )
+        elif set_type == EdgeSet:
+            raise Error(
+                "Invalid source set type",
+                "Edgesets can only be sampled from other edgesets.",
+                self.pos,
+            )
+        else:
+            raise TypeError("Unexpected type %r" % set_type)
 
 
 @attrs.define
 class SelectRelative:
     name: str
-    type: TypeRef
     set: SetRef
     amount: int | float
     parent: SetRef
@@ -1139,10 +1157,30 @@ class SelectRelative:
         amount = make_literal(node.field("amount"), int | float)
         parent = SetRef.make(node.field("parent"), scope)
         name = f"select_{set.name}_from_{parent.name}_relative_{node.pos.line}"
-        type = TypeRef("unknown", scope, None)
-        obj = cls(name, type, set, amount, parent, node.pos)
+        obj = cls(name, set, amount, parent, node.pos)
         scope.define(name, obj, node.pos)
         return obj
+
+    def type_check(self):
+        set_type = type(self.set.resolve())
+        parent_type = type(self.parent.resolve())
+        if set_type == parent_type:
+            return
+
+        if set_type == NodeSet:
+            raise Error(
+                "Invalid source set type",
+                "Nodesets can only be sampled from other nodesets.",
+                self.pos,
+            )
+        elif set_type == EdgeSet:
+            raise Error(
+                "Invalid source set type",
+                "Edgesets can only be sampled from other edgesets.",
+                self.pos,
+            )
+        else:
+            raise TypeError("Unexpected type %r" % set_type)
 
 
 @attrs.define
@@ -1164,15 +1202,77 @@ class ForeachStatement:
         scope.define(name, obj, node.pos)
         return obj
 
+    def type_check(self):
+        set = self.set.resolve()
+        function = self.function.resolve()
+
+        match self.type:
+            case "node":
+                if not isinstance(set, NodeSet):
+                    raise Error(
+                        "Invalid set type",
+                        "Foreach node statement must be run on nodesets.",
+                        self.pos,
+                    )
+                if not is_node_func(function):
+                    raise Error(
+                        "Invalid function type",
+                        "Foreach node statements must run functions with a single parameter of type node.",
+                        self.pos,
+                    )
+            case "edge":
+                if not isinstance(set, EdgeSet):
+                    raise Error(
+                        "Invalid set type",
+                        "Foreach edge statement must be run on edgesets.",
+                        self.pos,
+                    )
+                if not is_node_func(function):
+                    raise Error(
+                        "Invalid function type",
+                        "Foreach edge statements must run functions with a single parameter of type edge.",
+                        self.pos,
+                    )
+            case _ as unexpected:
+                assert_never(unexpected)
+
+        if not is_void_func(function):
+            raise Error(
+                "Invalid function type",
+                "Foreach statements must run functions that do not return values.",
+                self.pos,
+            )
+
+
+@attrs.define
+class Param:
+    name: str
+    type: TypeRef
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Param:
+        name = node.field("name").text
+        type = TypeRef.make(node.field("type"), scope)
+        obj = cls(name, type, None, node.pos)
+        scope.define(name, obj, node.pos)
+        return obj
+
+    def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
+        match self.type:
+            case TypeRef("node"):
+                self.scope = node_table.scope
+            case TypeRef("edge"):
+                self.scope = edge_table.scope
+
 
 @attrs.define
 class Function:
     name: str
     params: list[Param]
-    variables: list[Variable]
     return_: TypeRef | None
     body: list[Statement]
-    device_statements: list[DeviceStatement]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -1196,112 +1296,33 @@ class Function:
             stmt = parse_statement(child, scope)
             body.append(stmt)
 
-        variables: list[Variable] = []
-        device_statements: list[DeviceStatement] = []
-        for s in scope.names.values():
-            match s:
-                case Variable():
-                    variables.append(s)
-                case SelectUsing() | SelectApprox() | SelectRelative() | ForeachStatement():
-                    device_statements.append(s)
-
-        obj = cls(
-            name, params, variables, return_, body, device_statements, scope, node.pos
-        )
+        obj = cls(name, params, return_, body, scope, node.pos)
         parent_scope.define(name, obj, node.pos)
         return obj
+
+    def variables(self) -> list[Variable]:
+        assert self.scope is not None
+        return [s for s in self.scope.names.values() if isinstance(s, Variable)]
+
+    def device_statements(self) -> list[DeviceStatement]:
+        assert self.scope is not None
+        return [s for s in self.scope.names.values() if isinstance(s, DeviceStatement)]
+
+    def function_calls(self) -> list[FunctionCall]:
+        assert self.scope is not None
+        return [s for s in self.scope.names.values() if isinstance(s, FunctionCall)]
 
     def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
         for param in self.params:
             param.link_tables(node_table, edge_table)
-        for var in self.variables:
+        for var in self.variables():
             var.link_tables(node_table, edge_table)
 
-    def fix_device_statement_type(self):
-        for s in self.device_statements:
-            match s:
-                case SelectUsing() | SelectApprox() | SelectRelative():
-                    match s.set.resolve():
-                        case NodeSet():
-                            s.type.type = "node"
-                        case EdgeSet():
-                            s.type.type = "edge"
-                        case _ as unexpected:
-                            assert_never(unexpected)
-
-        for s in self.device_statements:
-            match s:
-                case SelectUsing():
-                    func = s.function.resolve()
-                    if s.type.type == "node":
-                        if not is_node_func(func):
-                            raise Error(
-                                "Invalid function type",
-                                "Nodeset update functions must have a single parameter of type node",
-                                s.pos,
-                            )
-                    elif s.type.type == "edge":
-                        if not is_edge_func(func):
-                            raise Error(
-                                "Invalid function type",
-                                "Edgeset update functions must have a single parameter of type edge",
-                                s.pos,
-                            )
-
-                    if not is_bool_func(func):
-                        raise Error(
-                            "Invalid function type",
-                            "Sets can can only be updated using functions that return a single bool value",
-                            s.pos,
-                        )
-                case SelectApprox() | SelectRelative():
-                    if s.type.type == "node":
-                        if not isinstance(s.parent.resolve(), NodeSet):
-                            raise Error(
-                                "Invalid source set type",
-                                "Nodesets can only be sampled from other nodesets",
-                                s.pos,
-                            )
-                    elif s.type.type == "edge":
-                        if not isinstance(s.parent.resolve(), EdgeSet):
-                            raise Error(
-                                "Invalid source set type",
-                                "Edgesets can only be sampled from other edgesets",
-                                s.pos,
-                            )
-                case ForeachStatement():
-                    if s.type == "node":
-                        if not isinstance(s.set.resolve(), NodeSet):
-                            raise Error(
-                                "Invalid set type",
-                                "Foreach node statement must be run on nodesets",
-                                s.pos,
-                            )
-                        if not is_node_func(s.function.resolve()):
-                            raise Error(
-                                "Invalid function type",
-                                "Foreach node statements must run functions with a single parameter of type node.",
-                                s.pos,
-                            )
-                    elif s.type == "edge":
-                        if not isinstance(s.set.resolve(), EdgeSet):
-                            raise Error(
-                                "Invalid set type",
-                                "Foreach edge statement must be run on edgesets.",
-                                s.pos,
-                            )
-                        if not is_node_func(s.function.resolve()):
-                            raise Error(
-                                "Invalid function type",
-                                "Foreach edge statements must run functions with a single parameter of type edge.",
-                                s.pos,
-                            )
-                    if not is_void_func(s.function.resolve()):
-                        raise Error(
-                            "Invalid function type",
-                            "Foreach statements must run functions that do not return values.",
-                            s.pos,
-                        )
+    def type_check(self):
+        for s in self.device_statements():
+            s.type_check()
+        for c in self.function_calls():
+            c.type_check()
 
 
 @attrs.define
@@ -1373,29 +1394,18 @@ def is_void_func(f: Function) -> bool:
 
 
 def is_kernel_func(f: Function) -> bool:
-    match f.params:
-        case [Param(_, TypeRef("node"))]:
-            return True
-        case [Param(_, TypeRef("edge"))]:
-            return True
-        case _:
-            return False
-
-
-def is_filter_func(f: Function) -> bool:
-    return is_kernel_func(f) and is_bool_func(f)
-
-
-def is_kernel_proc(f: Function) -> bool:
-    return is_kernel_func(f) and is_void_func(f)
+    if f.device_statements():
+        return False
+    else:
+        return True
 
 
 def make_main(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    if f.params:
-        raise Error("Bad main", "Main function must not have any parameters", f.pos)
+    if f.params or f.return_ is not None:
+        raise Error("Bad main", "Main function must not have any parameters.", f.pos)
     if f.return_ is not None:
-        raise Error("Bad main", "Main function must not have a return type", f.pos)
+        raise Error("Bad main", "Main function must not have a return type.", f.pos)
     return f
 
 
@@ -1410,7 +1420,13 @@ def make_susceptibility(node: PTNode, parent_scope: Scope) -> Function:
     if not is_float_func(f):
         raise Error(
             "Bad susceptibility",
-            "Susceptibility function must have a return type `float'",
+            "Susceptibility function must have a return type `float'.",
+            f.pos,
+        )
+    if not is_kernel_func(f):
+        raise Error(
+            "Bad susceptibility",
+            "Susceptibility function must not have parallel statements.",
             f.pos,
         )
     return f
@@ -1430,6 +1446,12 @@ def make_infectivity(node: PTNode, parent_scope: Scope) -> Function:
             "Infectivity function must have a return type `float'",
             f.pos,
         )
+    if not is_kernel_func(f):
+        raise Error(
+            "Bad infectivity",
+            "Infectivity function must not have parallel statements.",
+            f.pos,
+        )
     return f
 
 
@@ -1447,6 +1469,12 @@ def make_transmissibility(node: PTNode, parent_scope: Scope) -> Function:
             "Transmissibility function must have a return type `float'",
             f.pos,
         )
+    if not is_kernel_func(f):
+        raise Error(
+            "Bad transmissibility",
+            "Transmissibility function must not have parallel statements.",
+            f.pos,
+        )
     return f
 
 
@@ -1462,6 +1490,12 @@ def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
         raise Error(
             "Bad enabled (edge)",
             "Enabled (edge) function must have a return type `bool'",
+            f.pos,
+        )
+    if not is_kernel_func(f):
+        raise Error(
+            "Bad enabled (edge)",
+            "Enabled (edge) function must not have parallel statements.",
             f.pos,
         )
     return f
@@ -1485,9 +1519,9 @@ def add_builtins(scope: Scope, pos: SourcePosition):
 @attrs.define
 class Source:
     module: str
-    configs: list[Config]
-    variables: list[Variable]
     enums: list[EnumType]
+    configs: list[Config]
+    globals: list[Global]
     node_table: NodeTable
     edge_table: EdgeTable
     distributions: list[Distribution]
@@ -1504,9 +1538,9 @@ class Source:
         scope = Scope(name="source")
         add_builtins(scope, node.pos)
 
-        configs: list[Config] = []
-        variables: list[Variable] = []
         enums: list[EnumType] = []
+        configs: list[Config] = []
+        globals: list[Global] = []
         node_table: UniqueObject[NodeTable] = UniqueObject()
         edge_table: UniqueObject[EdgeTable] = UniqueObject()
         distributions: list[Distribution] = []
@@ -1518,41 +1552,42 @@ class Source:
 
         for child in node.named_children:
             match child.type:
-                case "config":
-                    configs.append(Config.make(child, scope))
-                case "variable":
-                    variables.append(Variable.make(child, scope))
                 case "enum":
                     enums.append(EnumType.make(child, scope))
+                case "config":
+                    configs.append(Config.make(child, scope))
+                case "global":
+                    globals.append(Global.make(child, scope))
                 case "node":
                     node_table.dup_error(
                         "Multiple node tables",
-                        "Node table is multiply defined",
+                        "Node table is multiply defined.",
                         child.pos,
                     )
                     node_table.set(NodeTable.make(child, scope))
                 case "edge":
                     edge_table.dup_error(
                         "Multiple edge tables",
-                        "Edge table is multiply defined",
+                        "Edge table is multiply defined.",
                         child.pos,
                     )
-
                     edge_table.set(EdgeTable.make(child, scope))
                 case "distributions":
-                    for d in child.named_children:
-                        distributions.append(parse_distribution(d, scope))
+                    for grand_child in child.named_children:
+                        distributions.append(parse_distribution(grand_child, scope))
                 case "contagion":
                     contagions.append(Contagion.make(child, scope))
                 case "nodeset":
-                    nodesets.append(NodeSet.make(child, scope))
+                    for grand_child in child.fields("name"):
+                        nodesets.append(NodeSet.make(grand_child, scope))
                 case "edgeset":
-                    edgesets.append(EdgeSet.make(child, scope))
+                    for grand_child in child.fields("name"):
+                        edgesets.append(EdgeSet.make(grand_child, scope))
                 case "function":
                     if child.field("name").text == "main":
                         main_function.dup_error(
                             "Multiple mains",
-                            "Main function is multiply defined",
+                            "Main function is multiply defined.",
                             child.pos,
                         )
                         main_function.set(make_main(child, scope))
@@ -1560,13 +1595,13 @@ class Source:
                         functions.append(Function.make(child, scope))
 
         node_table.missing_error(
-            "Node undefined", "Node table was not defined", node.pos
+            "Node undefined", "Node table was not defined.", node.pos
         )
         edge_table.missing_error(
-            "Edge undefined", "Edge table was not defined", node.pos
+            "Edge undefined", "Edge table was not defined.", node.pos
         )
         main_function.missing_error(
-            "Main undefined", "No main function was defined", node.pos
+            "Main undefined", "No main function was defined.", node.pos
         )
 
         node_table.get().link_contagions(contagions)
@@ -1575,20 +1610,27 @@ class Source:
 
         for func in functions:
             func.link_tables(node_table.get(), edge_table.get())
-            func.fix_device_statement_type()
         for contagion in contagions:
             contagion.susceptibility.link_tables(node_table.get(), edge_table.get())
             contagion.infectivity.link_tables(node_table.get(), edge_table.get())
             contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
             contagion.enabled.link_tables(node_table.get(), edge_table.get())
         main_function.get().link_tables(node_table.get(), edge_table.get())
-        main_function.get().fix_device_statement_type()
+
+        for contagion in contagions:
+            contagion.susceptibility.type_check()
+            contagion.infectivity.type_check()
+            contagion.transmissibility.type_check()
+            contagion.enabled.type_check()
+        for func in functions:
+            func.type_check()
+        main_function.get().type_check()
 
         return cls(
             module=module,
-            configs=configs,
-            variables=variables,
             enums=enums,
+            configs=configs,
+            globals=globals,
             node_table=node_table.get(),
             edge_table=edge_table.get(),
             distributions=distributions,
@@ -1656,6 +1698,8 @@ StatementParts = Statement | ElseSection | ElifSection
 
 def parse_statement(node: PTNode, scope: Scope) -> Statement:
     match node.type:
+        case "variable":
+            return Variable.make(node, scope)
         case "pass_statement":
             return PassStatement(node.pos)
         case "return_statement":
@@ -1670,8 +1714,6 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
             return UpdateStatement.make(node, scope)
         case "print_statement":
             return PrintStatement.make(node, scope)
-        case "variable":
-            return Variable.make(node, scope)
         case "select_using":
             return SelectUsing.make(node, scope)
         case "select_relative":
@@ -1687,6 +1729,7 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
 Referable = (
     EnumConstant
     | Config
+    | Global
     | Param
     | Variable
     | BuiltinFunction
@@ -1704,6 +1747,13 @@ Referable = (
     | tuple[Param | Variable, SourceNodeAccessor, Contagion, NodeField]
     | tuple[Param | Variable, TargetNodeAccessor, NodeField]
     | tuple[Param | Variable, TargetNodeAccessor, Contagion, NodeField]
+)
+
+Callable = (
+    BuiltinFunction
+    | Function
+    | tuple[Contagion, BuiltinFunction]
+    | tuple[Contagion, Function]
 )
 
 
@@ -1729,10 +1779,8 @@ def resolve_ref(r: Reference) -> Referable:
 
     try:
         ret = check_type(ret, Referable)
-    except Exception as e:
-        raise Error(
-            "Invalid reference", f"'{r_str}' is not a valid reference; ({e})", r.pos
-        )
+    except TypeCheckError:
+        raise Error("Invalid reference", f"'{r_str}' is not a valid reference", r.pos)
 
     return ret
 

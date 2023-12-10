@@ -5,7 +5,7 @@ config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = True
 
 config num_ticks: int = 10
-var cur_tick: int = 0
+global cur_tick: int = 0
 
 node
     pid: int node key static
@@ -168,8 +168,7 @@ def main():
         cur_tick += 1
         print("cur_tick = ", cur_tick)
 
-        c1.do_transmission(cur_tick)
-        c1.do_transition(cur_tick, 1.0)
+        c1.step(cur_tick, 1.0)
 
         if cur_tick < 10:
             select susceptibles using is_susceptible
