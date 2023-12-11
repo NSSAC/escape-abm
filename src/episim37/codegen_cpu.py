@@ -1049,6 +1049,24 @@ def codegen_cpu():
 
 
 @codegen_cpu.command()
+@click.argument(
+    "input",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+def print_ir(input: Path):
+    """Print intermediate representation."""
+    input_bytes = input.read_bytes()
+
+    try:
+        pt = mk_pt(str(input), input_bytes)
+        ast1 = mk_ast1(input, pt)
+        source = Source.make(ast1)
+        rich.print(source)
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+        e.rich_print()
+
+
+@codegen_cpu.command()
 @click.option(
     "-o",
     "--output",
@@ -1107,5 +1125,5 @@ def run(input: Path):
             rich.print("[cyan]Running simulator[/cyan]")
             cmd = "./simulator"
             verbose_run(cmd, cwd=output)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
