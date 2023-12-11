@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.27)
+
+project({{ source.module }} VERSION 0.0.1)
+
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
+find_package(OpenMP REQUIRED COMPONENTS C CXX)
+
+add_executable(simulator simulator.cpp)
+target_link_libraries(simulator hdf5::hdf5 hdf5::hdf5_cpp OpenMP::OpenMP_CXX)
+target_compile_features(simulator PRIVATE cxx_std_17)

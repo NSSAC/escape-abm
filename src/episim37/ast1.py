@@ -613,6 +613,11 @@ class Transmission:
 
 
 @attrs.define
+class StateAccessor:
+    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
+
+
+@attrs.define
 class Contagion:
     name: str
     state_type: EnumTypeRef
@@ -622,7 +627,7 @@ class Contagion:
     infectivity: Function
     transmissibility: Function
     enabled: Function
-    state: NodeField
+    state: StateAccessor
     step: BuiltinFunction
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -718,14 +723,8 @@ class Contagion:
             node.pos,
         )
 
-        state = NodeField(
-            "state",
-            TypeRef(state_type.get().type, scope),
-            False,
-            False,
-            None,
-        )
-        scope.define(state.name, state, state.pos)
+        state = StateAccessor(scope)
+        scope.define("state", state, None)
 
         step = BuiltinFunction(
             "step",
@@ -1740,7 +1739,7 @@ Referable = (
     | tuple[Contagion, Function]
     | tuple[Param | Variable, NodeField]
     | tuple[Param | Variable, EdgeField]
-    | tuple[Param | Variable, Contagion, NodeField]
+    | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor]
     | tuple[Param | Variable, TargetNodeAccessor]
     | tuple[Param | Variable, SourceNodeAccessor, NodeField]
