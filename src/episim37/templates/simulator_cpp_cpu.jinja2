@@ -63,6 +63,8 @@ void read_dataset(
         const H5::PredType& h5_type,
         const size_type count,
         T *const out) {
+    // std::cout << "reading " << dataset_name << std::endl;
+
     H5::DataSet dataset = file.openDataSet(dataset_name);
 
     // Ensure datatype is correct

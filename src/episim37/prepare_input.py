@@ -216,7 +216,7 @@ def prepare_cpu(
         ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
     )
     edge_out_dtypes["_target_node_index"] = node_index_dtype
-    edge_out_dtypes["_source_node_index"] = edge_index_dtype
+    edge_out_dtypes["_source_node_index"] = node_index_dtype
 
     rich.print("[yellow]Computing incoming incidence sparse matrix.[/yellow]")
     I = edge_table._target_node_index.to_numpy()
