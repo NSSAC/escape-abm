@@ -26,6 +26,10 @@ dependencies = [
     "jinja2",
     "pygls",
     "platformdirs",
+    "numpy",
+    "scipy",
+    "pandas",
+    "h5py",
 ]
 
 [tool.setuptools.packages.find]
