@@ -828,7 +828,9 @@ class Transmission:
 @attrs.define
 class Contagion:
     name: str
+    print_name: str
     state_type: str
+    num_states: int
     transition: Transition
     transmission: Transmission
     step: str
@@ -836,11 +838,15 @@ class Contagion:
     @classmethod
     def make(cls, c: ast1.Contagion) -> Contagion:
         name = mangle(c.name)
+        print_name = c.name
         state_type = typename(c.state_type.resolve())
+        num_states = len(c.state_type.resolve().consts)
         transition = Transition.make(c)
         transmission = Transmission.make(c)
         step = ref((c, c.step))
-        return cls(name, state_type, transition, transmission, step)
+        return cls(
+            name, print_name, state_type, num_states, transition, transmission, step
+        )
 
 
 @attrs.define

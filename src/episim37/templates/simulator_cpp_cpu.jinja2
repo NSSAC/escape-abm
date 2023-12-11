@@ -981,6 +981,44 @@ void {{ c.name }}_transmit(
     }
 }
 
+void {{ c.name }}_save_state_count(const int_type tick) {
+    size_type state_count[{{ c.num_states }}] = {0};
+
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+
+        size_type thread_state_count[{{ c.num_states }}] = {0};
+        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
+
+        for (size_type v = v_start; v < v_end; v++) {
+            thread_state_count[NODE_TABLE->{{ c.name }}_state[v]] += 1;
+        }
+
+        #pragma omp critical
+        {
+            for (size_type i = 0; i < {{ c.num_states }}; i++) {
+                state_count[i] += thread_state_count[i];
+            }
+        }
+    }
+
+    const auto bufsize = 4096;
+    char dataset_name[bufsize];
+    auto ret = std::snprintf(dataset_name, bufsize, "/{{ c.print_name }}/state_count/tick_%ld", tick);
+    assert(ret > 0 && ret < bufsize);
+
+    hsize_t dims[1] = { {{ c.num_states }} };
+    H5::DataSpace dataspace(1, dims);
+
+    H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, SIZE_TYPE_H5_TYPE, dataspace);
+    dataset.write(state_count, SIZE_TYPE_H5_TYPE);
+
+    dataset.close();
+    dataspace.close();
+}
+
 void {{ c.step }}(const int_type tick, const float_type elapsed) {
     #pragma omp parallel
     {
@@ -1020,6 +1058,7 @@ void {{ c.step }}(const int_type tick, const float_type elapsed) {
 
     {{ c.name }}_OUTPUT->save_transmissions(tick);
     {{ c.name }}_OUTPUT->save_transitions(tick);
+    {{ c.name }}_save_state_count(tick);
 }
 
 {% endfor %}
@@ -1330,6 +1369,9 @@ int main() {
         group.close();
 
         group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/transmissions");
+        group.close();
+
+        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/state_count");
         group.close();
     }
 
