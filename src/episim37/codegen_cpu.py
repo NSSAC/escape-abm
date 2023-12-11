@@ -48,7 +48,7 @@ class DeferredType:
 
 
 ENVIRONMENT = jinja2.Environment(
-    loader=jinja2.PackageLoader(package_name="episim37", package_path="."),
+    loader=jinja2.PackageLoader(package_name="episim37", package_path="templates"),
     undefined=jinja2.StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,

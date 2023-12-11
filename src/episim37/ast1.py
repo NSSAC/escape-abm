@@ -14,30 +14,6 @@ from typeguard import TypeCheckError, check_type
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError, SourcePosition
 
 
-T = TypeVar("T")
-
-
-class UniqueObject(Generic[T]):
-    def __init__(self):
-        self.obj: T | None = None
-
-    def dup_error(self, type: str, explanation: str, pos: SourcePosition):
-        if self.obj is not None:
-            raise Error(type, explanation, pos)
-
-    def set(self, obj: T):
-        assert self.obj is None
-        self.obj = obj
-
-    def get(self) -> T:
-        assert self.obj is not None
-        return self.obj
-
-    def missing_error(self, type: str, explanation, pos: SourcePosition):
-        if self.obj is None:
-            raise Error(type, explanation, pos)
-
-
 class ASTConstructionError(Exception):
     def __init__(self, type: str, explanation: str, pos: SourcePosition | None):
         super().__init__()
@@ -71,6 +47,29 @@ class UnexpectedValue(ASTConstructionError):
 
 
 Error = ASTConstructionError
+
+T = TypeVar("T")
+
+
+class UniqueObject(Generic[T]):
+    def __init__(self):
+        self.obj: T | None = None
+
+    def dup_error(self, type: str, explanation: str, pos: SourcePosition):
+        if self.obj is not None:
+            raise Error(type, explanation, pos)
+
+    def set(self, obj: T):
+        assert self.obj is None
+        self.obj = obj
+
+    def get(self) -> T:
+        assert self.obj is not None
+        return self.obj
+
+    def missing_error(self, type: str, explanation, pos: SourcePosition):
+        if self.obj is None:
+            raise Error(type, explanation, pos)
 
 
 @attrs.define
