@@ -495,13 +495,14 @@ class EnumType:
     name: str
     base_type: str
     consts: list[str]
+    print_consts: list[str]
 
     @classmethod
     def make(cls, et: ast1.EnumType) -> EnumType:
         name = typename(et)
         base_type = enum_base_type(et)
         consts = [mangle(c) for c in et.consts]
-        return cls(name, base_type, consts)
+        return cls(name, base_type, consts, et.consts)
 
 
 @attrs.define
@@ -540,6 +541,7 @@ class Global:
 @attrs.define
 class Field:
     name: str
+    print_name: str
     dataset_name: str
     type: str
     h5_type: str
@@ -556,11 +558,14 @@ class NodeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
+            print_name = field.name
             dataset_name = f"/node/{field.name}"
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
-            fields.append(Field(name, dataset_name, type, h5_type, is_static))
+            fields.append(
+                Field(name, print_name, dataset_name, type, h5_type, is_static)
+            )
 
         contagions = []
         for contagion in tab.contagions:
@@ -581,11 +586,14 @@ class EdgeTable:
         fields = []
         for field in tab.fields:
             name = mangle(field.name)
+            print_name = field.name
             dataset_name = f"/edge/{field.name}"
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
-            fields.append(Field(name, dataset_name, type, h5_type, is_static))
+            fields.append(
+                Field(name, print_name, dataset_name, type, h5_type, is_static)
+            )
 
         contagions = []
         for contagion in tab.contagions:

@@ -5,6 +5,7 @@ import click
 from .parse_tree import print_parse_tree
 from .ast1 import print_ast1
 from .codegen_cpu import codegen_cpu
+from .prepare_input import prepare_cpu
 
 
 @click.group()
@@ -15,3 +16,4 @@ def cli():
 cli.add_command(print_parse_tree)
 cli.add_command(print_ast1)
 cli.add_command(codegen_cpu)
+cli.add_command(prepare_cpu)

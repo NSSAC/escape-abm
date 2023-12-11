@@ -29,6 +29,7 @@ dependencies = [
     "numpy",
     "scipy",
     "pandas",
+    "pyarrow",
     "h5py",
 ]
 
