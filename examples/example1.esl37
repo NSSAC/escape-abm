@@ -3,8 +3,9 @@
 config enable_hybrid_learning: bool = True
 config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = True
+config transmissibility_scale: float = 0.3
 
-config num_ticks: int = 10
+config num_ticks: int = 100
 global cur_tick: int = 0
 
 node
@@ -54,7 +55,7 @@ contagion c1
     end
 
     def transmissibility(e: edge) -> float:
-        return 0.03 * e.duration
+        return transmissibility_scale * e.duration
     end
 
     transmission
@@ -191,5 +192,7 @@ def main():
             select will_start_isolation sample relative 0.95 from positive_inschool_nodes
             foreach node in will_start_isolation run start_isolation_b
         end
+
+        select susceptibles using is_susceptible
     end
 end
