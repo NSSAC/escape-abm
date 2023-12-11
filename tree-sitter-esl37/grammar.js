@@ -18,9 +18,9 @@ module.exports = grammar({
 
     rules: {
         source_file: $ => repeat(choice(
-            $.config,
-            $.variable,
             $.enum,
+            $.config,
+            $.global,
             $.node,
             $.edge,
             $.distributions,
@@ -34,6 +34,13 @@ module.exports = grammar({
 
         reference: $ => dotSep1($.identifier),
 
+        enum: $ => seq(
+            'enum',
+            field('name', $.identifier),
+            field('const', commaSep1($.identifier)),
+            'end'
+        ),
+
         config: $ => seq(
             'config',
             field('name', $.identifier),
@@ -44,11 +51,14 @@ module.exports = grammar({
             $._terminator
         ),
 
-        enum: $ => seq(
-            'enum',
+        global: $ => seq(
+            'global',
             field('name', $.identifier),
-            field('const', commaSep1($.identifier)),
-            'end'
+            ':',
+            field('type', $.identifier),
+            '=',
+            field('default', choice($.integer, $.float, $.boolean)),
+            $._terminator,
         ),
 
         node: $ => seq(
@@ -189,6 +199,17 @@ module.exports = grammar({
             $._terminator
         ),
 
+        nodeset: $ => seq(
+            'nodeset',
+            field('name', commaSep1($.identifier)),
+        ),
+
+        edgeset: $ => seq(
+            'edgeset',
+            field('name', commaSep1($.identifier)),
+        ),
+
+
         function: $ => seq(
             'def',
             field('name', $.identifier),
@@ -218,6 +239,7 @@ module.exports = grammar({
         ),
 
         _statement: $ => choice(
+            $.variable,
             $.pass_statement,
             $.return_statement,
             $.if_statement,
@@ -227,11 +249,20 @@ module.exports = grammar({
             $.call_statement,
             $.update_statement,
             $.print_statement,
-            $.variable,
             $.select_using,
             $.select_approx,
             $.select_relative,
             $.foreach_statement,
+        ),
+
+        variable: $ => seq(
+            'var',
+            field('name', $.identifier),
+            ':',
+            field('type', $.identifier),
+            '=',
+            field('init', $._expression),
+            $._terminator,
         ),
 
         pass_statement: $ => seq(
@@ -319,26 +350,6 @@ module.exports = grammar({
             $._terminator
         ),
 
-        variable: $ => seq(
-            'var',
-            field('var', $.identifier),
-            ':',
-            field('type', $.identifier),
-            '=',
-            field('init', $._expression),
-            $._terminator,
-        ),
-
-        // const_statement: $ => seq(
-        //     'const',
-        //     field('var', $.identifier),
-        //     ':',
-        //     field('type', $.identifier),
-        //     '=',
-        //     field('right', $._expression),
-        //     $._terminator,
-        // ),
-
         update_statement: $ => seq(
             field('left', $.reference),
             field('operator', choice(
@@ -351,16 +362,6 @@ module.exports = grammar({
             )),
             field('right', $._expression),
             $._terminator,
-        ),
-
-        nodeset: $ => seq(
-            'nodeset',
-            field('name', $.identifier),
-        ),
-
-        edgeset: $ => seq(
-            'edgeset',
-            field('name', $.identifier),
         ),
 
         select_using: $ => seq(
@@ -471,7 +472,7 @@ module.exports = grammar({
 
         identifier: _ => /[a-zA-Z][_a-zA-Z0-9]*/,
 
-        _comment: _ => token(seq('#', /.*/)),
+        comment: _ => token(seq('#', /.*/)),
 
         _number: $ => choice($.integer, $.float),
 
@@ -537,7 +538,7 @@ module.exports = grammar({
     },
 
     extras: $ => [
-        $._comment,
+        $.comment,
         $._whitespace
     ]
 });

@@ -1,10 +1,3 @@
-; Config
-(config
-    "config" @keyword
-    name: (identifier) @constant
-    type: (identifier) @type
-)
-
 ; Enum
 (enum
     "enum" @keyword
@@ -14,6 +7,21 @@
     const: (identifier) @constant
     ("," const: (identifier) @constant)*
 )
+
+; Config
+(config
+    "config" @keyword
+    name: (identifier) @constant
+    type: (identifier) @type
+)
+
+; Global
+(global
+    "global" @keyword
+    name: (identifier) @constant
+    type: (identifier) @type
+)
+
 
 ; Node
 (node "node" @keyword)
@@ -74,13 +82,15 @@
   (identifier) @constant
 )
 
+; Nodeset / Edgeset
+[ "nodeset" "edgeset" ] @keyword
+
 ; Function
 (function name: (identifier) @function)
 (function return: (identifier) @type)
 (function_param type: (identifier) @type)
 
 ; Function call
-
 (function_call
   function: (reference (identifier) @function .)
 )
@@ -96,8 +106,21 @@
 
 (print_statement "print" @function.builtin)
 
-; Literals
+; select_*
+[ "select" "using" "sample" "approx" "relative" "from" ] @keyword
 
+(select_using
+  function: (identifier) @function
+)
+
+; foreach
+[ "foreach" "in" "run" ] @keyword
+
+(foreach_statement
+  function: (identifier) @function
+)
+
+; Literals
 [
   (boolean)
 ] @boolean
@@ -136,8 +159,6 @@
 [
  "->"
  "=>"
- ; "{"
- ; "}"
  ":"
  ","
  ";"
@@ -152,10 +173,6 @@
  "pass"
  "return"
  "if" "elif" "else"
- ; "switch" "case" "default"
  "while"
- ; "for" "in"
  "var"
- ; "const"
- ; "nodeset" "edgeset" "foreach"
 ] @keyword

@@ -431,9 +431,13 @@
     "named": true,
     "fields": {
       "name": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
+          {
+            "type": ",",
+            "named": false
+          },
           {
             "type": "identifier",
             "named": true
@@ -875,6 +879,50 @@
     }
   },
   {
+    "type": "global",
+    "named": true,
+    "fields": {
+      "default": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "if_statement",
     "named": true,
     "fields": {
@@ -1049,9 +1097,13 @@
     "named": true,
     "fields": {
       "name": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
+          {
+            "type": ",",
+            "named": false
+          },
           {
             "type": "identifier",
             "named": true
@@ -1434,6 +1486,10 @@
           "named": true
         },
         {
+          "type": "global",
+          "named": true
+        },
+        {
           "type": "node",
           "named": true
         },
@@ -1447,10 +1503,6 @@
         },
         {
           "type": "test_statement",
-          "named": true
-        },
-        {
-          "type": "variable",
           "named": true
         }
       ]
@@ -1909,7 +1961,7 @@
           }
         ]
       },
-      "type": {
+      "name": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1919,7 +1971,7 @@
           }
         ]
       },
-      "var": {
+      "type": {
         "multiple": false,
         "required": true,
         "types": [
@@ -2154,6 +2206,10 @@
     "named": false
   },
   {
+    "type": "comment",
+    "named": true
+  },
+  {
     "type": "config",
     "named": false
   },
@@ -2223,6 +2279,10 @@
   },
   {
     "type": "from",
+    "named": false
+  },
+  {
+    "type": "global",
     "named": false
   },
   {
