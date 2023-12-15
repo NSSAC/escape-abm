@@ -1035,7 +1035,25 @@ class Source:
         )
 
 
-def do_build(output: Path | None, input: Path) -> Path:
+def do_prepare(output: Path | None, input: Path) -> Path:
+    input_bytes = input.read_bytes()
+    pt = mk_pt(str(input), input_bytes)
+    ast1 = mk_ast1(input, pt)
+
+    if output is None:
+        output = input.parent
+    output.mkdir(parents=True, exist_ok=True)
+
+    source = Source.make(ast1)
+
+    with open(output / "CMakeLists.txt", "wt") as fobj:
+        template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
+        fobj.write(template.render(source=source, input=str(input.absolute())))
+
+    return output
+
+
+def do_compile(output: Path | None, input: Path) -> Path:
     input_bytes = input.read_bytes()
     pt = mk_pt(str(input), input_bytes)
     ast1 = mk_ast1(input, pt)
@@ -1048,10 +1066,6 @@ def do_build(output: Path | None, input: Path) -> Path:
 
     with open(output / "simulator.cpp", "wt") as fobj:
         template = ENVIRONMENT.get_template("simulator_cpp_cpu.jinja2")
-        fobj.write(template.render(source=source))
-
-    with open(output / "CMakeLists.txt", "wt") as fobj:
-        template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
         fobj.write(template.render(source=source))
 
     return output
@@ -1085,16 +1099,35 @@ def print_ir(input: Path):
     "-o",
     "--output",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
-    help="Output directory",
+    help="Output directory.",
 )
 @click.argument(
     "input",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
 )
-def build(output: Path | None, input: Path):
-    """Build simulator."""
+def prepare(output: Path | None, input: Path):
+    """Generate CMakeLists.txt."""
     try:
-        do_build(output, input)
+        do_prepare(output, input)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+
+
+@codegen_cpu.command()
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    help="Output directory.",
+)
+@click.argument(
+    "input",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+def compile(output: Path | None, input: Path):
+    """Compile simulator code."""
+    try:
+        do_compile(output, input)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
 
@@ -1126,7 +1159,7 @@ def run(input: Path):
             rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
 
             rich.print("[cyan]Creating simulator[/cyan]")
-            output = do_build(output, input)
+            output = do_prepare(output, input)
 
             rich.print("[cyan]Running cmake[/cyan]")
             cmd = "cmake ."

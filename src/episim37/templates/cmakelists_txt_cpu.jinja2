@@ -4,6 +4,19 @@ project({{ source.module }} VERSION 0.0.1)
 
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 find_package(OpenMP REQUIRED COMPONENTS C CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+    set(CMAKE_CXX_COMPILER_LAUNCHER ccache)
+endif(CCACHE_FOUND)
+
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/simulator.cpp
+    COMMAND episim37 codegen-cpu compile {{ input }} -o ${CMAKE_CURRENT_SOURCE_DIR}
+    DEPENDS {{ input }}
+    VERBATIM
+)
 
 add_executable(simulator simulator.cpp)
 target_link_libraries(simulator hdf5::hdf5 hdf5::hdf5_cpp OpenMP::OpenMP_CXX)
