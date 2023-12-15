@@ -1,12 +1,12 @@
 """Prepare input data."""
 
+import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import scipy.sparse as sparse
 import h5py as h5
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 import click
 import rich
@@ -93,7 +93,7 @@ def enum_converter(type: str, enums: list[Enum]):
     "node_file",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
     required=True,
-    help="Path to node attributes (parquet) file.",
+    help="Path to node attributes file.",
 )
 @click.option(
     "-e",
@@ -101,7 +101,7 @@ def enum_converter(type: str, enums: list[Enum]):
     "edge_file",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
     required=True,
-    help="Path to edge attributes (parquet) file.",
+    help="Path to edge attributes file.",
 )
 @click.option(
     "-d",
@@ -148,17 +148,22 @@ def prepare_cpu(
         )
         node_dataset_names[field.print_name] = field.dataset_name
     node_key = ast1.node_table.key.name
-    node_schema = pa.schema(
-        [(c, pa.from_numpy_dtype(dtype)) for c, dtype in node_in_dtypes.items()]
-    )
-    node_table = pq.read_table(
-        node_file, columns=node_columns, schema=node_schema
-    ).to_pandas()
+
+    if node_file.suffix == ".csv":
+        node_table = pd.read_csv(node_file, usecols=node_columns, dtype=node_in_dtypes)
+    elif node_file.suffix == ".parquet":
+        node_table = pd.read_parquet(
+            node_file, usecols=node_columns, dtype=node_in_dtypes, engine="pyarrow"
+        )
+    else:
+        rich.print("[red]Unknown filetype for node file[/red]")
+        sys.exit(1)
+
     for col, converter in node_enum_converter.items():
         node_table[col] = node_table[col].map(converter)
 
     for col in node_table.columns:
-        if node_table[col].isnull().any():
+        if node_table[col].isnull().any():  # type: ignore
             rich.print(f"[red]Column {col} Node table has null values.[/red]")
             return
 
@@ -184,17 +189,22 @@ def prepare_cpu(
         edge_dataset_names[field.print_name] = field.dataset_name
     target_node_key = ast1.edge_table.target_node_key.name
     source_node_key = ast1.edge_table.source_node_key.name
-    edge_schema = pa.schema(
-        [(c, pa.from_numpy_dtype(dtype)) for c, dtype in edge_in_dtypes.items()]
-    )
-    edge_table = pq.read_table(
-        edge_file, columns=edge_columns, schema=edge_schema
-    ).to_pandas()
+
+    if edge_file.suffix == ".csv":
+        edge_table = pd.read_csv(edge_file, usecols=edge_columns, dtype=edge_in_dtypes)
+    elif edge_file.suffix == ".parquet":
+        edge_table = pd.read_parquet(
+            edge_file, usecols=edge_columns, dtype=edge_in_dtypes, engine="pyarrow"
+        )
+    else:
+        rich.print("[red]Unknown filetype for edge file[/red]")
+        sys.exit(1)
+
     for col, converter in edge_enum_converter.items():
         edge_table[col] = edge_table[col].map(converter)
 
     for col in edge_table.columns:
-        if edge_table[col].isnull().any():
+        if edge_table[col].isnull().any():  # type: ignore
             rich.print(f"[red]Column {col} in edge table has null values.[/red]")
             return
 
@@ -210,8 +220,8 @@ def prepare_cpu(
     key_idx = {k: idx for idx, k in enumerate(node_table[node_key])}
 
     rich.print("[yellow]Sorting edges.[/yellow]")
-    edge_table["_target_node_index"] = edge_table[target_node_key].map(key_idx)
-    edge_table["_source_node_index"] = edge_table[source_node_key].map(key_idx)
+    edge_table["_target_node_index"] = edge_table[target_node_key].map(key_idx)  # type: ignore
+    edge_table["_source_node_index"] = edge_table[source_node_key].map(key_idx)  # type: ignore
     edge_table.sort_values(
         ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
     )
