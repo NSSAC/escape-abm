@@ -27,9 +27,12 @@ const H5::PredType {{ type.h5_type }} = {{ type.base_h5_type }};
 // Utility methods
 // ----------------------------------------------------------------------------
 
+size_type TOTAL_ALLOC = 0;
+
 template <typename T>
 T* alloc_mem(const size_type n) {
   const auto alloc_size = sizeof(T) * n;
+  TOTAL_ALLOC += alloc_size;
   T* ret = static_cast<T*>(std::malloc(alloc_size));
   assert(ret != nullptr);
 
@@ -1300,7 +1303,7 @@ int main() {
     const auto init_start{std::chrono::steady_clock::now()};
 
     NUM_THREADS = omp_get_max_threads();
-    std::cout << "### num_threads: " << NUM_THREADS << std::endl;
+    std::cout << "### num_threads = " << NUM_THREADS << std::endl;
 
     {% for config in source.configs %}
     {
@@ -1333,10 +1336,10 @@ int main() {
     H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
 
     NUM_NODES = get_num_nodes(input_file);
-    std::cout << "### num_nodes: " << NUM_NODES << std::endl;
+    std::cout << "### num_nodes = " << NUM_NODES << std::endl;
 
     NUM_EDGES = get_num_edges(input_file);
-    std::cout << "### num_edges: " << NUM_EDGES << std::endl;
+    std::cout << "### num_edges = " << NUM_EDGES << std::endl;
 
     in_inc_csr csr(input_file);
     IN_INC_CSR = &csr;
@@ -1392,15 +1395,17 @@ int main() {
     {{ name }} = &{{ name }}_;
     {% endfor %}
 
+    std::cout << "### total_alloc_gb = " << double(TOTAL_ALLOC) / 1e9 << std::endl;
+
     const auto init_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> init_seconds{init_end - init_start};
-    std::cout << "### setup time (s): " << init_seconds.count() << std::endl;
+    std::cout << "### init_time_s = " << init_seconds.count() << std::endl;
 
     const auto main_start{std::chrono::steady_clock::now()};
     do_main();
     const auto main_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> main_seconds{main_end - main_start};
-    std::cout << "### main time (s): " << main_seconds.count() << std::endl;
+    std::cout << "### main_time_s: " << main_seconds.count() << std::endl;
 
     output_file.close();
     OUTPUT_FILE = nullptr;
