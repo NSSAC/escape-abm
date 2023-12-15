@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import shlex
 from pathlib import Path
 from textwrap import dedent
@@ -119,6 +120,7 @@ def ctype(t: str) -> str:
         "uint":  "uint_type",
         "float": "float_type",
         "bool":  "bool_type",
+        "size":  "size_type",
 
         "u8":  "uint8_t",
         "u16": "uint16_t",
@@ -135,6 +137,9 @@ def ctype(t: str) -> str:
 
         "node":  "node_index_type",
         "edge":  "edge_index_type",
+
+        "nodeset":  "nodeset*",
+        "edgeset":  "edgeset*",
     }
     # fmt: on
 
@@ -236,36 +241,32 @@ def update_globals() -> dict:
 ENVIRONMENT.globals.update(update_globals())
 
 
-def ref(x: ast1.Referable) -> str:
+def ref_str(x: ast1.Referable) -> str:
     match x:
         case ast1.EnumConstant():
             return mangle(x.name)
         case ast1.Config():
             return mangle(x.name)
+        case ast1.BuiltinConfig():
+            return x.name.upper()
         case ast1.Global():
             return mangle(x.name)
+        case ast1.BuiltinGlobal():
+            return x.name.upper()
         case ast1.Param():
             return mangle(x.name)
         case ast1.Variable():
-            return mangle(x.name)
-        case ast1.BuiltinFunction():
-            return mangle(x.name)
-        case ast1.Function():
             return mangle(x.name)
         case ast1.NodeSet():
             return mangle(x.name)
         case ast1.EdgeSet():
             return mangle(x.name)
-        case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
-            return mangle(c.name, f.name)
-        case [ast1.Contagion() as c, ast1.Function() as f]:
-            return mangle(c.name, f.name)
         case [ast1.Param() | ast1.Variable() as v, ast1.NodeField() as f]:
-            v_ref = ref(v)
+            v_ref = ref_str(v)
             f_ref = mangle(f.name)
             return f"NODE_TABLE->{f_ref}[{v_ref}]"
         case [ast1.Param() | ast1.Variable() as e, ast1.EdgeField() as f]:
-            e_ref = ref(e)
+            e_ref = ref_str(e)
             f_ref = mangle(f.name)
             return f"EDGE_TABLE->{f_ref}[{e_ref}]"
         case [
@@ -273,57 +274,58 @@ def ref(x: ast1.Referable) -> str:
             ast1.Contagion() as c,
             ast1.StateAccessor(),
         ]:
-            v_ref = ref(v)
+            v_ref = ref_str(v)
             f_ref = mangle(c.name) + "_state"
             return f"NODE_TABLE->{f_ref}[{v_ref}]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.SourceNodeAccessor(),
         ]:
-            e_ref = ref(e)
+            e_ref = ref_str(e)
             return f"EDGE_TABLE->source_node_index[{e_ref}]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.TargetNodeAccessor(),
         ]:
-            e_ref = ref(e)
+            e_ref = ref_str(e)
             return f"EDGE_TABLE->target_node_index[{e_ref}]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.SourceNodeAccessor(),
             ast1.NodeField() as f,
         ]:
-            e_ref = ref(e)
+            e_ref = ref_str(e)
             f_ref = mangle(f.name)
-            return f"NODE_TABLE->{f_ref}[EDGE_TABLE->source_node_index[{e_ref}]]"
-        case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.SourceNodeAccessor(),
-            ast1.Contagion() as c,
-            ast1.NodeField() as f,
-        ]:
-            e_ref = ref(e)
-            f_ref = mangle(c.name, f.name)
             return f"NODE_TABLE->{f_ref}[EDGE_TABLE->source_node_index[{e_ref}]]"
         case [
             ast1.Param() | ast1.Variable() as e,
             ast1.TargetNodeAccessor(),
             ast1.NodeField() as f,
         ]:
-            e_ref = ref(e)
+            e_ref = ref_str(e)
             f_ref = mangle(f.name)
-            return f"NODE_TABLE->{f_ref}[EDGE_TABLE->target_node_index[{e_ref}]]"
-        case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.TargetNodeAccessor(),
-            ast1.Contagion() as c,
-            ast1.NodeField() as f,
-        ]:
-            e_ref = ref(e)
-            f_ref = mangle(c.name, f.name)
             return f"NODE_TABLE->{f_ref}[EDGE_TABLE->target_node_index[{e_ref}]]"
         case _ as unexpected:
             assert_never(unexpected)
+
+
+def call_str(x: ast1.Callable) -> str:
+    match x:
+        case ast1.BuiltinFunction():
+            return mangle(x.name)
+        case ast1.Function():
+            return mangle(x.name)
+        case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
+            return mangle(c.name, f.name)
+        case [ast1.Contagion() as c, ast1.Function() as f]:
+            return mangle(c.name, f.name)
+        case _ as unexpected:
+            assert_never(unexpected)
+
+
+def upd_str(left: ast1.Updateable, op: str, right_str: str) -> str:
+    l_str = ref_str(left)
+    return f"{l_str} {op} {right_str}"
 
 
 def cpp_operator(t: str) -> str:
@@ -359,9 +361,9 @@ def expression_str(e: ast1.Expression) -> str:
             eo = expression_str(e.expression)
             return f"({eo})"
         case ast1.Reference():
-            return ref(e.resolve())
+            return ref_str(e.resolve_referable())
         case ast1.FunctionCall():
-            function = ref(e.function.resolve())
+            function = call_str(e.function.resolve_callable())
             args = [expression_str(a) for a in e.args]
             args = ", ".join(args)
             return f"{function}({args})"
@@ -451,10 +453,10 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
             lines.append(call_line)
         case ast1.UpdateStatement():
             lines.append(make_line(s.pos))
-            left = ref(s.left.resolve())
+            left = s.left.resolve_updateable()
             op = s.operator
             right = expression_str(s.right)
-            lines.append(f"{left} {op} {right};")
+            lines.append(upd_str(left, op, right) + ";")
         case ast1.PrintStatement():
             args = []
             for arg in s.args:
@@ -469,7 +471,7 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
             lines.append(line)
         case ast1.Variable():
             lines.append(make_line(s.pos))
-            left = ref(s)
+            left = ref_str(s)
             right = expression_str(s.init)
             lines.append(f"{left} = {right};")
         case ast1.SelectUsing():
@@ -516,7 +518,7 @@ class Config:
 
     @classmethod
     def make(cls, c: ast1.Config) -> Config:
-        name = ref(c)
+        name = ref_str(c)
         type = typename(c.type.resolve())
         from_str_fn = cstr_to_ctype_fn(type)
         env_var = c.name.upper()
@@ -532,7 +534,7 @@ class Global:
 
     @classmethod
     def make(cls, c: ast1.Global) -> Global:
-        name = ref(c)
+        name = ref_str(c)
         type = typename(c.type.resolve())
         default = expression_str(c.default)
         return cls(name, type, default)
@@ -695,7 +697,7 @@ class Function:
     def make(cls, name: str, x: ast1.Function) -> Function:
         params = []
         for p in x.params:
-            p_name = ref(p)
+            p_name = ref_str(p)
             p_type = typename(p.type.resolve())
             params.append((p_name, p_type))
 
@@ -706,7 +708,7 @@ class Function:
 
         variables = []
         for v in x.variables():
-            v_name = ref(v)
+            v_name = ref_str(v)
             v_type = typename(v.type.resolve())
             variables.append((v_name, v_type))
 
@@ -727,8 +729,8 @@ class SingleEdgeTransition:
 
     @classmethod
     def make(cls, t: ast1.Transition) -> SingleEdgeTransition:
-        entry = ref(t.entry.resolve())
-        exit = ref(t.exit.resolve())
+        entry = ref_str(t.entry.resolve())
+        exit = ref_str(t.exit.resolve())
         dwell_dist = mangle(t.dwell.resolve().name)
         return cls(entry, exit, dwell_dist)
 
@@ -743,14 +745,14 @@ class MultiEdgeTransition:
 
     @classmethod
     def make(cls, ts: list[ast1.Transition]) -> MultiEdgeTransition:
-        entry = ref(ts[0].entry.resolve())
+        entry = ref_str(ts[0].entry.resolve())
 
         ps = [t.p for t in ts]
         table = AliasTable.make(ps)
         probs = [str(p) for p in table.probs]
         alias = [str(p) for p in table.alias]
 
-        exits = [ref(t.exit.resolve()) for t in ts]
+        exits = [ref_str(t.exit.resolve()) for t in ts]
         dwell_dists = [mangle(t.dwell.resolve().name) for t in ts]
         return cls(entry, probs, alias, exits, dwell_dists)
 
@@ -765,7 +767,7 @@ class Transition:
     def make(cls, c: ast1.Contagion) -> Transition:
         entry_transi = defaultdict(list)
         for transi in c.transitions:
-            entry_transi[ref(transi.entry.resolve())].append(transi)
+            entry_transi[ref_str(transi.entry.resolve())].append(transi)
 
         single: list[SingleEdgeTransition] = []
         multi: list[MultiEdgeTransition] = []
@@ -802,19 +804,19 @@ class Transmission:
     def make(cls, c: ast1.Contagion) -> Transmission:
         transms = defaultdict(lambda: defaultdict(list))
         for t in c.transmissions:
-            contact = ref(t.contact.resolve())
-            entry = ref(t.entry.resolve())
-            exit = ref(t.exit.resolve())
+            contact = ref_str(t.contact.resolve())
+            entry = ref_str(t.entry.resolve())
+            exit = ref_str(t.exit.resolve())
             transms[entry][exit].append(contact)
         transms = [
             (entry, [(exit, contacts) for exit, contacts in xs.items()])
             for entry, xs in transms.items()
         ]
 
-        susceptibility = ref((c, c.susceptibility))
-        infectivity = ref((c, c.infectivity))
-        transmissibility = ref((c, c.transmissibility))
-        enabled = ref((c, c.enabled))
+        susceptibility = call_str((c, c.susceptibility))
+        infectivity = call_str((c, c.infectivity))
+        transmissibility = call_str((c, c.transmissibility))
+        enabled = call_str((c, c.enabled))
 
         return cls(
             transms=transms,
@@ -843,7 +845,7 @@ class Contagion:
         num_states = len(c.state_type.resolve().consts)
         transition = Transition.make(c)
         transmission = Transmission.make(c)
-        step = ref((c, c.step))
+        step = call_str((c, c.step))
         return cls(
             name, print_name, state_type, num_states, transition, transmission, step
         )
@@ -858,8 +860,8 @@ class SelectUsing:
     @classmethod
     def make(cls, s: ast1.SelectUsing) -> SelectUsing:
         name = s.name
-        set_name = ref(s.set.resolve())
-        function_name = ref(s.function.resolve())
+        set_name = ref_str(s.set.resolve())
+        function_name = call_str(s.function.resolve())
         return cls(name, set_name, function_name)
 
 
@@ -873,9 +875,9 @@ class SelectApprox:
     @classmethod
     def make(cls, s: ast1.SelectApprox) -> SelectApprox:
         name = s.name
-        set_name = ref(s.set.resolve())
+        set_name = ref_str(s.set.resolve())
         amount = str(s.amount)
-        parent_set_name = ref(s.parent.resolve())
+        parent_set_name = ref_str(s.parent.resolve())
         return cls(name, set_name, amount, parent_set_name)
 
 
@@ -889,9 +891,9 @@ class SelectRelative:
     @classmethod
     def make(cls, s: ast1.SelectRelative) -> SelectRelative:
         name = s.name
-        set_name = ref(s.set.resolve())
+        set_name = ref_str(s.set.resolve())
         amount = str(s.amount)
-        parent_set_name = ref(s.parent.resolve())
+        parent_set_name = ref_str(s.parent.resolve())
         return cls(name, set_name, amount, parent_set_name)
 
 
@@ -904,8 +906,8 @@ class ForeachStatement:
     @classmethod
     def make(cls, s: ast1.ForeachStatement) -> ForeachStatement:
         name = s.name
-        set_name = ref(s.set.resolve())
-        function_name = ref(s.function.resolve())
+        set_name = ref_str(s.set.resolve())
+        function_name = call_str(s.function.resolve())
         return cls(name, set_name, function_name)
 
 
@@ -945,8 +947,8 @@ class Source:
         node_table = NodeTable.make(source.node_table)
         edge_table = EdgeTable.make(source.edge_table)
         contagion_outputs = [ContagionOutput.make(c) for c in source.contagions]
-        nodesets = [ref(s) for s in source.nodesets]
-        edgesets = [ref(s) for s in source.edgesets]
+        nodesets = [ref_str(s) for s in source.nodesets]
+        edgesets = [ref_str(s) for s in source.edgesets]
 
         constant_dists: list[ConstantDist] = []
         discrete_dists: list[DiscreteDist] = []
@@ -968,12 +970,13 @@ class Source:
         functions: list[Function] = []
         for c in source.contagions:
             for fn in [c.susceptibility, c.infectivity, c.transmissibility, c.enabled]:
-                name = ref((c, fn))
+                name = call_str((c, fn))
                 functions.append(Function.make(name, fn))
         for fn in source.functions:
-            name = ref(fn)
+            name = call_str(fn)
             functions.append(Function.make(name, fn))
-        functions.append(Function.make("do_main", source.main_function))
+        functions.append(Function.make("do_initialize", source.initialize))
+        functions.append(Function.make("do_intervene", source.intervene))
 
         contagions = [Contagion.make(c) for c in source.contagions]
 
@@ -985,7 +988,7 @@ class Source:
         select_relative_edge: list[SelectRelative] = []
         foreach_node_statement: list[ForeachStatement] = []
         foreach_edge_statement: list[ForeachStatement] = []
-        for fn in chain(source.functions, [source.main_function]):
+        for fn in chain(source.functions, [source.initialize, source.intervene]):
             for stmt in fn.device_statements():
                 set = stmt.set.resolve()
                 match [stmt, set]:
@@ -1092,6 +1095,7 @@ def print_ir(input: Path):
         rich.print(source)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
+        sys.exit(1)
 
 
 @codegen_cpu.command()
@@ -1111,6 +1115,7 @@ def prepare(output: Path | None, input: Path):
         do_prepare(output, input)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
+        sys.exit(1)
 
 
 @codegen_cpu.command()
@@ -1130,6 +1135,7 @@ def compile(output: Path | None, input: Path):
         do_compile(output, input)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
+        sys.exit(1)
 
 
 def pprint_cmd(cmd):
@@ -1174,3 +1180,4 @@ def run(input: Path):
             verbose_run(cmd, cwd=output)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
+        sys.exit(1)

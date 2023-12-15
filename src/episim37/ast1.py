@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, TypeVar, Generic, Literal, cast, assert_never
 
@@ -148,12 +149,16 @@ class BuiltinTypeRef:
             self.pos,
         )
 
+@attrs.define
+class BuiltinParam:
+    name: str
+    type: str
 
 @attrs.define
 class BuiltinFunction:
     name: str
-    params: list[Param]
-    return_: TypeRef | None
+    params: list[BuiltinParam]
+    return_: str | None
     is_device: bool
 
 
@@ -273,6 +278,12 @@ class Config:
 
 
 @attrs.define
+class BuiltinConfig:
+    name: str
+    type: str
+
+
+@attrs.define
 class Global:
     name: str
     type: BuiltinTypeRef
@@ -287,6 +298,12 @@ class Global:
         obj = cls(name, type, default, node.pos)
         scope.define(name, obj, node.pos)
         return obj
+
+
+@attrs.define
+class BuiltinGlobal:
+    name: str
+    type: str
 
 
 @attrs.define
@@ -728,8 +745,7 @@ class Contagion:
         step = BuiltinFunction(
             "step",
             [
-                Param("tick", TypeRef("int", scope)),
-                Param("elapsed", TypeRef("float", scope)),
+                BuiltinParam("elapsed", "float"),
             ],
             None,
             True,
@@ -851,8 +867,70 @@ class Reference:
         names = [s.text for s in node.named_children]
         return cls(names, scope, node.pos)
 
-    def resolve(self) -> Referable:
-        return resolve_ref(self)
+    @property
+    def names_str(self) -> str:
+        return ".".join(self.names)
+
+    def do_resolve(self) -> Any:
+        assert self.scope is not None
+
+        head, tail = self.names[0], self.names[1:]
+        refs = []
+        try:
+            v = self.scope.resolve(head, self.pos)
+            refs.append(v)
+            for part in tail:
+                v = v.scope.resolve(part, self.pos)
+                refs.append(v)
+        except (ASTConstructionError, AttributeError) as e:
+            raise Error(
+                "Undefined reference",
+                f"Failed to resolve '{self.names_str}'; ({e})",
+                self.pos,
+            )
+
+        if len(refs) == 1:
+            ret = refs[0]
+        else:
+            ret = tuple(refs)
+
+        return ret
+
+    def resolve_referable(self) -> Referable:
+        ret = self.do_resolve()
+        try:
+            ret = check_type(ret, Referable)
+        except TypeCheckError:
+            raise Error(
+                "Invalid reference",
+                f"'{self.names_str}' is not a valid referable",
+                self.pos,
+            )
+        return ret
+
+    def resolve_callable(self) -> Callable:
+        ret = self.do_resolve()
+        try:
+            ret = check_type(ret, Callable)
+        except TypeCheckError:
+            raise Error(
+                "Invalid reference",
+                f"'{self.names_str}' is not a valid callable",
+                self.pos,
+            )
+        return ret
+
+    def resolve_updateable(self) -> Updateable:
+        ret = self.do_resolve()
+        try:
+            ret = check_type(ret, Updateable)
+        except TypeCheckError:
+            raise Error(
+                "Invalid reference",
+                f"'{self.names_str}' can't be updated",
+                self.pos,
+            )
+        return ret
 
 
 @attrs.define
@@ -873,14 +951,7 @@ class FunctionCall:
         return obj
 
     def type_check(self):
-        function = self.function.resolve()
-        r_str = ".".join(self.function.names)
-        try:
-            function = check_type(function, Callable)
-        except TypeCheckError:
-            raise Error(
-                "Invalid reference", f"{r_str!r} is not a valid callable.", self.pos
-            )
+        function = self.function.resolve_callable()
 
         match function:
             case BuiltinFunction() | Function():
@@ -1398,12 +1469,29 @@ def is_kernel_func(f: Function) -> bool:
         return True
 
 
-def make_main(node: PTNode, parent_scope: Scope) -> Function:
+def make_initialize(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
     if f.params or f.return_ is not None:
-        raise Error("Bad main", "Main function must not have any parameters.", f.pos)
+        raise Error(
+            "Bad initialize", "Initialize function must not have any parameters.", f.pos
+        )
     if f.return_ is not None:
-        raise Error("Bad main", "Main function must not have a return type.", f.pos)
+        raise Error(
+            "Bad initialize", "Initialize function must not have a return type.", f.pos
+        )
+    return f
+
+
+def make_intervene(node: PTNode, parent_scope: Scope) -> Function:
+    f = Function.make(node, parent_scope)
+    if f.params or f.return_ is not None:
+        raise Error(
+            "Bad intervene", "Intervene function must not have any parameters.", f.pos
+        )
+    if f.return_ is not None:
+        raise Error(
+            "Bad intervene", "Intervene function must not have a return type.", f.pos
+        )
     return f
 
 
@@ -1499,19 +1587,26 @@ def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
     return f
 
 
-def add_builtin_type(type: str, scope: Scope, pos: SourcePosition):
-    scope.define(type, BuiltinType(type), pos)
-
-
 def add_builtins(scope: Scope, pos: SourcePosition):
-    for type in ["int", "uint", "float", "bool", "node", "edge"]:
-        add_builtin_type(type, scope, pos)
-    for type in ["u8", "u16", "u32", "u64"]:
-        add_builtin_type(type, scope, pos)
-    for type in ["i8", "i16", "i32", "i64"]:
-        add_builtin_type(type, scope, pos)
-    for type in ["f32", "f64"]:
-        add_builtin_type(type, scope, pos)
+    # fmt: off
+    builtin_types = [
+        "int", "uint", "float", "bool", "size",
+        "node", "edge",
+        "nodeset", "edgeset",
+        "u8", "u16", "u32", "u64",
+        "i8", "i16", "i32", "i64",
+        "f32", "f64",
+    ]
+    # fmt: on
+
+    for type in builtin_types:
+        scope.define(type, BuiltinType(type), pos)
+
+    scope.define("num_ticks", BuiltinConfig("num_ticks", "uint"), pos)
+
+    scope.define("cur_tick", BuiltinGlobal("cur_tick", "uint"), pos)
+    scope.define("num_nodes", BuiltinGlobal("num_nodes", "size"), pos)
+    scope.define("num_edges", BuiltinGlobal("num_edges", "size"), pos)
 
 
 @attrs.define
@@ -1527,7 +1622,8 @@ class Source:
     nodesets: list[NodeSet]
     edgesets: list[EdgeSet]
     functions: list[Function]
-    main_function: Function
+    initialize: Function
+    intervene: Function
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -1546,7 +1642,8 @@ class Source:
         nodesets: list[NodeSet] = []
         edgesets: list[EdgeSet] = []
         functions: list[Function] = []
-        main_function: UniqueObject[Function] = UniqueObject()
+        initialize: UniqueObject[Function] = UniqueObject()
+        intervene: UniqueObject[Function] = UniqueObject()
 
         for child in node.named_children:
             match child.type:
@@ -1582,13 +1679,20 @@ class Source:
                     for grand_child in child.fields("name"):
                         edgesets.append(EdgeSet.make(grand_child, scope))
                 case "function":
-                    if child.field("name").text == "main":
-                        main_function.dup_error(
-                            "Multiple mains",
-                            "Main function is multiply defined.",
+                    if child.field("name").text == "initialize":
+                        initialize.dup_error(
+                            "Multiple initialize",
+                            "Initialize function is multiply defined.",
                             child.pos,
                         )
-                        main_function.set(make_main(child, scope))
+                        initialize.set(make_initialize(child, scope))
+                    elif child.field("name").text == "intervene":
+                        intervene.dup_error(
+                            "Multiple intervene",
+                            "Intervene function is multiply defined.",
+                            child.pos,
+                        )
+                        intervene.set(make_intervene(child, scope))
                     else:
                         functions.append(Function.make(child, scope))
 
@@ -1598,8 +1702,11 @@ class Source:
         edge_table.missing_error(
             "Edge undefined", "Edge table was not defined.", node.pos
         )
-        main_function.missing_error(
-            "Main undefined", "No main function was defined.", node.pos
+        initialize.missing_error(
+            "Initialize undefined", "No initialize function was defined.", node.pos
+        )
+        intervene.missing_error(
+            "Intervene undefined", "No intervene function was defined.", node.pos
         )
 
         node_table.get().link_contagions(contagions)
@@ -1613,7 +1720,8 @@ class Source:
             contagion.infectivity.link_tables(node_table.get(), edge_table.get())
             contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
             contagion.enabled.link_tables(node_table.get(), edge_table.get())
-        main_function.get().link_tables(node_table.get(), edge_table.get())
+        initialize.get().link_tables(node_table.get(), edge_table.get())
+        intervene.get().link_tables(node_table.get(), edge_table.get())
 
         for contagion in contagions:
             contagion.susceptibility.type_check()
@@ -1622,7 +1730,8 @@ class Source:
             contagion.enabled.type_check()
         for func in functions:
             func.type_check()
-        main_function.get().type_check()
+        initialize.get().type_check()
+        intervene.get().type_check()
 
         return cls(
             module=module,
@@ -1636,7 +1745,8 @@ class Source:
             nodesets=nodesets,
             edgesets=edgesets,
             functions=functions,
-            main_function=main_function.get(),
+            initialize=initialize.get(),
+            intervene=intervene.get(),
             scope=scope,
             pos=node.pos,
         )
@@ -1727,24 +1837,20 @@ def parse_statement(node: PTNode, scope: Scope) -> Statement:
 Referable = (
     EnumConstant
     | Config
+    | BuiltinConfig
     | Global
+    | BuiltinGlobal
     | Param
     | Variable
-    | BuiltinFunction
-    | Function
     | NodeSet
     | EdgeSet
-    | tuple[Contagion, BuiltinFunction]
-    | tuple[Contagion, Function]
     | tuple[Param | Variable, NodeField]
     | tuple[Param | Variable, EdgeField]
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor]
     | tuple[Param | Variable, TargetNodeAccessor]
     | tuple[Param | Variable, SourceNodeAccessor, NodeField]
-    | tuple[Param | Variable, SourceNodeAccessor, Contagion, NodeField]
     | tuple[Param | Variable, TargetNodeAccessor, NodeField]
-    | tuple[Param | Variable, TargetNodeAccessor, Contagion, NodeField]
 )
 
 Callable = (
@@ -1754,33 +1860,16 @@ Callable = (
     | tuple[Contagion, Function]
 )
 
-
-def resolve_ref(r: Reference) -> Referable:
-    assert r.scope is not None
-    r_str = ".".join(r.names)
-
-    head, tail = r.names[0], r.names[1:]
-    refs = []
-    try:
-        v = r.scope.resolve(head, r.pos)
-        refs.append(v)
-        for part in tail:
-            v = v.scope.resolve(part, r.pos)
-            refs.append(v)
-    except (ASTConstructionError, AttributeError) as e:
-        raise Error("Undefined reference", f"Failed to resolve '{r_str}'; ({e})", r.pos)
-
-    if len(refs) == 1:
-        ret = refs[0]
-    else:
-        ret = tuple(refs)
-
-    try:
-        ret = check_type(ret, Referable)
-    except TypeCheckError:
-        raise Error("Invalid reference", f"'{r_str}' is not a valid reference", r.pos)
-
-    return ret
+Updateable = (
+    Global
+    | Param
+    | Variable
+    | tuple[Param | Variable, NodeField]
+    | tuple[Param | Variable, EdgeField]
+    | tuple[Param | Variable, Contagion, StateAccessor]
+    | tuple[Param | Variable, SourceNodeAccessor, NodeField]
+    | tuple[Param | Variable, TargetNodeAccessor, NodeField]
+)
 
 
 def mk_ast1(filename: Path, node: PTNode) -> Source:
@@ -1804,3 +1893,4 @@ def print_ast1(filename: Path):
         rich.print(ast1)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
+        sys.exit(1)

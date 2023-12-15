@@ -5,9 +5,6 @@ config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = True
 config transmissibility_scale: float = 0.3
 
-config num_ticks: int = 10
-global cur_tick: int = 0
-
 node
     pid: int node key static
     is_in_school: bool static
@@ -164,35 +161,34 @@ nodeset seed_nodes
 nodeset positive_inschool_nodes
 nodeset will_start_isolation
 
-def main():
-    while cur_tick < num_ticks:
-        cur_tick += 1
-        print("cur_tick = ", cur_tick)
+def initialize():
+    pass
+end
 
-        c1.step(cur_tick, 1.0)
+def intervene():
+    c1.step(1.0)
 
-        if cur_tick < 10:
-            select susceptibles using is_susceptible
-            select seed_nodes sample approx 5 from susceptibles
-            foreach node in seed_nodes run set_seed
-        end
-
+    if cur_tick < 10:
         select susceptibles using is_susceptible
-
-        if (enable_day_30_antigen_test or enable_day_30_pcr_test) and cur_tick >= 30:
-            select positive_inschool_nodes using is_positive_inschool_node
-        end
-
-        if enable_day_30_antigen_test and cur_tick >= 30:
-            select will_start_isolation sample relative 0.8 from positive_inschool_nodes
-            foreach node in will_start_isolation run start_isolation_a
-        end
-
-        if enable_day_30_pcr_test and cur_tick >= 30:
-            select will_start_isolation sample relative 0.95 from positive_inschool_nodes
-            foreach node in will_start_isolation run start_isolation_b
-        end
-
-        select susceptibles using is_susceptible
+        select seed_nodes sample approx 5 from susceptibles
+        foreach node in seed_nodes run set_seed
     end
+
+    select susceptibles using is_susceptible
+
+    if (enable_day_30_antigen_test or enable_day_30_pcr_test) and cur_tick >= 30:
+        select positive_inschool_nodes using is_positive_inschool_node
+    end
+
+    if enable_day_30_antigen_test and cur_tick >= 30:
+        select will_start_isolation sample relative 0.8 from positive_inschool_nodes
+        foreach node in will_start_isolation run start_isolation_a
+    end
+
+    if enable_day_30_pcr_test and cur_tick >= 30:
+        select will_start_isolation sample relative 0.95 from positive_inschool_nodes
+        foreach node in will_start_isolation run start_isolation_b
+    end
+
+    select susceptibles using is_susceptible
 end

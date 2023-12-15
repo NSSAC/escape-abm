@@ -112,8 +112,10 @@ const {{ enum.name }} {{ const }} = {{ loop.index0 }};
 
 {% endfor %}
 
+int_type NUM_TICKS = 0;
+
 // ----------------------------------------------------------------------------
-// User defined global variables
+// Global variables
 // ----------------------------------------------------------------------------
 
 {% for global in source.globals %}
@@ -121,13 +123,10 @@ const {{ enum.name }} {{ const }} = {{ loop.index0 }};
 
 {% endfor %}
 
-// ----------------------------------------------------------------------------
-// Internal global variables
-// ----------------------------------------------------------------------------
-
 size_type NUM_THREADS = 0;
 size_type NUM_NODES = 0;
 size_type NUM_EDGES = 0;
+int_type CUR_TICK = 0;
 
 // ----------------------------------------------------------------------------
 // Node and edge count getters
@@ -461,12 +460,8 @@ struct {{ co.name }}_output {
     transmission_source{nullptr},
     transmission_state{nullptr},
     num_transmissions{nullptr} {
-        // we allocate twice output space here because
-        // a node can transition twice during a step
-        // once due to the user's interventions
-        // and the other due to regular progression
-        transition_node_idx = alloc_mem<node_index_type>(NUM_NODES * 2);
-        transition_state = alloc_mem<{{ co.state_type }}>(NUM_NODES * 2);
+        transition_node_idx = alloc_mem<node_index_type>(NUM_NODES);
+        transition_state = alloc_mem<{{ co.state_type }}>(NUM_NODES);
         num_transitions = alloc_mem<size_type>(NUM_THREADS);
 
         transmission_node_idx = alloc_mem<node_index_type>(NUM_NODES);
@@ -483,7 +478,8 @@ struct {{ co.name }}_output {
 
             const auto start = THREAD_NODE_RANGE->start(thread_idx);
             const auto end = THREAD_NODE_RANGE->end(thread_idx);
-            for (size_type v = start * 2; v < end * 2; v++) {
+
+            for (size_type v = start; v < end; v++) {
                 transition_node_idx[v] = 0;
                 transition_state[v] = 0;
             }
@@ -505,19 +501,19 @@ struct {{ co.name }}_output {
             const size_type v_start,
             const size_type v,
             const {{ co.state_type }} state) {
-        auto idx = (v_start * 2) + num_transitions[thread_idx];
+        auto idx = v_start + num_transitions[thread_idx];
         transition_node_idx[idx] = v;
         transition_state[idx] = state;
         num_transitions[thread_idx]++;
     }
 
-    void save_transitions(const int_type tick) {
-        auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}", tick);
+    void save_interventions() {
+        auto group_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}", CUR_TICK);
         H5::Group group = OUTPUT_FILE->createGroup(group_name);
         group.close();
 
         for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}", tick, thread_idx);
+            auto group_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}", CUR_TICK, thread_idx);
             H5::Group group = OUTPUT_FILE->createGroup(group_name);
             group.close();
 
@@ -527,7 +523,7 @@ struct {{ co.name }}_output {
             auto v_start = THREAD_NODE_RANGE->start(thread_idx);
 
             {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/node_index", tick, thread_idx);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transition_node_idx[v_start]);
@@ -536,7 +532,43 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/state", tick, thread_idx);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
+
+                auto data = &(transition_state[v_start]);
+                dataset.write(data, {{ co.state_h5_type }});
+                dataset.close();
+            }
+
+        }
+    }
+
+    void save_transitions() {
+        auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}", CUR_TICK);
+        H5::Group group = OUTPUT_FILE->createGroup(group_name);
+        group.close();
+
+        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
+            auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}", CUR_TICK, thread_idx);
+            H5::Group group = OUTPUT_FILE->createGroup(group_name);
+            group.close();
+
+            hsize_t dims[1] = {num_transitions[thread_idx]};
+            H5::DataSpace dataspace(1, dims);
+
+            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+
+            {
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
+                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
+
+                auto data = &(transition_node_idx[v_start]);
+                dataset.write(data, NODE_INDEX_TYPE_H5_TYPE);
+                dataset.close();
+            }
+
+            {
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
 
                 auto data = &(transition_state[v_start]);
@@ -564,13 +596,13 @@ struct {{ co.name }}_output {
         num_transmissions[thread_idx]++;
     }
 
-    void save_transmissions(const int_type tick) {
-        auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}", tick);
+    void save_transmissions() {
+        auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}", CUR_TICK);
         H5::Group group = OUTPUT_FILE->createGroup(group_name);
         group.close();
 
         for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}", tick, thread_idx);
+            auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}", CUR_TICK, thread_idx);
             H5::Group group = OUTPUT_FILE->createGroup(group_name);
             group.close();
 
@@ -580,7 +612,7 @@ struct {{ co.name }}_output {
             auto v_start = THREAD_NODE_RANGE->start(thread_idx);
 
             {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/node_index", tick, thread_idx);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transmission_node_idx[v_start]);
@@ -589,7 +621,7 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/source_edge_index", tick, thread_idx);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/source_edge_index", CUR_TICK, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, EDGE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transmission_source[v_start]);
@@ -598,7 +630,7 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/state", tick, thread_idx);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
 
                 auto data = &(transmission_state[v_start]);
@@ -895,7 +927,6 @@ void {{ c.name }}_transition_node(
     NODE_TABLE->{{ c.name }}_dwell_time[v] = dwell_time;
 }
 
-
 void {{ c.name }}_update_transmission_prob(const size_type e) {
     const auto v = EDGE_TABLE->target_node_index[e];
     const auto u = EDGE_TABLE->source_node_index[e];
@@ -971,7 +1002,7 @@ void {{ c.name }}_transmit(
     }
 }
 
-void {{ c.name }}_save_state_count(const int_type tick) {
+void {{ c.name }}_save_state_count() {
     size_type state_count[{{ c.num_states }}] = {0};
 
     #pragma omp parallel
@@ -997,7 +1028,7 @@ void {{ c.name }}_save_state_count(const int_type tick) {
     hsize_t dims[1] = { {{ c.num_states }} };
     H5::DataSpace dataspace(1, dims);
 
-    auto dataset_name = fmt::format("/{{ c.print_name }}/state_count/tick_{}", tick);
+    auto dataset_name = fmt::format("/{{ c.print_name }}/state_count/tick_{}", CUR_TICK);
     H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, SIZE_TYPE_H5_TYPE, dataspace);
     dataset.write(state_count, SIZE_TYPE_H5_TYPE);
 
@@ -1005,46 +1036,67 @@ void {{ c.name }}_save_state_count(const int_type tick) {
     dataspace.close();
 }
 
-void {{ c.step }}(const int_type tick, const float_type elapsed) {
+void {{ c.step }}(const float_type elapsed) {
+    // First we do transitions caused by interventions
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
         const auto rnd = &(RND_STATE->rnd[thread_idx]);
 
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
+        {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
+
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-
-        {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
-        {{ c.name }}_OUTPUT->reset_transmissions(thread_idx);
-
-        // First we do transitions caused by the user
         for (size_type v = v_start; v < v_end; v++) {
             {{ c.name }}_transition_node(v, rnd, 0.0, thread_idx, v_start);
         }
+    }
 
-        #pragma omp barrier
+    {{ c.name }}_OUTPUT->save_interventions();
 
-        // Second to the transmissions
+    // Second to the transmissions
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+
+        {{ c.name }}_OUTPUT->reset_transmissions(thread_idx);
+
+        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
+        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
         for (size_type e = e_start; e < e_end; e++) {
             {{ c.name }}_update_transmission_prob(e);
         }
-        for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transmit(v, rnd, thread_idx, v_start);
-        }
 
         #pragma omp barrier
 
-        // Third we do do transitions caused by progression
+        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
+        for (size_type v = v_start; v < v_end; v++) {
+            {{ c.name }}_transmit(v, rnd, thread_idx, v_start);
+        }
+    }
+
+    {{ c.name }}_OUTPUT->save_transmissions();
+
+    // Third we do do transitions caused by progression
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto rnd = &(RND_STATE->rnd[thread_idx]);
+
+        {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
+
+        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
             {{ c.name }}_transition_node(v, rnd, elapsed, thread_idx, v_start);
         }
     }
 
-    {{ c.name }}_OUTPUT->save_transmissions(tick);
-    {{ c.name }}_OUTPUT->save_transitions(tick);
-    {{ c.name }}_save_state_count(tick);
+    {{ c.name }}_OUTPUT->save_transitions();
+
+    {{ c.name }}_save_state_count();
 }
 
 {% endfor %}
@@ -1297,6 +1349,13 @@ int main() {
         fmt::print("### {{ config.print_name }} = {}\n", {{ config.name }});
     }
     {% endfor %}
+    {
+        const char *p = std::getenv("NUM_TICKS");
+        if (p) {
+            NUM_TICKS = std::stol(p);
+        }
+        fmt::print("### num_ticks = {}\n", NUM_TICKS);
+    }
 
     const char *input_file_name = "input.h5";
     {
@@ -1351,6 +1410,9 @@ int main() {
         group = OUTPUT_FILE->createGroup("/{{ co.print_name }}");
         group.close();
 
+        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/interventions");
+        group.close();
+
         group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/transitions");
         group.close();
 
@@ -1385,7 +1447,14 @@ int main() {
     fmt::print("### init_time = {}\n", init_seconds);
 
     const auto main_start{std::chrono::steady_clock::now()};
-    do_main();
+    CUR_TICK = -1;
+    fmt::print("### cur_tick = {}\n", CUR_TICK);
+    do_initialize();
+
+    for (CUR_TICK = 0; CUR_TICK < NUM_TICKS; CUR_TICK++) {
+        fmt::print("### cur_tick = {}\n", CUR_TICK);
+        do_intervene();
+    }
     const auto main_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> main_seconds{main_end - main_start};
     fmt::print("### main_time = {}\n", main_seconds);
