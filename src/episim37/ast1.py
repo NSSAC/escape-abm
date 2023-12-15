@@ -111,7 +111,7 @@ def make_literal(n: PTNode, types: type) -> int | float | bool:
         case "float":
             v = float(n.text)
         case "boolean":
-            v = n.text == True
+            v = n.text == "True"
         case _ as unexpected:
             raise UnexpectedValue(unexpected, n.pos)
 
@@ -1771,7 +1771,7 @@ def parse_expression(node: PTNode, scope: Scope) -> Expression:
         case "float":
             return float(node.text)
         case "boolean":
-            return node.text == True
+            return node.text == "True"
         case "unary_expression":
             return UnaryExpression.make(node, scope)
         case "binary_expression":
