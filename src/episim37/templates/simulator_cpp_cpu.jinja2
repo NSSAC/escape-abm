@@ -10,6 +10,8 @@
 #include <chrono>
 #include <omp.h>
 #include <H5Cpp.h>
+#include <fmt/core.h>
+#include <fmt/chrono.h>
 
 // ----------------------------------------------------------------------------
 // Common types
@@ -510,18 +512,13 @@ struct {{ co.name }}_output {
     }
 
     void save_transitions(const int_type tick) {
-        const auto bufsize = 4096;
-        char dataset_name[bufsize];
-
-        auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transitions/tick_%ld", tick);
-        assert(ret > 0 && ret < bufsize);
-        H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+        auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}", tick);
+        H5::Group group = OUTPUT_FILE->createGroup(group_name);
         group.close();
 
         for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transitions/tick_%ld/thread_%ld", tick, thread_idx);
-            assert(ret > 0 && ret < bufsize);
-            H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+            auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}", tick, thread_idx);
+            H5::Group group = OUTPUT_FILE->createGroup(group_name);
             group.close();
 
             hsize_t dims[1] = {num_transitions[thread_idx]};
@@ -530,8 +527,7 @@ struct {{ co.name }}_output {
             auto v_start = THREAD_NODE_RANGE->start(thread_idx);
 
             {
-                auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transitions/tick_%ld/thread_%ld/node_index", tick, thread_idx);
-                assert(ret > 0 && ret < bufsize);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/node_index", tick, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transition_node_idx[v_start]);
@@ -540,8 +536,7 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transitions/tick_%ld/thread_%ld/state", tick, thread_idx);
-                assert(ret > 0 && ret < bufsize);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/state", tick, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
 
                 auto data = &(transition_state[v_start]);
@@ -570,18 +565,13 @@ struct {{ co.name }}_output {
     }
 
     void save_transmissions(const int_type tick) {
-        const auto bufsize = 4096;
-        char dataset_name[bufsize];
-
-        auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transmissions/tick_%ld", tick);
-        assert(ret > 0 && ret < bufsize);
-        H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+        auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}", tick);
+        H5::Group group = OUTPUT_FILE->createGroup(group_name);
         group.close();
 
         for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transmissions/tick_%ld/thread_%ld", tick, thread_idx);
-            assert(ret > 0 && ret < bufsize);
-            H5::Group group = OUTPUT_FILE->createGroup(dataset_name);
+            auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}", tick, thread_idx);
+            H5::Group group = OUTPUT_FILE->createGroup(group_name);
             group.close();
 
             hsize_t dims[1] = {num_transmissions[thread_idx]};
@@ -590,8 +580,7 @@ struct {{ co.name }}_output {
             auto v_start = THREAD_NODE_RANGE->start(thread_idx);
 
             {
-                auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transmissions/tick_%ld/thread_%ld/node_index", tick, thread_idx);
-                assert(ret > 0 && ret < bufsize);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/node_index", tick, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transmission_node_idx[v_start]);
@@ -600,8 +589,7 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transmissions/tick_%ld/thread_%ld/source_edge_index", tick, thread_idx);
-                assert(ret > 0 && ret < bufsize);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/source_edge_index", tick, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, EDGE_INDEX_TYPE_H5_TYPE, dataspace);
 
                 auto data = &(transmission_source[v_start]);
@@ -610,8 +598,7 @@ struct {{ co.name }}_output {
             }
 
             {
-                auto ret = std::snprintf(dataset_name, bufsize, "/{{ co.print_name }}/transmissions/tick_%ld/thread_%ld/state", tick, thread_idx);
-                assert(ret > 0 && ret < bufsize);
+                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/state", tick, thread_idx);
                 H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
 
                 auto data = &(transmission_state[v_start]);
@@ -1007,14 +994,10 @@ void {{ c.name }}_save_state_count(const int_type tick) {
         }
     }
 
-    const auto bufsize = 4096;
-    char dataset_name[bufsize];
-    auto ret = std::snprintf(dataset_name, bufsize, "/{{ c.print_name }}/state_count/tick_%ld", tick);
-    assert(ret > 0 && ret < bufsize);
-
     hsize_t dims[1] = { {{ c.num_states }} };
     H5::DataSpace dataspace(1, dims);
 
+    auto dataset_name = fmt::format("/{{ c.print_name }}/state_count/tick_{}", tick);
     H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, SIZE_TYPE_H5_TYPE, dataspace);
     dataset.write(state_count, SIZE_TYPE_H5_TYPE);
 
@@ -1303,7 +1286,7 @@ int main() {
     const auto init_start{std::chrono::steady_clock::now()};
 
     NUM_THREADS = omp_get_max_threads();
-    std::cout << "### num_threads = " << NUM_THREADS << std::endl;
+    fmt::print("### num_threads = {}\n", NUM_THREADS);
 
     {% for config in source.configs %}
     {
@@ -1311,7 +1294,7 @@ int main() {
         if (p) {
             {{ config.name }} = {{ config.from_str_fn }}(p);
         }
-        std::cout << "### {{ config.print_name }} = " << std::to_string({{ config.name }}) << std::endl;
+        fmt::print("### {{ config.print_name }} = {}\n", {{ config.name }});
     }
     {% endfor %}
 
@@ -1321,7 +1304,7 @@ int main() {
         if (p) {
             input_file_name = p;
         }
-        std::cout << "### input_file = " << input_file_name << std::endl;
+        fmt::print("### input_file = {}\n", input_file_name);
     }
 
     const char *output_file_name = "output.h5";
@@ -1330,16 +1313,16 @@ int main() {
         if (p) {
             output_file_name = p;
         }
-        std::cout << "### output_file = " << output_file_name << std::endl;
+        fmt::print("### output_file = {}\n", output_file_name);
     }
 
     H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
 
     NUM_NODES = get_num_nodes(input_file);
-    std::cout << "### num_nodes = " << NUM_NODES << std::endl;
+    fmt::print("### num_nodes = {}\n", NUM_NODES);
 
     NUM_EDGES = get_num_edges(input_file);
-    std::cout << "### num_edges = " << NUM_EDGES << std::endl;
+    fmt::print("### num_edges = {}\n", NUM_EDGES);
 
     in_inc_csr csr(input_file);
     IN_INC_CSR = &csr;
@@ -1395,17 +1378,17 @@ int main() {
     {{ name }} = &{{ name }}_;
     {% endfor %}
 
-    std::cout << "### total_alloc_gb = " << double(TOTAL_ALLOC) / 1e9 << std::endl;
+    fmt::print("### total_alloc_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
 
     const auto init_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> init_seconds{init_end - init_start};
-    std::cout << "### init_time_s = " << init_seconds.count() << std::endl;
+    fmt::print("### init_time = {}\n", init_seconds);
 
     const auto main_start{std::chrono::steady_clock::now()};
     do_main();
     const auto main_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> main_seconds{main_end - main_start};
-    std::cout << "### main_time_s: " << main_seconds.count() << std::endl;
+    fmt::print("### main_time = {}\n", main_seconds);
 
     output_file.close();
     OUTPUT_FILE = nullptr;
