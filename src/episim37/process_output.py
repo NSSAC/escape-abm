@@ -9,8 +9,115 @@ import h5py as h5
 import click
 import rich
 
-from .ast1 import mk_ast1, ASTConstructionError
+from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
 from .parse_tree import mk_pt, ParseTreeConstructionError
+
+
+def find_contagion(name: str, source: Source) -> Contagion:
+    if not name:
+        name = source.contagions[0].name
+
+    contagion = [c for c in source.contagions if c.name == name]
+    if len(contagion) != 1:
+        rich.print("[red]Invalid contagion[/red]")
+        sys.exit(1)
+    contagion = contagion[0]
+
+    return contagion
+
+
+def save_df(df: pd.DataFrame, fname: Path):
+    if fname.suffix == ".csv":
+        df.to_csv(fname, index=False)
+    elif fname.suffix == ".parquet":
+        df.to_parquet(fname, index=False, engine="pyarrow", compression="zstd")
+    else:
+        rich.print("[red]Unknown output file type[/red]")
+        sys.exit(1)
+
+
+def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pd.DataFrame:
+    states = [const for const in contagion.state_type.resolve().consts]
+    group = sim_output[contagion.name]["state_count"]  # type: ignore
+
+    ticks = []
+    counts = []
+    for key in group.keys():  # type: ignore
+        tick = key.split("_")
+        tick = tick[-1]
+        tick = int(tick)
+
+        dset = group[key][...]  # type: ignore
+
+        ticks.append(tick)
+        counts.append(dset)
+
+    df = pd.DataFrame(counts, columns=states)
+    df["tick"] = ticks
+    df.sort_values("tick", ignore_index=True, inplace=True)
+    return df
+
+
+def do_extract_transitions(
+    sim_output: h5.File, contagion: Contagion, gkey: str = "transitions"
+) -> pd.DataFrame:
+    states = [const for const in contagion.state_type.resolve().consts]
+    states = {i: n for i, n in enumerate(states)}
+
+    group = sim_output[contagion.name][gkey]  # type: ignore
+
+    parts = []
+    for k1 in group.keys():  # type: ignore
+        tick = k1.split("_")
+        tick = tick[-1]
+        tick = int(tick)
+
+        for k2 in group[k1].keys():  # type: ignore
+            node_index = group[k1][k2]["node_index"][...]  # type: ignore
+            state = group[k1][k2]["state"][...]  # type: ignore
+            part = {"node_index": node_index, "state": state}
+            part = pd.DataFrame(part)
+            part["tick"] = tick
+            part["state"] = part.state.map(states)
+            parts.append(part)
+
+    df = pd.concat(parts, axis=0)
+    df.sort_values(["tick", "node_index"], ignore_index=True, inplace=True)
+    return df
+
+
+def do_extract_interventions(sim_output: h5.File, contagion: Contagion) -> pd.DataFrame:
+    return do_extract_transitions(sim_output, contagion, "interventions")
+
+
+def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.DataFrame:
+    states = [const for const in contagion.state_type.resolve().consts]
+    states = {i: n for i, n in enumerate(states)}
+
+    group = sim_output[contagion.name]["transitions"]  # type: ignore
+
+    parts = []
+    for k1 in group.keys():  # type: ignore
+        tick = k1.split("_")
+        tick = tick[-1]
+        tick = int(tick)
+
+        for k2 in group[k1].keys():  # type: ignore
+            node_index = group[k1][k2]["node_index"][...]  # type: ignore
+            state = group[k1][k2]["state"][...]  # type: ignore
+            part = {"node_index": node_index, "state": state}
+            part = pd.DataFrame(part)
+            part["tick"] = tick
+            part["state"] = part.state.map(states)
+            parts.append(part)
+
+    df = pd.concat(parts, axis=0)
+    df.sort_values(["tick", "node_index"], ignore_index=True, inplace=True)
+    return df
+
+
+ExistingFile = click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path)
+NewFile = click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path)
 
 
 @click.group
@@ -18,40 +125,79 @@ def process_output():
     """Process output file."""
 
 
-@process_output.command()
-@click.option(
+simulation_file_option = click.option(
     "-s",
     "--simulation",
     "simulation_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    type=ExistingFile,
     required=True,
-    help="Path to simulation (esl37) file.",
+    help="Path to simulation file.",
 )
-@click.option(
+
+contagion_name_option = click.option(
     "-c",
     "--contagion",
     "contagion_name",
     default="",
     help="Contagion to extract. (default: first defined contagion)",
 )
-@click.option(
+
+simulation_output_option = click.option(
     "-i",
     "--simulation-output",
     "sim_output_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    type=ExistingFile,
     required=True,
     show_default=True,
     help="Path to simulation output file (h5) file.",
 )
-@click.option(
+
+summary_file_option = click.option(
     "-o",
     "--summary-output",
     "summary_file",
-    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
-    default="summary.parquet",
+    type=NewFile,
+    default="summary.csv",
     show_default=True,
-    help="Path to summary output file.",
+    help="Path to summary file.",
 )
+
+interventions_file_option = click.option(
+    "-o",
+    "--interventions-output",
+    "interventions_file",
+    type=NewFile,
+    default="interventions.csv",
+    show_default=True,
+    help="Path to interventions file.",
+)
+
+transitions_file_option = click.option(
+    "-o",
+    "--transitions-output",
+    "transitions_file",
+    type=NewFile,
+    default="transitions.csv",
+    show_default=True,
+    help="Path to transitions file.",
+)
+
+transmissions_file_option = click.option(
+    "-o",
+    "--transmissions-output",
+    "transmissions_file",
+    type=NewFile,
+    default="transmissions.csv",
+    show_default=True,
+    help="Path to transmissions file.",
+)
+
+
+@process_output.command()
+@simulation_file_option
+@contagion_name_option
+@simulation_output_option
+@summary_file_option
 def extract_summary(
     simulation_file: Path,
     contagion_name: str,
@@ -60,329 +206,137 @@ def extract_summary(
 ):
     """Extract summary from simulation output."""
     simulation_bytes = simulation_file.read_bytes()
-
     try:
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
-        if not contagion_name:
-            contagion_name = ast1.contagions[0].name
-
-        contagion = [c for c in ast1.contagions if c.name == contagion_name]
-        if len(contagion) != 1:
-            rich.print("[red]Invalid contagion[/red]")
-            sys.exit(1)
-        contagion = contagion[0]
-
-        states = [const for const in contagion.state_type.resolve().consts]
-
+        contagion = find_contagion(contagion_name, ast1)
         with h5.File(sim_output_file, "r") as sim_output:
-            group = sim_output[contagion_name]["state_count"]  # type: ignore
+            df = do_extract_summary(sim_output, contagion)
 
-            ticks = []
-            counts = []
-            for key in group.keys():  # type: ignore
-                tick = key.split("_")
-                tick = tick[-1]
-                tick = int(tick)
-
-                dset = group[key][...]  # type: ignore
-
-                ticks.append(tick)
-                counts.append(dset)
-
-        df = pd.DataFrame(counts, columns=states)
-        df["tick"] = ticks
-        df.sort_values("tick", ignore_index=True)
-
-        if summary_file.suffix == ".csv":
-            df.to_csv(summary_file, index=False)
-        elif summary_file.suffix == ".parquet":
-            df.to_parquet(summary_file, index=False, engine="pyarrow")
-        else:
-            rich.print("[red]Unknown output file type[/red]")
-            sys.exit(1)
+        save_df(df, summary_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
 
 
 @process_output.command()
-@click.option(
-    "-s",
-    "--simulation",
-    "simulation_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    help="Path to simulation (esl37) file.",
-)
-@click.option(
-    "-c",
-    "--contagion",
-    "contagion_name",
-    default="",
-    help="Contagion to extract. (default: first defined contagion)",
-)
-@click.option(
-    "-i",
-    "--simulation-output",
-    "sim_output_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    show_default=True,
-    help="Path to simulation output file (h5) file.",
-)
-@click.option(
-    "-o",
-    "--summary-output",
-    "summary_file",
-    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
-    default="summary.parquet",
-    show_default=True,
-    help="Path to summary output file.",
-)
+@simulation_file_option
+@contagion_name_option
+@simulation_output_option
+@interventions_file_option
 def extract_interventions(
     simulation_file: Path,
     contagion_name: str,
     sim_output_file: Path,
-    summary_file: Path,
+    interventions_file: Path,
 ):
     """Extract interventions from simulation output."""
     simulation_bytes = simulation_file.read_bytes()
-
     try:
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
-        if not contagion_name:
-            contagion_name = ast1.contagions[0].name
-
-        contagion = [c for c in ast1.contagions if c.name == contagion_name]
-        if len(contagion) != 1:
-            rich.print("[red]Invalid contagion[/red]")
-            sys.exit(1)
-        contagion = contagion[0]
-
-        states = [const for const in contagion.state_type.resolve().consts]
-        states = {i: n for i, n in enumerate(states)}
-
+        contagion = find_contagion(contagion_name, ast1)
         with h5.File(sim_output_file, "r") as sim_output:
-            group = sim_output[contagion_name]["interventions"]  # type: ignore
+            df = do_extract_interventions(sim_output, contagion)
 
-            parts = []
-            for k1 in group.keys():  # type: ignore
-                tick = k1.split("_")
-                tick = tick[-1]
-                tick = int(tick)
-
-                for k2 in group[k1].keys():  # type: ignore
-                    node_index = group[k1][k2]["node_index"][...]  # type: ignore
-                    state = group[k1][k2]["state"][...]  # type: ignore
-                    part = {"node_index": node_index, "state": state}
-                    part = pd.DataFrame(part)
-                    part["tick"] = tick
-                    part["state"] = part.state.map(states)
-                    parts.append(part)
-
-        df = pd.concat(parts, axis=0)
-        df.sort_values(["tick", "node_index"], ignore_index=True)
-
-        if summary_file.suffix == ".csv":
-            df.to_csv(summary_file, index=False)
-        elif summary_file.suffix == ".parquet":
-            df.to_parquet(summary_file, index=False, engine="pyarrow")
-        else:
-            rich.print("[red]Unknown output file type[/red]")
-            sys.exit(1)
+        save_df(df, interventions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
 
 
 @process_output.command()
-@click.option(
-    "-s",
-    "--simulation",
-    "simulation_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    help="Path to simulation (esl37) file.",
-)
-@click.option(
-    "-c",
-    "--contagion",
-    "contagion_name",
-    default="",
-    help="Contagion to extract. (default: first defined contagion)",
-)
-@click.option(
-    "-i",
-    "--simulation-output",
-    "sim_output_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    show_default=True,
-    help="Path to simulation output file (h5) file.",
-)
-@click.option(
-    "-o",
-    "--summary-output",
-    "summary_file",
-    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
-    default="summary.parquet",
-    show_default=True,
-    help="Path to summary output file.",
-)
+@simulation_file_option
+@contagion_name_option
+@simulation_output_option
+@transitions_file_option
 def extract_transitions(
     simulation_file: Path,
     contagion_name: str,
     sim_output_file: Path,
-    summary_file: Path,
+    transitions_file: Path,
 ):
     """Extract transitions from simulation output."""
     simulation_bytes = simulation_file.read_bytes()
-
     try:
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
-        if not contagion_name:
-            contagion_name = ast1.contagions[0].name
-
-        contagion = [c for c in ast1.contagions if c.name == contagion_name]
-        if len(contagion) != 1:
-            rich.print("[red]Invalid contagion[/red]")
-            sys.exit(1)
-        contagion = contagion[0]
-
-        states = [const for const in contagion.state_type.resolve().consts]
-        states = {i: n for i, n in enumerate(states)}
-
+        contagion = find_contagion(contagion_name, ast1)
         with h5.File(sim_output_file, "r") as sim_output:
-            group = sim_output[contagion_name]["transitions"]  # type: ignore
+            df = do_extract_transitions(sim_output, contagion)
 
-            parts = []
-            for k1 in group.keys():  # type: ignore
-                tick = k1.split("_")
-                tick = tick[-1]
-                tick = int(tick)
-
-                for k2 in group[k1].keys():  # type: ignore
-                    node_index = group[k1][k2]["node_index"][...]  # type: ignore
-                    state = group[k1][k2]["state"][...]  # type: ignore
-                    part = {"node_index": node_index, "state": state}
-                    part = pd.DataFrame(part)
-                    part["tick"] = tick
-                    part["state"] = part.state.map(states)
-                    parts.append(part)
-
-        df = pd.concat(parts, axis=0)
-        df.sort_values(["tick", "node_index"], ignore_index=True)
-
-        if summary_file.suffix == ".csv":
-            df.to_csv(summary_file, index=False)
-        elif summary_file.suffix == ".parquet":
-            df.to_parquet(summary_file, index=False, engine="pyarrow")
-        else:
-            rich.print("[red]Unknown output file type[/red]")
-            sys.exit(1)
+        save_df(df, transitions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
 
 
 @process_output.command()
-@click.option(
-    "-s",
-    "--simulation",
-    "simulation_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    help="Path to simulation (esl37) file.",
-)
-@click.option(
-    "-c",
-    "--contagion",
-    "contagion_name",
-    default="",
-    help="Contagion to extract. (default: first defined contagion)",
-)
-@click.option(
-    "-i",
-    "--simulation-output",
-    "sim_output_file",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-    required=True,
-    show_default=True,
-    help="Path to simulation output file (h5) file.",
-)
-@click.option(
-    "-o",
-    "--summary-output",
-    "summary_file",
-    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
-    default="summary.parquet",
-    show_default=True,
-    help="Path to summary output file.",
-)
+@simulation_file_option
+@contagion_name_option
+@simulation_output_option
+@transmissions_file_option
 def extract_transmissions(
     simulation_file: Path,
     contagion_name: str,
     sim_output_file: Path,
-    summary_file: Path,
+    transmissions_file: Path,
 ):
-    """Extract transitions from simulation output."""
+    """Extract transmissions from simulation output."""
     simulation_bytes = simulation_file.read_bytes()
-
     try:
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
-        if not contagion_name:
-            contagion_name = ast1.contagions[0].name
-
-        contagion = [c for c in ast1.contagions if c.name == contagion_name]
-        if len(contagion) != 1:
-            rich.print("[red]Invalid contagion[/red]")
-            sys.exit(1)
-        contagion = contagion[0]
-
-        states = [const for const in contagion.state_type.resolve().consts]
-        states = {i: n for i, n in enumerate(states)}
-
+        contagion = find_contagion(contagion_name, ast1)
         with h5.File(sim_output_file, "r") as sim_output:
-            group = sim_output[contagion_name]["transmissions"]  # type: ignore
+            df = do_extract_transmissions(sim_output, contagion)
 
-            parts = []
-            for k1 in group.keys():  # type: ignore
-                tick = k1.split("_")
-                tick = tick[-1]
-                tick = int(tick)
+        save_df(df, transmissions_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        sys.exit(1)
 
-                for k2 in group[k1].keys():  # type: ignore
-                    node_index = group[k1][k2]["node_index"][...]  # type: ignore
-                    source_edge_index = group[k1][k2]["source_edge_index"][...]  # type: ignore
-                    state = group[k1][k2]["state"][...]  # type: ignore
-                    part = {
-                        "node_index": node_index,
-                        "source_edge_index": source_edge_index,
-                        "state": state,
-                    }
-                    part = pd.DataFrame(part)
-                    part["tick"] = tick
-                    part["state"] = part.state.map(states)
-                    parts.append(part)
 
-        df = pd.concat(parts, axis=0)
-        df.sort_values(["tick", "node_index"], ignore_index=True)
+@process_output.command()
+@simulation_file_option
+@contagion_name_option
+@simulation_output_option
+@summary_file_option
+@interventions_file_option
+@transitions_file_option
+@transmissions_file_option
+def extract_all(
+    simulation_file: Path,
+    contagion_name: str,
+    sim_output_file: Path,
+    summary_file: Path,
+    interventions_file: Path,
+    transitions_file: Path,
+    transmissions_file: Path,
+):
+    """Extract summary,interventions,transitions,transmissions from simulation output."""
+    simulation_bytes = simulation_file.read_bytes()
+    try:
+        pt = mk_pt(str(simulation_file), simulation_bytes)
+        ast1 = mk_ast1(simulation_file, pt)
 
-        if summary_file.suffix == ".csv":
-            df.to_csv(summary_file, index=False)
-        elif summary_file.suffix == ".parquet":
-            df.to_parquet(summary_file, index=False, engine="pyarrow")
-        else:
-            rich.print("[red]Unknown output file type[/red]")
-            sys.exit(1)
+        contagion = find_contagion(contagion_name, ast1)
+        with h5.File(sim_output_file, "r") as sim_output:
+            df = do_extract_summary(sim_output, contagion)
+            save_df(df, summary_file)
+
+            df = do_extract_interventions(sim_output, contagion)
+            save_df(df, interventions_file)
+
+            df = do_extract_transitions(sim_output, contagion)
+            save_df(df, transitions_file)
+
+            df = do_extract_transmissions(sim_output, contagion)
+            save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
