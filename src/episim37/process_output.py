@@ -94,7 +94,7 @@ def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.Da
     states = [const for const in contagion.state_type.resolve().consts]
     states = {i: n for i, n in enumerate(states)}
 
-    group = sim_output[contagion.name]["transitions"]  # type: ignore
+    group = sim_output[contagion.name]["transmissions"]  # type: ignore
 
     parts = []
     for k1 in group.keys():  # type: ignore
@@ -104,8 +104,13 @@ def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.Da
 
         for k2 in group[k1].keys():  # type: ignore
             node_index = group[k1][k2]["node_index"][...]  # type: ignore
+            source_edge_index = group[k1][k2]["source_edge_index"][...]  # type: ignore
             state = group[k1][k2]["state"][...]  # type: ignore
-            part = {"node_index": node_index, "state": state}
+            part = {
+                "node_index": node_index,
+                "source_edge_index": source_edge_index,
+                "state": state,
+            }
             part = pd.DataFrame(part)
             part["tick"] = tick
             part["state"] = part.state.map(states)
@@ -326,15 +331,19 @@ def extract_all(
 
         contagion = find_contagion(contagion_name, ast1)
         with h5.File(sim_output_file, "r") as sim_output:
+            rich.print("[yellow]Extracting summary.[/yellow]")
             df = do_extract_summary(sim_output, contagion)
             save_df(df, summary_file)
 
+            rich.print("[yellow]Extracting interventions.[/yellow]")
             df = do_extract_interventions(sim_output, contagion)
             save_df(df, interventions_file)
 
+            rich.print("[yellow]Extracting transitions.[/yellow]")
             df = do_extract_transitions(sim_output, contagion)
             save_df(df, transitions_file)
 
+            rich.print("[yellow]Extracting transmissions.[/yellow]")
             df = do_extract_transmissions(sim_output, contagion)
             save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
