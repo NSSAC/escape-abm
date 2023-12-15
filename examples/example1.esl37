@@ -3,7 +3,7 @@
 config enable_hybrid_learning: bool = True
 config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = True
-config transmissibility_scale: float = 0.3
+config transmissibility_scale: float = 0.03
 
 node
     pid: int node key static
@@ -166,8 +166,6 @@ def initialize():
 end
 
 def intervene():
-    c1.step(1.0)
-
     if cur_tick < 10:
         select susceptibles using is_susceptible
         select seed_nodes sample approx 5 from susceptibles

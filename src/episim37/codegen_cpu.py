@@ -835,7 +835,6 @@ class Contagion:
     num_states: int
     transition: Transition
     transmission: Transmission
-    step: str
 
     @classmethod
     def make(cls, c: ast1.Contagion) -> Contagion:
@@ -845,10 +844,7 @@ class Contagion:
         num_states = len(c.state_type.resolve().consts)
         transition = Transition.make(c)
         transmission = Transmission.make(c)
-        step = call_str((c, c.step))
-        return cls(
-            name, print_name, state_type, num_states, transition, transmission, step
-        )
+        return cls(name, print_name, state_type, num_states, transition, transmission)
 
 
 @attrs.define

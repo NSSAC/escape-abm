@@ -113,6 +113,7 @@ const {{ enum.name }} {{ const }} = {{ loop.index0 }};
 {% endfor %}
 
 int_type NUM_TICKS = 0;
+float_type TICK_ELAPSED = 1.0;
 
 // ----------------------------------------------------------------------------
 // Global variables
@@ -1036,7 +1037,7 @@ void {{ c.name }}_save_state_count() {
     dataspace.close();
 }
 
-void {{ c.step }}(const float_type elapsed) {
+void {{ c.name }}_step() {
     // First we do transitions caused by interventions
     #pragma omp parallel
     {
@@ -1090,7 +1091,7 @@ void {{ c.step }}(const float_type elapsed) {
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transition_node(v, rnd, elapsed, thread_idx, v_start);
+            {{ c.name }}_transition_node(v, rnd, TICK_ELAPSED, thread_idx, v_start);
         }
     }
 
@@ -1450,10 +1451,17 @@ int main() {
     CUR_TICK = -1;
     fmt::print("### cur_tick = {}\n", CUR_TICK);
     do_initialize();
+    {% for c in source.contagions %}
+    {{ c.name }}_step();
+    {% endfor %}
+
 
     for (CUR_TICK = 0; CUR_TICK < NUM_TICKS; CUR_TICK++) {
         fmt::print("### cur_tick = {}\n", CUR_TICK);
         do_intervene();
+        {% for c in source.contagions %}
+        {{ c.name }}_step();
+        {% endfor %}
     }
     const auto main_end{std::chrono::steady_clock::now()};
     const std::chrono::duration<double> main_seconds{main_end - main_start};

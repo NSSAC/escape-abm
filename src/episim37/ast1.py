@@ -149,10 +149,12 @@ class BuiltinTypeRef:
             self.pos,
         )
 
+
 @attrs.define
 class BuiltinParam:
     name: str
     type: str
+
 
 @attrs.define
 class BuiltinFunction:
@@ -644,7 +646,6 @@ class Contagion:
     transmissibility: Function
     enabled: Function
     state: StateAccessor
-    step: BuiltinFunction
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -742,16 +743,6 @@ class Contagion:
         state = StateAccessor(scope)
         scope.define("state", state, None)
 
-        step = BuiltinFunction(
-            "step",
-            [
-                BuiltinParam("elapsed", "float"),
-            ],
-            None,
-            True,
-        )
-        scope.define("step", step, None)
-
         obj = cls(
             name=name,
             state_type=state_type.get(),
@@ -762,7 +753,6 @@ class Contagion:
             transmissibility=transmissibility.get(),
             enabled=enabled.get(),
             state=state,
-            step=step,
             scope=scope,
             pos=node.pos,
         )
@@ -1598,13 +1588,12 @@ def add_builtins(scope: Scope, pos: SourcePosition):
         "f32", "f64",
     ]
     # fmt: on
-
     for type in builtin_types:
         scope.define(type, BuiltinType(type), pos)
 
-    scope.define("num_ticks", BuiltinConfig("num_ticks", "uint"), pos)
+    scope.define("num_ticks", BuiltinConfig("num_ticks", "int"), pos)
 
-    scope.define("cur_tick", BuiltinGlobal("cur_tick", "uint"), pos)
+    scope.define("cur_tick", BuiltinGlobal("cur_tick", "int"), pos)
     scope.define("num_nodes", BuiltinGlobal("num_nodes", "size"), pos)
     scope.define("num_edges", BuiltinGlobal("num_edges", "size"), pos)
 
