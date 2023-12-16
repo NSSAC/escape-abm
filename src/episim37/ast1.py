@@ -1461,7 +1461,7 @@ def is_kernel_func(f: Function) -> bool:
 
 def make_initialize(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    if f.params or f.return_ is not None:
+    if f.params:
         raise Error(
             "Bad initialize", "Initialize function must not have any parameters.", f.pos
         )
@@ -1474,7 +1474,7 @@ def make_initialize(node: PTNode, parent_scope: Scope) -> Function:
 
 def make_intervene(node: PTNode, parent_scope: Scope) -> Function:
     f = Function.make(node, parent_scope)
-    if f.params or f.return_ is not None:
+    if f.params:
         raise Error(
             "Bad intervene", "Intervene function must not have any parameters.", f.pos
         )
