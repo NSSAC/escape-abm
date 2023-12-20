@@ -40,21 +40,19 @@ def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pd.DataFram
     states = [const for const in contagion.state_type.resolve().consts]
     group = sim_output[contagion.name]["state_count"]  # type: ignore
 
+    num_ticks = sim_output.attrs["num_ticks"]
+
     ticks = []
     counts = []
-    for key in group.keys():  # type: ignore
-        tick = key.split("_")
-        tick = tick[-1]
-        tick = int(tick)
-
-        dset = group[key][...]  # type: ignore
+    for tick in range(-1, num_ticks):  # type: ignore
+        dset_name = f"tick_{tick}"
+        dset = group[dset_name][...]  # type: ignore
 
         ticks.append(tick)
         counts.append(dset)
 
     df = pd.DataFrame(counts, columns=states)
     df["tick"] = ticks
-    df.sort_values("tick", ignore_index=True, inplace=True)
     return df
 
 
@@ -65,16 +63,19 @@ def do_extract_transitions(
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name][gkey]  # type: ignore
+    num_ticks = sim_output.attrs["num_ticks"]
+    num_threads = sim_output.attrs["num_threads"]
 
     parts = []
-    for k1 in group.keys():  # type: ignore
-        tick = k1.split("_")
-        tick = tick[-1]
-        tick = int(tick)
+    for tick in range(-1, num_ticks):  # type: ignore
+        tick_gname = f"tick_{tick}"
+        tick_group = group[tick_gname]  # type: ignore
+        for thread in range(num_threads):  # type: ignore
+            thread_gname = f"thread_{thread}"
+            thread_group = tick_group[thread_gname]  # type: ignore
 
-        for k2 in group[k1].keys():  # type: ignore
-            node_index = group[k1][k2]["node_index"][...]  # type: ignore
-            state = group[k1][k2]["state"][...]  # type: ignore
+            node_index = thread_group["node_index"][...]  # type: ignore
+            state = thread_group["state"][...]  # type: ignore
             part = {"node_index": node_index, "state": state}
             part = pd.DataFrame(part)
             part["tick"] = tick
@@ -82,7 +83,6 @@ def do_extract_transitions(
             parts.append(part)
 
     df = pd.concat(parts, axis=0)
-    df.sort_values(["tick", "node_index"], ignore_index=True, inplace=True)
     return df
 
 
@@ -95,17 +95,20 @@ def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.Da
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name]["transmissions"]  # type: ignore
+    num_ticks = sim_output.attrs["num_ticks"]
+    num_threads = sim_output.attrs["num_threads"]
 
     parts = []
-    for k1 in group.keys():  # type: ignore
-        tick = k1.split("_")
-        tick = tick[-1]
-        tick = int(tick)
+    for tick in range(-1, num_ticks):  # type: ignore
+        tick_gname = f"tick_{tick}"
+        tick_group = group[tick_gname]  # type: ignore
+        for thread in range(num_threads):  # type: ignore
+            thread_gname = f"thread_{thread}"
+            thread_group = tick_group[thread_gname]  # type: ignore
 
-        for k2 in group[k1].keys():  # type: ignore
-            node_index = group[k1][k2]["node_index"][...]  # type: ignore
-            source_edge_index = group[k1][k2]["source_edge_index"][...]  # type: ignore
-            state = group[k1][k2]["state"][...]  # type: ignore
+            node_index = thread_group["node_index"][...]  # type: ignore
+            source_edge_index = thread_group["source_edge_index"][...]  # type: ignore
+            state = thread_group["state"][...]  # type: ignore
             part = {
                 "node_index": node_index,
                 "source_edge_index": source_edge_index,
@@ -117,7 +120,6 @@ def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.Da
             parts.append(part)
 
     df = pd.concat(parts, axis=0)
-    df.sort_values(["tick", "node_index"], ignore_index=True, inplace=True)
     return df
 
 

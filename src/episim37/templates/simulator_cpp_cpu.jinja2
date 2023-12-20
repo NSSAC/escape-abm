@@ -1404,6 +1404,21 @@ int main() {
     H5::H5File output_file(output_file_name, H5F_ACC_TRUNC);
     OUTPUT_FILE = &output_file;
 
+    {
+        H5::DataSpace dataspace(H5S_SCALAR);
+        H5::Attribute attribute;
+
+        attribute = output_file.createAttribute("num_ticks", INT_TYPE_H5_TYPE, dataspace);
+        attribute.write(INT_TYPE_H5_TYPE, &NUM_TICKS);
+        attribute.close();
+
+        attribute = output_file.createAttribute("num_threads", SIZE_TYPE_H5_TYPE, dataspace);
+        attribute.write(SIZE_TYPE_H5_TYPE, &NUM_THREADS);
+        attribute.close();
+
+        dataspace.close();
+    }
+
     {% for co in source.contagion_outputs %}
     {
         H5::Group group;
