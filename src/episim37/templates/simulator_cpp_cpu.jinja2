@@ -499,10 +499,10 @@ struct {{ co.name }}_output {
 
     void add_transition(
             const size_type thread_idx,
-            const size_type v_start,
             const size_type v,
             const {{ co.state_type }} state) {
-        auto idx = v_start + num_transitions[thread_idx];
+        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+        const auto idx = v_start + num_transitions[thread_idx];
         transition_node_idx[idx] = v;
         transition_state[idx] = state;
         num_transitions[thread_idx]++;
@@ -586,11 +586,11 @@ struct {{ co.name }}_output {
 
     void add_transmission(
             const size_type thread_idx,
-            const size_type v_start,
             const size_type v,
             const size_type e,
             const {{ co.state_type }} state) {
-        auto idx = v_start + num_transmissions[thread_idx];
+        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+        const auto idx = v_start + num_transmissions[thread_idx];
         transmission_node_idx[idx] = v;
         transmission_source[idx] = e;
         transmission_state[idx] = state;
@@ -862,8 +862,7 @@ void {{ c.name }}_transition_node(
         const size_type v,
         rnd_state_type *const rnd,
         const float_type elapsed,
-        const size_type thread_idx,
-        const size_type v_start) {
+        const size_type thread_idx) {
     auto state = NODE_TABLE->{{ c.name }}_state[v];
     auto state_prev = NODE_TABLE->{{ c.name }}_state_prev[v];
     auto next_state = NODE_TABLE->{{ c.name }}_next_state[v];
@@ -890,7 +889,7 @@ void {{ c.name }}_transition_node(
     }
 
     dwell_time = 0.0;
-    {{ c.name }}_OUTPUT->add_transition(thread_idx, v_start, v, state);
+    {{ c.name }}_OUTPUT->add_transition(thread_idx, v, state);
 
     switch (state) {
     {% for st in c.transition.single %}
@@ -949,8 +948,7 @@ void {{ c.name }}_update_transmission_prob(const size_type e) {
 void {{ c.name }}_transmit(
         const size_type v,
         rnd_state_type *const rnd,
-        const size_type thread_idx,
-        const size_type v_start) {
+        const size_type thread_idx) {
     const auto start = IN_INC_CSR->indptr[v];
     const auto end = IN_INC_CSR->indptr[v+1];
 
@@ -994,7 +992,7 @@ void {{ c.name }}_transmit(
             case {{ contact }}:
             {% endfor %}
                 NODE_TABLE->{{ c.name }}_state[v] = {{ exit }};
-                {{ c.name }}_OUTPUT->add_transmission(thread_idx, v_start, v, esel, {{ exit }});
+                {{ c.name }}_OUTPUT->add_transmission(thread_idx, v, esel, {{ exit }});
                 break;
             {% endfor %}
             }
@@ -1049,7 +1047,7 @@ void {{ c.name }}_step() {
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transition_node(v, rnd, 0.0, thread_idx, v_start);
+            {{ c.name }}_transition_node(v, rnd, 0.0, thread_idx);
         }
     }
 
@@ -1074,7 +1072,7 @@ void {{ c.name }}_step() {
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transmit(v, rnd, thread_idx, v_start);
+            {{ c.name }}_transmit(v, rnd, thread_idx);
         }
     }
 
@@ -1091,7 +1089,7 @@ void {{ c.name }}_step() {
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transition_node(v, rnd, TICK_ELAPSED, thread_idx, v_start);
+            {{ c.name }}_transition_node(v, rnd, TICK_ELAPSED, thread_idx);
         }
     }
 
