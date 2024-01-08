@@ -264,8 +264,9 @@ def prepare_cpu(
     rich.print("[yellow]Computing incoming incidence sparse matrix.[/yellow]")
     target_node_index = edge_table._target_node_index.to_numpy()
     edge_count = np.bincount(target_node_index, minlength=Vn)
+    cum_edge_count = np.cumsum(edge_count)
     in_inc_csr_indptr = np.zeros(Vn + 1, dtype=edge_index_dtype)
-    in_inc_csr_indptr[1:] = edge_count
+    in_inc_csr_indptr[1:] = cum_edge_count
 
     rich.print("[yellow]Creating data file.[/yellow]")
     with h5.File(data_file, "w") as fobj:
