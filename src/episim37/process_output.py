@@ -9,8 +9,9 @@ import h5py as h5
 import click
 import rich
 
-from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
 from .parse_tree import mk_pt, ParseTreeConstructionError
+from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
+from .codegen_cpu import SOURCE_NODE_INDEX_DATASET_NAME
 
 
 def find_contagion(name: str, source: Source) -> Contagion:
@@ -57,67 +58,84 @@ def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pd.DataFram
 
 
 def do_extract_transitions(
-    sim_output: h5.File, contagion: Contagion, gkey: str = "transitions"
+    sim_input: h5.File,
+    sim_output: h5.File,
+    contagion: Contagion,
+    node_key_dataset: str,
+    gkey: str = "transitions",
 ) -> pd.DataFrame:
     states = [const for const in contagion.state_type.resolve().consts]
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name][gkey]  # type: ignore
     num_ticks = sim_output.attrs["num_ticks"]
-    num_threads = sim_output.attrs["num_threads"]
+
+    node_key = sim_input[node_key_dataset][...]  # type: ignore
 
     parts = []
     for tick in range(-1, num_ticks):  # type: ignore
         tick_gname = f"tick_{tick}"
         tick_group = group[tick_gname]  # type: ignore
-        for thread in range(num_threads):  # type: ignore
-            thread_gname = f"thread_{thread}"
-            thread_group = tick_group[thread_gname]  # type: ignore
 
-            node_index = thread_group["node_index"][...]  # type: ignore
-            state = thread_group["state"][...]  # type: ignore
-            part = {"node_index": node_index, "state": state}
-            part = pd.DataFrame(part)
-            part["tick"] = tick
-            part["state"] = part.state.map(states)
-            parts.append(part)
+        node_index = tick_group["node_index"][...]  # type: ignore
+        node = node_key[node_index]  # type: ignore
+        state = tick_group["state"][...]  # type: ignore
+        part = {"node": node, "state": state}
+        part = pd.DataFrame(part)
+        part["tick"] = tick
+        part["state"] = part.state.map(states)
+        parts.append(part)
 
     df = pd.concat(parts, axis=0)
     return df
 
 
-def do_extract_interventions(sim_output: h5.File, contagion: Contagion) -> pd.DataFrame:
-    return do_extract_transitions(sim_output, contagion, "interventions")
+def do_extract_interventions(
+    sim_input: h5.File, sim_output: h5.File, contagion: Contagion, node_key_dataset: str
+) -> pd.DataFrame:
+    return do_extract_transitions(
+        sim_input, sim_output, contagion, node_key_dataset, "interventions"
+    )
 
 
-def do_extract_transmissions(sim_output: h5.File, contagion: Contagion) -> pd.DataFrame:
+def do_extract_transmissions(
+    sim_input: h5.File,
+    sim_output: h5.File,
+    contagion: Contagion,
+    node_key_dataset: str,
+) -> pd.DataFrame:
     states = [const for const in contagion.state_type.resolve().consts]
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name]["transmissions"]  # type: ignore
     num_ticks = sim_output.attrs["num_ticks"]
-    num_threads = sim_output.attrs["num_threads"]
+
+    node_key = sim_input[node_key_dataset][...]  # type: ignore
+    source_node_index = sim_input[SOURCE_NODE_INDEX_DATASET_NAME][...]  # type: ignore
 
     parts = []
     for tick in range(-1, num_ticks):  # type: ignore
         tick_gname = f"tick_{tick}"
         tick_group = group[tick_gname]  # type: ignore
-        for thread in range(num_threads):  # type: ignore
-            thread_gname = f"thread_{thread}"
-            thread_group = tick_group[thread_gname]  # type: ignore
 
-            node_index = thread_group["node_index"][...]  # type: ignore
-            source_edge_index = thread_group["source_edge_index"][...]  # type: ignore
-            state = thread_group["state"][...]  # type: ignore
-            part = {
-                "node_index": node_index,
-                "source_edge_index": source_edge_index,
-                "state": state,
-            }
-            part = pd.DataFrame(part)
-            part["tick"] = tick
-            part["state"] = part.state.map(states)
-            parts.append(part)
+        node_index = tick_group["node_index"][...]  # type: ignore
+        node = node_key[node_index]  # type: ignore
+
+        source_edge_index = tick_group["source_edge_index"][...]  # type: ignore
+        source_node_ix = source_node_index[source_edge_index]  # type: ignore
+        source_node = node_key[source_node_ix]  # type: ignore
+
+        state = tick_group["state"][...]  # type: ignore
+        part = {
+            "node": node,
+            "source_node": source_node,
+            "edge_index": source_edge_index,
+            "state": state,
+        }
+        part = pd.DataFrame(part)
+        part["tick"] = tick
+        part["state"] = part.state.map(states)
+        parts.append(part)
 
     df = pd.concat(parts, axis=0)
     return df
@@ -149,8 +167,18 @@ contagion_name_option = click.option(
     help="Contagion to extract. (default: first defined contagion)",
 )
 
-simulation_output_option = click.option(
+simulation_input_option = click.option(
     "-i",
+    "--simulation-input",
+    "sim_input_file",
+    type=ExistingFile,
+    required=True,
+    show_default=True,
+    help="Path to simulation input file (h5) file.",
+)
+
+simulation_output_option = click.option(
+    "-o",
     "--simulation-output",
     "sim_output_file",
     type=ExistingFile,
@@ -160,7 +188,7 @@ simulation_output_option = click.option(
 )
 
 summary_file_option = click.option(
-    "-o",
+    "-so",
     "--summary-output",
     "summary_file",
     type=NewFile,
@@ -170,7 +198,7 @@ summary_file_option = click.option(
 )
 
 interventions_file_option = click.option(
-    "-o",
+    "-io",
     "--interventions-output",
     "interventions_file",
     type=NewFile,
@@ -180,7 +208,7 @@ interventions_file_option = click.option(
 )
 
 transitions_file_option = click.option(
-    "-o",
+    "-tio",
     "--transitions-output",
     "transitions_file",
     type=NewFile,
@@ -190,7 +218,7 @@ transitions_file_option = click.option(
 )
 
 transmissions_file_option = click.option(
-    "-o",
+    "-tmo",
     "--transmissions-output",
     "transmissions_file",
     type=NewFile,
@@ -230,11 +258,13 @@ def extract_summary(
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
+@simulation_input_option
 @simulation_output_option
 @interventions_file_option
 def extract_interventions(
     simulation_file: Path,
     contagion_name: str,
+    sim_input_file: Path,
     sim_output_file: Path,
     interventions_file: Path,
 ):
@@ -244,9 +274,14 @@ def extract_interventions(
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
+        node_key_dataset = f"/node/{ast1.node_table.key.name}"
+
         contagion = find_contagion(contagion_name, ast1)
-        with h5.File(sim_output_file, "r") as sim_output:
-            df = do_extract_interventions(sim_output, contagion)
+        with h5.File(sim_input_file, "r") as sim_input:
+            with h5.File(sim_output_file, "r") as sim_output:
+                df = do_extract_interventions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
 
         save_df(df, interventions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
@@ -257,11 +292,13 @@ def extract_interventions(
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
+@simulation_input_option
 @simulation_output_option
 @transitions_file_option
 def extract_transitions(
     simulation_file: Path,
     contagion_name: str,
+    sim_input_file: Path,
     sim_output_file: Path,
     transitions_file: Path,
 ):
@@ -271,9 +308,14 @@ def extract_transitions(
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
+        node_key_dataset = f"/node/{ast1.node_table.key.name}"
+
         contagion = find_contagion(contagion_name, ast1)
-        with h5.File(sim_output_file, "r") as sim_output:
-            df = do_extract_transitions(sim_output, contagion)
+        with h5.File(sim_input_file, "r") as sim_input:
+            with h5.File(sim_output_file, "r") as sim_output:
+                df = do_extract_transitions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
 
         save_df(df, transitions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
@@ -284,11 +326,13 @@ def extract_transitions(
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
+@simulation_input_option
 @simulation_output_option
 @transmissions_file_option
 def extract_transmissions(
     simulation_file: Path,
     contagion_name: str,
+    sim_input_file: Path,
     sim_output_file: Path,
     transmissions_file: Path,
 ):
@@ -298,9 +342,14 @@ def extract_transmissions(
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
+        node_key_dataset = f"/node/{ast1.node_table.key.name}"
+
         contagion = find_contagion(contagion_name, ast1)
-        with h5.File(sim_output_file, "r") as sim_output:
-            df = do_extract_transmissions(sim_output, contagion)
+        with h5.File(sim_input_file, "r") as sim_input:
+            with h5.File(sim_output_file, "r") as sim_output:
+                df = do_extract_transmissions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
 
         save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
@@ -311,6 +360,7 @@ def extract_transmissions(
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
+@simulation_input_option
 @simulation_output_option
 @summary_file_option
 @interventions_file_option
@@ -319,6 +369,7 @@ def extract_transmissions(
 def extract_all(
     simulation_file: Path,
     contagion_name: str,
+    sim_input_file: Path,
     sim_output_file: Path,
     summary_file: Path,
     interventions_file: Path,
@@ -331,23 +382,32 @@ def extract_all(
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
+        node_key_dataset = f"/node/{ast1.node_table.key.name}"
+
         contagion = find_contagion(contagion_name, ast1)
-        with h5.File(sim_output_file, "r") as sim_output:
-            rich.print("[yellow]Extracting summary.[/yellow]")
-            df = do_extract_summary(sim_output, contagion)
-            save_df(df, summary_file)
+        with h5.File(sim_input_file, "r") as sim_input:
+            with h5.File(sim_output_file, "r") as sim_output:
+                rich.print("[yellow]Extracting summary.[/yellow]")
+                df = do_extract_summary(sim_output, contagion)
+                save_df(df, summary_file)
 
-            rich.print("[yellow]Extracting interventions.[/yellow]")
-            df = do_extract_interventions(sim_output, contagion)
-            save_df(df, interventions_file)
+                rich.print("[yellow]Extracting interventions.[/yellow]")
+                df = do_extract_interventions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
+                save_df(df, interventions_file)
 
-            rich.print("[yellow]Extracting transitions.[/yellow]")
-            df = do_extract_transitions(sim_output, contagion)
-            save_df(df, transitions_file)
+                rich.print("[yellow]Extracting transitions.[/yellow]")
+                df = do_extract_transitions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
+                save_df(df, transitions_file)
 
-            rich.print("[yellow]Extracting transmissions.[/yellow]")
-            df = do_extract_transmissions(sim_output, contagion)
-            save_df(df, transmissions_file)
+                rich.print("[yellow]Extracting transmissions.[/yellow]")
+                df = do_extract_transmissions(
+                    sim_input, sim_output, contagion, node_key_dataset
+                )
+                save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
