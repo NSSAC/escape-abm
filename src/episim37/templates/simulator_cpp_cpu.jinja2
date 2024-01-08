@@ -442,6 +442,51 @@ edge_table* EDGE_TABLE = nullptr;
 
 H5::H5File* OUTPUT_FILE = nullptr;
 
+void create_group(const std::string& group_name) {
+    H5::Group group = OUTPUT_FILE->createGroup(group_name);
+    group.close();
+}
+
+template <typename T>
+void write_node_dataset(
+        const std::string& dataset_name,
+        const H5::PredType& h5_type,
+        size_type* counts,
+        T* in) {
+    size_type dataset_size = 0;
+    for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
+        dataset_size += counts[thread_idx];
+    }
+
+    hsize_t dims[] = {dataset_size};
+    H5::DataSpace file_space(1, dims);
+
+    {
+        H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, h5_type, file_space);
+
+        size_type write_offset = 0;
+        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
+            hsize_t dims[] = {counts[thread_idx]};
+            H5::DataSpace mem_space(1, dims);
+
+            hsize_t count[] = {counts[thread_idx]};
+            hsize_t offset[] = {write_offset};
+            file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
+
+            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
+            auto data = &(in[v_start]);
+            dataset.write(data, h5_type, mem_space, file_space);
+
+            write_offset += count[0];
+            mem_space.close();
+        }
+
+        dataset.close();
+    }
+
+    file_space.close();
+}
+
 {% for co in source.contagion_outputs %}
 struct {{ co.name }}_output {
     node_index_type* transition_node_idx;
@@ -508,76 +553,27 @@ struct {{ co.name }}_output {
         num_transitions[thread_idx]++;
     }
 
-    void save_interventions() {
-        auto group_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}", CUR_TICK);
-        H5::Group group = OUTPUT_FILE->createGroup(group_name);
-        group.close();
+    void do_save_transitions(const std::string& transition_type) {
+        auto group_name = fmt::format("/{{ co.print_name }}/{}/tick_{}", transition_type, CUR_TICK);
+        create_group(group_name);
 
-        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto group_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}", CUR_TICK, thread_idx);
-            H5::Group group = OUTPUT_FILE->createGroup(group_name);
-            group.close();
+        {
+            auto dataset_name = fmt::format("/{{ co.print_name }}/{}/tick_{}/node_index", transition_type, CUR_TICK);
+            write_node_dataset(dataset_name, NODE_INDEX_TYPE_H5_TYPE, num_transitions, transition_node_idx);
+        }
 
-            hsize_t dims[1] = {num_transitions[thread_idx]};
-            H5::DataSpace dataspace(1, dims);
-
-            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
-
-                auto data = &(transition_node_idx[v_start]);
-                dataset.write(data, NODE_INDEX_TYPE_H5_TYPE);
-                dataset.close();
-            }
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/interventions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
-
-                auto data = &(transition_state[v_start]);
-                dataset.write(data, {{ co.state_h5_type }});
-                dataset.close();
-            }
-
+        {
+            auto dataset_name = fmt::format("/{{ co.print_name }}/{}/tick_{}/state", transition_type, CUR_TICK);
+            write_node_dataset(dataset_name, {{ co.state_h5_type }}, num_transitions, transition_state);
         }
     }
 
+    void save_interventions() {
+        do_save_transitions("interventions");
+    }
+
     void save_transitions() {
-        auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}", CUR_TICK);
-        H5::Group group = OUTPUT_FILE->createGroup(group_name);
-        group.close();
-
-        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto group_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}", CUR_TICK, thread_idx);
-            H5::Group group = OUTPUT_FILE->createGroup(group_name);
-            group.close();
-
-            hsize_t dims[1] = {num_transitions[thread_idx]};
-            H5::DataSpace dataspace(1, dims);
-
-            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
-
-                auto data = &(transition_node_idx[v_start]);
-                dataset.write(data, NODE_INDEX_TYPE_H5_TYPE);
-                dataset.close();
-            }
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transitions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
-
-                auto data = &(transition_state[v_start]);
-                dataset.write(data, {{ co.state_h5_type }});
-                dataset.close();
-            }
-
-        }
+        do_save_transitions("transitions");
     }
 
     void reset_transmissions(const size_type thread_idx) {
@@ -599,46 +595,21 @@ struct {{ co.name }}_output {
 
     void save_transmissions() {
         auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}", CUR_TICK);
-        H5::Group group = OUTPUT_FILE->createGroup(group_name);
-        group.close();
+        create_group(group_name);
 
-        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}", CUR_TICK, thread_idx);
-            H5::Group group = OUTPUT_FILE->createGroup(group_name);
-            group.close();
+        {
+            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/node_index", CUR_TICK);
+            write_node_dataset(dataset_name, NODE_INDEX_TYPE_H5_TYPE, num_transmissions, transmission_node_idx);
+        }
 
-            hsize_t dims[1] = {num_transmissions[thread_idx]};
-            H5::DataSpace dataspace(1, dims);
+        {
+            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/source_edge_index", CUR_TICK);
+            write_node_dataset(dataset_name, EDGE_INDEX_TYPE_H5_TYPE, num_transmissions, transmission_source);
+        }
 
-            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/node_index", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, NODE_INDEX_TYPE_H5_TYPE, dataspace);
-
-                auto data = &(transmission_node_idx[v_start]);
-                dataset.write(data, NODE_INDEX_TYPE_H5_TYPE);
-                dataset.close();
-            }
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/source_edge_index", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, EDGE_INDEX_TYPE_H5_TYPE, dataspace);
-
-                auto data = &(transmission_source[v_start]);
-                dataset.write(data, EDGE_INDEX_TYPE_H5_TYPE);
-                dataset.close();
-            }
-
-            {
-                auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/thread_{}/state", CUR_TICK, thread_idx);
-                H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, {{ co.state_h5_type }}, dataspace);
-
-                auto data = &(transmission_state[v_start]);
-                dataset.write(data, {{ co.state_h5_type }});
-                dataset.close();
-            }
-
+        {
+            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/state", CUR_TICK);
+            write_node_dataset(dataset_name, {{ co.state_h5_type }}, num_transmissions, transmission_state);
         }
     }
 
@@ -1410,31 +1381,20 @@ int main() {
         attribute.write(INT_TYPE_H5_TYPE, &NUM_TICKS);
         attribute.close();
 
-        attribute = output_file.createAttribute("num_threads", SIZE_TYPE_H5_TYPE, dataspace);
-        attribute.write(SIZE_TYPE_H5_TYPE, &NUM_THREADS);
-        attribute.close();
+        // attribute = output_file.createAttribute("num_threads", SIZE_TYPE_H5_TYPE, dataspace);
+        // attribute.write(SIZE_TYPE_H5_TYPE, &NUM_THREADS);
+        // attribute.close();
 
         dataspace.close();
     }
 
     {% for co in source.contagion_outputs %}
     {
-        H5::Group group;
-
-        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}");
-        group.close();
-
-        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/interventions");
-        group.close();
-
-        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/transitions");
-        group.close();
-
-        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/transmissions");
-        group.close();
-
-        group = OUTPUT_FILE->createGroup("/{{ co.print_name }}/state_count");
-        group.close();
+        create_group("/{{ co.print_name }}");
+        create_group("/{{ co.print_name }}/interventions");
+        create_group("/{{ co.print_name }}/transitions");
+        create_group("/{{ co.print_name }}/transmissions");
+        create_group("/{{ co.print_name }}/state_count");
     }
 
     {{ co.name }}_output {{ co.name }}_out;
