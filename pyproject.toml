@@ -31,6 +31,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "h5py",
+    "typeguard",
 ]
 
 [tool.setuptools.packages.find]
