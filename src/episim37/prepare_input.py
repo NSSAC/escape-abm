@@ -1,18 +1,22 @@
 """Prepare input data."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
+import attrs
 import numpy as np
 import pandas as pd
-import scipy.sparse as sparse
+import pyarrow as pa
+import pyarrow.parquet as pq
 import h5py as h5
 
 import click
 import rich
 
-from .ast1 import mk_ast1, ASTConstructionError
 from .parse_tree import mk_pt, ParseTreeConstructionError
+from .ast1 import mk_ast1, ASTConstructionError
 from .codegen_cpu import (
     CodegenError,
     INC_CSR_INDPTR_DATASET_NAME,
@@ -39,43 +43,140 @@ CTYPE_TO_DTYPE = {
 # fmt: on
 
 
-def type_to_in_dtype(type: str, deferred_types: dict[str, str], enums: list[Enum]):
+def make_in_dtypes(
+    deferred_types: dict[str, str], enums: list[Enum]
+) -> dict[str, type]:
+    type_map = dict(CTYPE_TO_DTYPE)
+
+    for deferred_type, base_type in deferred_types.items():
+        type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
+
     for enum in enums:
-        if type == enum.name:
-            return str
+        type_map[enum.name] = str
 
-    if type not in CTYPE_TO_DTYPE:
-        if type in deferred_types:
-            type = deferred_types[type]
-
-    if type not in CTYPE_TO_DTYPE:
-        raise ValueError(f"Unknown type {type}")
-
-    return CTYPE_TO_DTYPE[type]
+    return type_map
 
 
-def type_to_out_dtype(type: str, deferred_types: dict[str, str], enums: list[Enum]):
+def make_out_dtypes(
+    deferred_types: dict[str, str], enums: list[Enum]
+) -> dict[str, type]:
+    type_map = dict(CTYPE_TO_DTYPE)
+
+    for deferred_type, base_type in deferred_types.items():
+        type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
+
     for enum in enums:
-        if type == enum.name:
-            type = enum.base_type
-            break
+        type_map[enum.name] = CTYPE_TO_DTYPE[enum.base_type]
 
-    if type not in CTYPE_TO_DTYPE:
-        if type in deferred_types:
-            type = deferred_types[type]
-
-    if type not in CTYPE_TO_DTYPE:
-        raise ValueError(f"Unknown type {type}")
-
-    return CTYPE_TO_DTYPE[type]
+    return type_map
 
 
-def enum_converter(type: str, enums: list[Enum]):
-    for enum in enums:
-        if type == enum.name:
-            return {c: i for i, c in enumerate(enum.print_consts)}
+def make_enum_encoder(enum: Enum) -> dict[str, int]:
+    return {c: i for i, c in enumerate(enum.print_consts)}
 
-    return None
+
+@attrs.define
+class NodeTableMeta:
+    columns: list[str]
+    in_dtypes: dict[str, type]
+    enum_encoders: dict[str, dict[str, int]]
+    out_dtypes: dict[str, type]
+    dataset_names: dict[str, str]
+    key: str
+
+    @classmethod
+    def from_source_cpu(cls, source: SourceCPU) -> NodeTableMeta:
+        in_dtypes_all = make_in_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        out_dtypes_all = make_out_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        enum_encoders_all = {
+            enum.name: make_enum_encoder(enum) for enum in source.enums
+        }
+
+        columns = []
+        in_dtypes = {}
+        enum_encoders = {}
+        out_dtypes = {}
+        dataset_names = {}
+        for field in source.node_table.fields:
+            if not field.is_static:
+                continue
+            columns.append(field.print_name)
+            in_dtypes[field.print_name] = in_dtypes_all[field.type]
+            if field.type in enum_encoders_all:
+                enum_encoders[field.print_name] = enum_encoders_all[field.type]
+            out_dtypes[field.print_name] = out_dtypes_all[field.type]
+            dataset_names[field.print_name] = field.dataset_name
+        key = source.node_table.key
+
+        return cls(columns, in_dtypes, enum_encoders, out_dtypes, dataset_names, key)
+
+
+@attrs.define
+class EdgeTableMeta:
+    columns: list[str]
+    in_dtypes: dict[str, type]
+    enum_encoders: dict[str, dict[str, int]]
+    out_dtypes: dict[str, type]
+    dataset_names: dict[str, str]
+    target_node_key: str
+    source_node_key: str
+
+    @classmethod
+    def from_source_cpu(cls, source: SourceCPU) -> EdgeTableMeta:
+        in_dtypes_all = make_in_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        out_dtypes_all = make_out_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        enum_encoders_all = {
+            enum.name: make_enum_encoder(enum) for enum in source.enums
+        }
+
+        columns = []
+        in_dtypes = {}
+        enum_encoders = {}
+        out_dtypes = {}
+        dataset_names = {}
+        for field in source.edge_table.fields:
+            if not field.is_static:
+                continue
+            columns.append(field.print_name)
+            in_dtypes[field.print_name] = in_dtypes_all[field.type]
+            if field.type in enum_encoders_all:
+                enum_encoders[field.print_name] = enum_encoders_all[field.type]
+            out_dtypes[field.print_name] = out_dtypes_all[field.type]
+            dataset_names[field.print_name] = field.dataset_name
+
+        target_node_key = source.edge_table.target_node_key
+        source_node_key = source.edge_table.source_node_key
+
+        out_dtypes["_target_node_index"] = out_dtypes_all["node_index_type"]
+        out_dtypes["_source_node_index"] = out_dtypes_all["node_index_type"]
+
+        return cls(
+            columns,
+            in_dtypes,
+            enum_encoders,
+            out_dtypes,
+            dataset_names,
+            target_node_key,
+            source_node_key,
+        )
+
+
+def read_table(file: Path, columns: list, dtype: dict) -> pd.DataFrame:
+    if file.suffix == ".csv":
+        return pd.read_csv(file, usecols=columns, dtype=dtype)  # type: ignore
+    elif file.suffix == ".parquet":
+        schema = pa.schema([(c, pa.from_numpy_dtype(t)) for c, t in dtype.items()])
+        return pq.read_table(file, columns=columns, schema=schema).to_pandas()
+    else:
+        rich.print("[red]Unknown filetype for node file[/red]")
+        sys.exit(1)
+
+
+def check_null(table: pd.DataFrame, name: str):
+    for col in table.columns:
+        if table[col].isnull().any():  # type: ignore
+            rich.print(f"[red]Column {col} in {name} has null values.[/red]")
+            sys.exit(1)
 
 
 @click.command()
@@ -128,128 +229,56 @@ def prepare_cpu(
         return
 
     rich.print("[yellow]Reading node table.[/yellow]")
-    node_columns = []
-    node_in_dtypes = {}
-    node_enum_converter = {}
-    node_out_dtypes = {}
-    node_dataset_names = {}
-    for field in source.node_table.fields:
-        if not field.is_static:
-            continue
-        node_columns.append(field.print_name)
-        node_in_dtypes[field.print_name] = type_to_in_dtype(
-            field.type, DEFERRED_TYPES_CPU, source.enums
-        )
-        converter = enum_converter(field.type, source.enums)
-        if converter is not None:
-            node_enum_converter[field.print_name] = converter
-        node_out_dtypes[field.print_name] = type_to_out_dtype(
-            field.type, DEFERRED_TYPES_CPU, source.enums
-        )
-        node_dataset_names[field.print_name] = field.dataset_name
-    node_key = ast1.node_table.key.name
-
-    if node_file.suffix == ".csv":
-        node_table = pd.read_csv(node_file, usecols=node_columns, dtype=node_in_dtypes)
-    elif node_file.suffix == ".parquet":
-        node_table = pd.read_parquet(
-            node_file, usecols=node_columns, dtype=node_in_dtypes, engine="pyarrow"
-        )
-    else:
-        rich.print("[red]Unknown filetype for node file[/red]")
-        sys.exit(1)
-
-    for col, converter in node_enum_converter.items():
-        node_table[col] = node_table[col].map(converter)
-
-    for col in node_table.columns:
-        if node_table[col].isnull().any():  # type: ignore
-            rich.print(f"[red]Column {col} Node table has null values.[/red]")
-            return
+    ntm = NodeTableMeta.from_source_cpu(source)
+    node_table = read_table(node_file, ntm.columns, ntm.in_dtypes)
+    for col, encoder in ntm.enum_encoders.items():
+        node_table[col] = node_table[col].map(encoder)  # type: ignore
+    check_null(node_table, "node table")
 
     rich.print("[yellow]Reading edge table.[/yellow]")
-    edge_columns = []
-    edge_in_dtypes = {}
-    edge_enum_converter = {}
-    edge_out_dtypes = {}
-    edge_dataset_names = {}
-    for field in source.edge_table.fields:
-        if not field.is_static:
-            continue
-        edge_columns.append(field.print_name)
-        edge_in_dtypes[field.print_name] = type_to_in_dtype(
-            field.type, DEFERRED_TYPES_CPU, source.enums
-        )
-        converter = enum_converter(field.type, source.enums)
-        if converter is not None:
-            edge_enum_converter[field.print_name] = converter
-        edge_out_dtypes[field.print_name] = type_to_out_dtype(
-            field.type, DEFERRED_TYPES_CPU, source.enums
-        )
-        edge_dataset_names[field.print_name] = field.dataset_name
-    target_node_key = ast1.edge_table.target_node_key.name
-    source_node_key = ast1.edge_table.source_node_key.name
-
-    if edge_file.suffix == ".csv":
-        edge_table = pd.read_csv(edge_file, usecols=edge_columns, dtype=edge_in_dtypes)
-    elif edge_file.suffix == ".parquet":
-        edge_table = pd.read_parquet(
-            edge_file, usecols=edge_columns, dtype=edge_in_dtypes, engine="pyarrow"
-        )
-    else:
-        rich.print("[red]Unknown filetype for edge file[/red]")
-        sys.exit(1)
-
-    for col, converter in edge_enum_converter.items():
-        edge_table[col] = edge_table[col].map(converter)
-
-    for col in edge_table.columns:
-        if edge_table[col].isnull().any():  # type: ignore
-            rich.print(f"[red]Column {col} in edge table has null values.[/red]")
-            return
+    etm = EdgeTableMeta.from_source_cpu(source)
+    edge_table = read_table(edge_file, etm.columns, etm.in_dtypes)
+    for col, encoder in etm.enum_encoders.items():
+        edge_table[col] = edge_table[col].map(encoder)  # type: ignore
+    check_null(edge_table, "edge table")
 
     Vn = len(node_table)
     En = len(edge_table)
     print("### num_nodes: ", Vn)
     print("### num_edges: ", En)
 
-    node_index_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["node_index_type"]]
     edge_index_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["edge_index_type"]]
     size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["size_type"]]
 
-    key_idx = {k: idx for idx, k in enumerate(node_table[node_key])}
+    node_table.sort_values(ntm.key, inplace=True, ignore_index=True)
+
+    key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
 
     rich.print("[yellow]Sorting edges.[/yellow]")
-    edge_table["_target_node_index"] = edge_table[target_node_key].map(key_idx)  # type: ignore
-    edge_table["_source_node_index"] = edge_table[source_node_key].map(key_idx)  # type: ignore
+    edge_table["_target_node_index"] = edge_table[etm.target_node_key].map(key_idx)  # type: ignore
+    edge_table["_source_node_index"] = edge_table[etm.source_node_key].map(key_idx)  # type: ignore
     edge_table.sort_values(
         ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
     )
-    edge_out_dtypes["_target_node_index"] = node_index_dtype
-    edge_out_dtypes["_source_node_index"] = node_index_dtype
 
     rich.print("[yellow]Computing incoming incidence sparse matrix.[/yellow]")
-    I = edge_table._target_node_index.to_numpy()
-    J = np.arange(En, dtype=int)
-    data = np.ones_like(I)
-    in_inc_csr = sparse.coo_matrix((data, (I, J)), shape=(Vn, En))
-    in_inc_csr = in_inc_csr.tocsr()
+    target_node_index = edge_table._target_node_index.to_numpy()
+    edge_count = np.bincount(target_node_index, minlength=Vn)
+    in_inc_csr_indptr = np.zeros(Vn + 1, dtype=edge_index_dtype)
+    in_inc_csr_indptr[1:] = edge_count
 
     rich.print("[yellow]Creating data file.[/yellow]")
     with h5.File(data_file, "w") as fobj:
-        for col, dtype in node_out_dtypes.items():
+        for col, dtype in ntm.out_dtypes.items():
             print(f"Creating: /node/{col}")
             fobj.create_dataset(f"/node/{col}", data=node_table[col].to_numpy(dtype))
 
-        for col, dtype in edge_out_dtypes.items():
+        for col, dtype in etm.out_dtypes.items():
             print(f"Creating: /edge/{col}")
             fobj.create_dataset(f"/edge/{col}", data=edge_table[col].to_numpy(dtype))
 
         print(f"Creating: {INC_CSR_INDPTR_DATASET_NAME}")
-        fobj.create_dataset(
-            INC_CSR_INDPTR_DATASET_NAME,
-            data=np.array(in_inc_csr.indptr, dtype=edge_index_dtype),
-        )
+        fobj.create_dataset(INC_CSR_INDPTR_DATASET_NAME, data=in_inc_csr_indptr)
 
         fobj.attrs.create("num_nodes", Vn, dtype=size_dtype)
         fobj.attrs.create("num_edges", En, dtype=size_dtype)

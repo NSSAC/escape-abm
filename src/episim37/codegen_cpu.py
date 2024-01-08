@@ -554,6 +554,7 @@ class Field:
 class NodeTable:
     fields: list[Field]
     contagions: list[tuple[str, str]]  # contagion name, state_type
+    key: str
 
     @classmethod
     def make(cls, tab: ast1.NodeTable) -> NodeTable:
@@ -575,13 +576,15 @@ class NodeTable:
             state_type = typename(contagion.state_type.resolve())
             contagions.append((name, state_type))
 
-        return cls(fields, contagions)
+        return cls(fields, contagions, tab.key.name)
 
 
 @attrs.define
 class EdgeTable:
     fields: list[Field]
     contagions: list[str]  # contagion name
+    target_node_key: str
+    source_node_key: str
 
     @classmethod
     def make(cls, tab: ast1.EdgeTable) -> EdgeTable:
@@ -601,7 +604,9 @@ class EdgeTable:
         for contagion in tab.contagions:
             contagions.append(mangle(contagion.name))
 
-        return cls(fields, contagions)
+        return cls(
+            fields, contagions, tab.target_node_key.name, tab.source_node_key.name
+        )
 
 
 @attrs.define
