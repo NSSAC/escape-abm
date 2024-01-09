@@ -120,6 +120,7 @@ class EdgeTableMeta:
     dataset_names: dict[str, str]
     target_node_key: str
     source_node_key: str
+    edge_index_dtype: type
 
     @classmethod
     def from_source_cpu(cls, source: SourceCPU) -> EdgeTableMeta:
@@ -149,6 +150,7 @@ class EdgeTableMeta:
 
         out_dtypes["_target_node_index"] = out_dtypes_all["node_index_type"]
         out_dtypes["_source_node_index"] = out_dtypes_all["node_index_type"]
+        edge_index_dtype = out_dtypes_all["edge_index_type"]
 
         return cls(
             columns,
@@ -158,6 +160,7 @@ class EdgeTableMeta:
             dataset_names,
             target_node_key,
             source_node_key,
+            edge_index_dtype,
         )
 
 
@@ -176,7 +179,72 @@ def check_null(table: pd.DataFrame, name: str):
     for col in table.columns:
         if table[col].isnull().any():  # type: ignore
             rich.print(f"[red]Column {col} in {name} has null values.[/red]")
-            sys.exit(1)
+            raise SystemExit(1)
+
+
+def make_source_cpu(simulation_file: Path) -> SourceCPU:
+    simulation_bytes = simulation_file.read_bytes()
+    try:
+        pt = mk_pt(str(simulation_file), simulation_bytes)
+        ast1 = mk_ast1(simulation_file, pt)
+        source = SourceCPU.make(ast1)
+        return source
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+        e.rich_print()
+        raise SystemExit(1)
+
+
+def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pd.DataFrame:
+    node_table = read_table(node_file, ntm.columns, ntm.in_dtypes)
+    for col, encoder in ntm.enum_encoders.items():
+        node_table[col] = node_table[col].map(encoder)  # type: ignore
+    check_null(node_table, "node table")
+    return node_table
+
+
+def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pd.DataFrame:
+    edge_table = read_table(edge_file, etm.columns, etm.in_dtypes)
+    for col, encoder in etm.enum_encoders.items():
+        edge_table[col] = edge_table[col].map(encoder)  # type: ignore
+    check_null(edge_table, "edge table")
+
+    edge_table["_target_node_index"] = edge_table[etm.target_node_key].map(key_idx)  # type: ignore
+    edge_table["_source_node_index"] = edge_table[etm.source_node_key].map(key_idx)  # type: ignore
+    return edge_table
+
+
+def make_in_inc_csr_indptr(
+    edge_table: pd.DataFrame, Vn: int, etm: EdgeTableMeta
+) -> np.ndarray:
+    target_node_index = edge_table._target_node_index.to_numpy()
+    edge_count = np.bincount(target_node_index, minlength=Vn)
+    cum_edge_count = np.cumsum(edge_count)
+    in_inc_csr_indptr = np.zeros(Vn + 1, dtype=etm.edge_index_dtype)
+    in_inc_csr_indptr[1:] = cum_edge_count
+    return in_inc_csr_indptr
+
+
+def make_input_file_cpu(
+    data_file: Path,
+    node_table: pd.DataFrame,
+    edge_table: pd.DataFrame,
+    ntm: NodeTableMeta,
+    etm: EdgeTableMeta,
+    in_inc_csr_indptr: np.ndarray,
+):
+    size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["size_type"]]
+
+    with h5.File(data_file, "w") as fobj:
+        for col, dtype in ntm.out_dtypes.items():
+            fobj.create_dataset(f"/node/{col}", data=node_table[col].to_numpy(dtype))
+
+        for col, dtype in etm.out_dtypes.items():
+            fobj.create_dataset(f"/edge/{col}", data=edge_table[col].to_numpy(dtype))
+
+        fobj.create_dataset(INC_CSR_INDPTR_DATASET_NAME, data=in_inc_csr_indptr)
+
+        fobj.attrs.create("num_nodes", len(node_table), dtype=size_dtype)
+        fobj.attrs.create("num_edges", len(edge_table), dtype=size_dtype)
 
 
 @click.command()
@@ -217,71 +285,45 @@ def prepare_cpu(
     simulation_file: Path, node_file: Path, edge_file: Path, data_file: Path
 ):
     """Prepare input for simulation on CPUs."""
-    simulation_bytes = simulation_file.read_bytes()
-
-    rich.print("[yellow]Parsing simulator code.[/yellow]")
-    try:
-        pt = mk_pt(str(simulation_file), simulation_bytes)
-        ast1 = mk_ast1(simulation_file, pt)
-        source = SourceCPU.make(ast1)
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
-        e.rich_print()
-        return
-
-    rich.print("[yellow]Reading node table.[/yellow]")
+    rich.print("[cyan]Parsing simulator code.[/cyan]")
+    source = make_source_cpu(simulation_file)
     ntm = NodeTableMeta.from_source_cpu(source)
-    node_table = read_table(node_file, ntm.columns, ntm.in_dtypes)
-    for col, encoder in ntm.enum_encoders.items():
-        node_table[col] = node_table[col].map(encoder)  # type: ignore
-    check_null(node_table, "node table")
-
-    rich.print("[yellow]Reading edge table.[/yellow]")
     etm = EdgeTableMeta.from_source_cpu(source)
-    edge_table = read_table(edge_file, etm.columns, etm.in_dtypes)
-    for col, encoder in etm.enum_encoders.items():
-        edge_table[col] = edge_table[col].map(encoder)  # type: ignore
-    check_null(edge_table, "edge table")
 
-    Vn = len(node_table)
-    En = len(edge_table)
-    print("### num_nodes: ", Vn)
-    print("### num_edges: ", En)
+    # Step 1: Preprocess the node table files
+    rich.print("[cyan]Reading node table.[/cyan]")
+    node_table = make_node_table(node_file, ntm)
 
-    edge_index_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["edge_index_type"]]
-    size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["size_type"]]
-
+    # Step 2: Sort the node table dataset
+    rich.print("[cyan]Sorting node table.[/cyan]")
     node_table.sort_values(ntm.key, inplace=True, ignore_index=True)
 
+    # Step 3: Create a node index
+    rich.print("[cyan]Making node index.[/cyan]")
     key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
 
-    rich.print("[yellow]Sorting edges.[/yellow]")
-    edge_table["_target_node_index"] = edge_table[etm.target_node_key].map(key_idx)  # type: ignore
-    edge_table["_source_node_index"] = edge_table[etm.source_node_key].map(key_idx)  # type: ignore
+    Vn = len(node_table)
+    print("### num_nodes: ", Vn)
+
+    # Step 4: Preprocess the edge table files
+    rich.print("[cyan]Reading edge table.[/cyan]")
+    edge_table = make_edge_table(edge_file, etm, key_idx)
+
+    # Step 5: Sort the edge table dataset
+    rich.print("[cyan]Sorting edges table.[/cyan]")
     edge_table.sort_values(
         ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
     )
 
-    rich.print("[yellow]Computing incoming incidence sparse matrix.[/yellow]")
-    target_node_index = edge_table._target_node_index.to_numpy()
-    edge_count = np.bincount(target_node_index, minlength=Vn)
-    cum_edge_count = np.cumsum(edge_count)
-    in_inc_csr_indptr = np.zeros(Vn + 1, dtype=edge_index_dtype)
-    in_inc_csr_indptr[1:] = cum_edge_count
+    # Step 6: Make incoming incidence CSR graph's indptr
+    rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
+    in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
 
-    rich.print("[yellow]Creating data file.[/yellow]")
-    with h5.File(data_file, "w") as fobj:
-        for col, dtype in ntm.out_dtypes.items():
-            print(f"Creating: /node/{col}")
-            fobj.create_dataset(f"/node/{col}", data=node_table[col].to_numpy(dtype))
+    En = len(edge_table)
+    print("### num_edges: ", En)
 
-        for col, dtype in etm.out_dtypes.items():
-            print(f"Creating: /edge/{col}")
-            fobj.create_dataset(f"/edge/{col}", data=edge_table[col].to_numpy(dtype))
-
-        print(f"Creating: {INC_CSR_INDPTR_DATASET_NAME}")
-        fobj.create_dataset(INC_CSR_INDPTR_DATASET_NAME, data=in_inc_csr_indptr)
-
-        fobj.attrs.create("num_nodes", Vn, dtype=size_dtype)
-        fobj.attrs.create("num_edges", En, dtype=size_dtype)
+    # Step 7: Create the data file.
+    rich.print("[cyan]Creating data file.[/cyan]")
+    make_input_file_cpu(data_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
 
     rich.print("[green]Data file created successfully.[/green]")
