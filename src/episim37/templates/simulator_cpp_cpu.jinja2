@@ -7,11 +7,9 @@
 #include <vector>
 #include <algorithm>
 #include <random>
-#include <chrono>
 #include <omp.h>
 #include <H5Cpp.h>
 #include <fmt/core.h>
-#include <fmt/chrono.h>
 
 // ----------------------------------------------------------------------------
 // Common types
@@ -643,8 +641,7 @@ struct rnd_state {
         rnd = alloc_mem<rnd_state_type>(NUM_THREADS);
 
         std::random_device rd;
-        auto const now = std::chrono::system_clock::now();
-        auto const now_t = std::chrono::system_clock::to_time_t(now);
+        auto const now_t = omp_get_wtime();
 
         #pragma omp parallel
         {
@@ -1006,8 +1003,16 @@ void {{ c.name }}_save_state_count() {
     dataspace.close();
 }
 
+double OUTPUT_TIME = 0;
+double I_TRANSITION_TIME = 0;
+double TRANSMISSION_TIME = 0;
+double T_TRANSITION_TIME = 0;
+
 void {{ c.name }}_step() {
+    double start, end;
+
     // First we do transitions caused by interventions
+    start = omp_get_wtime();
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
@@ -1021,10 +1026,16 @@ void {{ c.name }}_step() {
             {{ c.name }}_transition_node(v, rnd, 0.0, thread_idx);
         }
     }
+    end = omp_get_wtime();
+    I_TRANSITION_TIME += end - start;
 
+    start = omp_get_wtime();
     {{ c.name }}_OUTPUT->save_interventions();
+    end = omp_get_wtime();
+    OUTPUT_TIME += end - start;
 
     // Second to the transmissions
+    start = omp_get_wtime();
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
@@ -1046,10 +1057,16 @@ void {{ c.name }}_step() {
             {{ c.name }}_transmit(v, rnd, thread_idx);
         }
     }
+    end = omp_get_wtime();
+    TRANSMISSION_TIME += end - start;
 
+    start = omp_get_wtime();
     {{ c.name }}_OUTPUT->save_transmissions();
+    end = omp_get_wtime();
+    OUTPUT_TIME += end - start;
 
     // Third we do do transitions caused by progression
+    start = omp_get_wtime();
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
@@ -1063,10 +1080,14 @@ void {{ c.name }}_step() {
             {{ c.name }}_transition_node(v, rnd, TICK_ELAPSED, thread_idx);
         }
     }
+    end = omp_get_wtime();
+    T_TRANSITION_TIME += end - start;
 
+    start = omp_get_wtime();
     {{ c.name }}_OUTPUT->save_transitions();
-
     {{ c.name }}_save_state_count();
+    end = omp_get_wtime();
+    OUTPUT_TIME += end - start;
 }
 
 {% endfor %}
@@ -1305,8 +1326,6 @@ void {{ f.name }}() {
 // ----------------------------------------------------------------------------
 
 int main() {
-    const auto init_start{std::chrono::steady_clock::now()};
-
     NUM_THREADS = omp_get_max_threads();
     fmt::print("### num_threads = {}\n", NUM_THREADS);
 
@@ -1344,6 +1363,8 @@ int main() {
         }
         fmt::print("### output_file = {}\n", output_file_name);
     }
+
+    const auto init_start = omp_get_wtime();
 
     H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
 
@@ -1414,31 +1435,39 @@ int main() {
     {{ name }} = &{{ name }}_;
     {% endfor %}
 
-    fmt::print("### total_alloc_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
+    const auto init_end = omp_get_wtime();
 
-    const auto init_end{std::chrono::steady_clock::now()};
-    const std::chrono::duration<double> init_seconds{init_end - init_start};
-    fmt::print("### init_time = {}\n", init_seconds);
-
-    const auto main_start{std::chrono::steady_clock::now()};
     CUR_TICK = -1;
     fmt::print("### cur_tick = {}\n", CUR_TICK);
+    const auto initialize_start = omp_get_wtime();
     do_initialize();
+    const auto initialize_end = omp_get_wtime();
+
     {% for c in source.contagions %}
     {{ c.name }}_step();
     {% endfor %}
 
-
+    double intervene_time = 0;
     for (CUR_TICK = 0; CUR_TICK < NUM_TICKS; CUR_TICK++) {
         fmt::print("### cur_tick = {}\n", CUR_TICK);
+        const auto intervene_start = omp_get_wtime();
         do_intervene();
+        const auto intervene_end = omp_get_wtime();
+        intervene_time += intervene_end - intervene_start;
+
         {% for c in source.contagions %}
         {{ c.name }}_step();
         {% endfor %}
     }
-    const auto main_end{std::chrono::steady_clock::now()};
-    const std::chrono::duration<double> main_seconds{main_end - main_start};
-    fmt::print("### main_time = {}\n", main_seconds);
+    fmt::print("### total_alloc_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
+
+    fmt::print("### init_time_s = {:g}\n", init_end - init_start);
+    fmt::print("### initialize_time_s = {:g}\n", initialize_end - initialize_start);
+    fmt::print("### intervene_time_s = {:g}\n", intervene_time);
+    fmt::print("### i_transition_time_s = {:g}\n", I_TRANSITION_TIME);
+    fmt::print("### t_transition_time_s = {:g}\n", T_TRANSITION_TIME);
+    fmt::print("### transmission_time_s = {:g}\n", TRANSMISSION_TIME);
+    fmt::print("### output_time_s = {:g}\n", OUTPUT_TIME);
 
     output_file.close();
     OUTPUT_FILE = nullptr;
