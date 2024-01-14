@@ -11,6 +11,7 @@ from subprocess import run as do_run
 from tempfile import TemporaryDirectory
 from collections import defaultdict
 from itertools import chain
+from importlib.resources import files
 
 import attrs
 import click
@@ -54,6 +55,8 @@ ENVIRONMENT = jinja2.Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+STATIC_DIR = files("episim37.static")
 
 
 class CodegenError(Exception):
@@ -1053,6 +1056,9 @@ def do_prepare(output: Path | None, input: Path) -> Path:
     with open(output / "CMakeLists.txt", "wt") as fobj:
         template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
         fobj.write(template.render(source=source, input=str(input.absolute())))
+
+    with open(output / "sim_utils.h", "wt") as fobj:
+        fobj.write(STATIC_DIR.joinpath("sim_utils.h").read_text())
 
     return output
 

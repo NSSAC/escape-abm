@@ -10,6 +10,7 @@
 #include <omp.h>
 #include <H5Cpp.h>
 #include <fmt/core.h>
+#include <sim_utils.h>
 
 // ----------------------------------------------------------------------------
 // Common types
@@ -22,72 +23,6 @@ typedef {{ type.base_ctype }} {{ type.name }};
 {% for type in DEFERRED_TYPES %}
 const H5::PredType {{ type.h5_type }} = {{ type.base_h5_type }};
 {% endfor %}
-
-// ----------------------------------------------------------------------------
-// Utility methods
-// ----------------------------------------------------------------------------
-
-size_type TOTAL_ALLOC = 0;
-
-template <typename T>
-T* alloc_mem(const size_type n) {
-  const auto alloc_size = sizeof(T) * n;
-  TOTAL_ALLOC += alloc_size;
-  T* ret = static_cast<T*>(std::malloc(alloc_size));
-  assert(ret != nullptr);
-
-  return ret;
-}
-
-template <typename T>
-void free_mem(T **p) {
-  if (p == nullptr || *p == nullptr) {
-    return;
-  }
-  std::free(*p);
-  *p = nullptr;
-}
-
-template <typename T>
-T get_attribute(const H5::H5File &file, const char* attr_name) {
-    T ret;
-
-    H5::Attribute attr = file.openAttribute(attr_name);
-    attr.read(attr.getDataType(), &ret);
-    attr.close();
-
-    return ret;
-}
-
-template <typename T>
-void read_dataset(
-        const H5::H5File &file,
-        const char* dataset_name,
-        const H5::PredType& h5_type,
-        const size_type count,
-        T *const out) {
-    // std::cout << "reading " << dataset_name << std::endl;
-
-    H5::DataSet dataset = file.openDataSet(dataset_name);
-
-    // Ensure datatype is correct
-    H5::DataType dataset_type = dataset.getDataType();
-    assert(dataset_type == h5_type);
-
-    // Ensure count is correct
-    H5::DataSpace dataspace = dataset.getSpace();
-    const auto ndims = dataspace.getSimpleExtentNdims();
-    std::vector<hsize_t> dims(ndims);
-    dataspace.getSimpleExtentDims(&dims[0]);
-    assert(dims.size() == 1);
-    assert(dims[0] == count);
-
-    dataset.read(out, h5_type);
-
-    dataspace.close();
-    dataset_type.close();
-    dataset.close();
-}
 
 // ----------------------------------------------------------------------------
 // Enumerations

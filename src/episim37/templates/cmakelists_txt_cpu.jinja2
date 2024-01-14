@@ -28,6 +28,8 @@ add_custom_command(
 
 add_executable(simulator
     ${CMAKE_CURRENT_BINARY_DIR}/simulator.cpp)
+target_include_directories(simulator
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(simulator
     hdf5::hdf5
     hdf5::hdf5_cpp
