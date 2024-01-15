@@ -79,25 +79,11 @@ size_type get_num_edges(const H5::H5File &file) {
 // ----------------------------------------------------------------------------
 
 struct in_inc_csr {
-    edge_index_type* indptr;
+    StaticArray<edge_index_type> indptr;
 
     in_inc_csr(const H5::H5File &file):
-    indptr{nullptr} {
-        // allocate memory
-        indptr = alloc_mem<edge_index_type>(NUM_NODES + 1);
-
-        // load data into memory
-        read_dataset(file, "{{ INC_CSR_INDPTR_DATASET_NAME }}", EDGE_INDEX_TYPE_H5_TYPE, NUM_NODES + 1, indptr);
-    }
-
-    in_inc_csr() = delete;                              // default constructor
-    in_inc_csr(const in_inc_csr &) = delete;            // copy constructor
-    in_inc_csr(in_inc_csr &&) = delete;                 // move constructor
-    in_inc_csr &operator=(const in_inc_csr &) = delete; // copy assignment
-    in_inc_csr &operator=(in_inc_csr &&) = delete;      // move assignment
-
-    ~in_inc_csr() {
-        free_mem(&indptr);
+    indptr{NUM_NODES + 1} {
+        read_dataset(file, "{{ INC_CSR_INDPTR_DATASET_NAME }}", EDGE_INDEX_TYPE_H5_TYPE, NUM_NODES + 1, indptr.data());
     }
 } ;
 
@@ -108,50 +94,42 @@ in_inc_csr* IN_INC_CSR = nullptr;
 // ----------------------------------------------------------------------------
 
 struct thread_node_range {
-  size_type* ptr;
+    StaticArray<size_type> ptr;
 
-  thread_node_range():
-  ptr{nullptr} {
-    ptr = alloc_mem<size_type>(NUM_THREADS + 1);
+    thread_node_range():
+    ptr{NUM_THREADS + 1} {
+        StaticArray<edge_index_type> cum_in_neighbors(NUM_NODES);
+        size_type total_load = 0;
+        for (size_type i = 0; i < NUM_NODES; i++) {
+            total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
+            cum_in_neighbors[i] = total_load;
+        }
 
-    edge_index_type *cum_in_neighbors = alloc_mem<edge_index_type>(NUM_NODES);
-    size_type total_load = 0;
-    for (size_type i = 0; i < NUM_NODES; i++) {
-        total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
-        cum_in_neighbors[i] = total_load;
-    }
+        auto thread_load = total_load / NUM_THREADS;
+        thread_load += (total_load % NUM_THREADS != 0);
 
-    auto thread_load = total_load / NUM_THREADS;
-    thread_load += (total_load % NUM_THREADS != 0);
+        ptr[0] = 0;
+        #pragma omp parallel
+        {
+            const auto thread_idx = omp_get_thread_num();
+            auto needle = thread_load * (thread_idx + 1);
+            if (needle > total_load) {
+                needle = total_load;
+            }
 
-    ptr[0] = 0;
-    #pragma omp parallel
-    {
-	const auto thread_idx = omp_get_thread_num();
-	auto needle = thread_load * (thread_idx + 1);
-	if (needle > total_load) {
-	    needle = total_load;
-	}
+            auto end = std::upper_bound(cum_in_neighbors.begin(), cum_in_neighbors.end(), needle);
+            ptr[thread_idx + 1] = end - cum_in_neighbors.begin();
+        }
 
-	auto end = std::upper_bound(cum_in_neighbors, cum_in_neighbors + NUM_NODES, needle);
-	ptr[thread_idx + 1] = end - cum_in_neighbors;
-    }
-
-    assert(ptr[0] == 0);
-    assert(ptr[NUM_THREADS] == NUM_NODES);
-    for (size_type i = 0; i < NUM_THREADS; i++) {
-        assert(ptr[i] <= ptr[i+1]);
-    }
-
-    free_mem(&cum_in_neighbors);
+        assert(ptr[0] == 0);
+        assert(ptr[NUM_THREADS] == NUM_NODES);
+        for (size_type i = 0; i < NUM_THREADS; i++) {
+            assert(ptr[i] <= ptr[i+1]);
+        }
   }
 
   size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
   size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-
-  ~thread_node_range() {
-    free_mem(&ptr);
-  }
 };
 
 thread_node_range* THREAD_NODE_RANGE = nullptr;
@@ -161,39 +139,33 @@ thread_node_range* THREAD_NODE_RANGE = nullptr;
 // ----------------------------------------------------------------------------
 
 struct thread_edge_range {
-  size_type* ptr;
+    StaticArray<size_type> ptr;
 
-  thread_edge_range():
-  ptr{nullptr} {
-    ptr = alloc_mem<size_type>(NUM_THREADS + 1);
+    thread_edge_range():
+    ptr{NUM_THREADS + 1} {
+        auto thread_load = NUM_EDGES / NUM_THREADS;
+        thread_load += (NUM_EDGES % NUM_THREADS != 0);
 
-    auto thread_load = NUM_EDGES / NUM_THREADS;
-    thread_load += (NUM_EDGES % NUM_THREADS != 0);
+        ptr[0] = 0;
+        #pragma omp parallel
+        {
+            const auto thread_idx = omp_get_thread_num();
+            auto end = thread_load * (thread_idx + 1);
+            if (end > NUM_EDGES) {
+                end = NUM_EDGES;
+            }
+            ptr[thread_idx +1] = end;
+        }
 
-    ptr[0] = 0;
-    #pragma omp parallel
-    {
-	const auto thread_idx = omp_get_thread_num();
-	auto end = thread_load * (thread_idx + 1);
-	if (end > NUM_EDGES) {
-	    end = NUM_EDGES;
-	}
-	ptr[thread_idx +1] = end;
+        assert(ptr[0] == 0);
+        assert(ptr[NUM_THREADS] == NUM_EDGES);
+        for (size_type i = 0; i < NUM_THREADS; i++) {
+            assert(ptr[i] <= ptr[i+1]);
+        }
     }
 
-    assert(ptr[0] == 0);
-    assert(ptr[NUM_THREADS] == NUM_EDGES);
-    for (size_type i = 0; i < NUM_THREADS; i++) {
-        assert(ptr[i] <= ptr[i+1]);
-    }
-  }
-
-  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
-  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-
-  ~thread_edge_range() {
-    free_mem(&ptr);
-  }
+    size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
+    size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
 };
 
 thread_edge_range* THREAD_EDGE_RANGE = nullptr;
@@ -204,38 +176,27 @@ thread_edge_range* THREAD_EDGE_RANGE = nullptr;
 
 struct node_table {
     {% for field in source.node_table.fields %}
-    {{ field.type }}* {{ field.name }};
+    StaticArray<{{ field.type }}> {{ field.name }};
     {% endfor %}
     {% for contagion_name, state_type in source.node_table.contagions %}
-    {{ state_type }}* {{ contagion_name }}_state;
-    {{ state_type }}* {{ contagion_name }}_state_prev;
-    {{ state_type }}* {{ contagion_name }}_next_state;
-    float_type* {{ contagion_name }}_dwell_time;
+    StaticArray<{{ state_type }}> {{ contagion_name }}_state;
+    StaticArray<{{ state_type }}> {{ contagion_name }}_state_prev;
+    StaticArray<{{ state_type }}> {{ contagion_name }}_next_state;
+    StaticArray<float_type> {{ contagion_name }}_dwell_time;
     {% endfor %}
 
     node_table(const H5::H5File &file):
     {% set comma = joiner(",") %}
     {% for field in source.node_table.fields %}
-    {{ comma() }}{{ field.name }}{nullptr}
+    {{ comma() }}{{ field.name }}{NUM_NODES}
     {% endfor %}
     {% for contagion_name, _ in source.node_table.contagions %}
-    {{ comma() }}{{ contagion_name }}_state{nullptr}
-    {{ comma() }}{{ contagion_name }}_state_prev{nullptr}
-    {{ comma() }}{{ contagion_name }}_next_state{nullptr}
-    {{ comma() }}{{ contagion_name }}_dwell_time{nullptr}
+    {{ comma() }}{{ contagion_name }}_state{NUM_NODES}
+    {{ comma() }}{{ contagion_name }}_state_prev{NUM_NODES}
+    {{ comma() }}{{ contagion_name }}_next_state{NUM_NODES}
+    {{ comma() }}{{ contagion_name }}_dwell_time{NUM_NODES}
     {% endfor %}
     {
-        // allocate
-        {% for field in source.node_table.fields %}
-        {{ field.name }} = alloc_mem<{{ field.type }}>(NUM_NODES);
-        {% endfor %}
-        {% for contagion_name, state_type in source.node_table.contagions %}
-        {{ contagion_name }}_state = alloc_mem<{{ state_type }}>(NUM_NODES);
-        {{ contagion_name }}_state_prev = alloc_mem<{{ state_type }}>(NUM_NODES);
-        {{ contagion_name }}_next_state = alloc_mem<{{ state_type }}>(NUM_NODES);
-        {{ contagion_name }}_dwell_time = alloc_mem<float_type>(NUM_NODES);
-        {% endfor %}
-
         // initialize
         #pragma omp parallel
         {
@@ -259,26 +220,8 @@ struct node_table {
         // load the static fields
         {% for field in source.node_table.fields %}
         {% if field.is_static %}
-        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_NODES, {{ field.name }});
+        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_NODES, {{ field.name }}.data());
         {% endif %}
-        {% endfor %}
-    }
-
-    node_table() = delete;                              // default constructor
-    node_table(const node_table &) = delete;            // copy constructor
-    node_table(node_table &&) = delete;                 // move constructor
-    node_table &operator=(const node_table &) = delete; // copy assignment
-    node_table &operator=(node_table &&) = delete;      // move assignment
-
-    ~node_table() {
-        {% for field in source.node_table.fields %}
-        free_mem(&{{ field.name }});
-        {% endfor %}
-        {% for contagion_name, _ in source.node_table.contagions %}
-        free_mem(&{{ contagion_name }}_state);
-        free_mem(&{{ contagion_name }}_state_prev);
-        free_mem(&{{ contagion_name }}_next_state);
-        free_mem(&{{ contagion_name }}_dwell_time);
         {% endfor %}
     }
 } ;
@@ -291,35 +234,25 @@ node_table *NODE_TABLE = nullptr;
 
 struct edge_table {
     {% for field in source.edge_table.fields %}
-    {{ field.type }}* {{ field.name }};
+    StaticArray<{{ field.type }}> {{ field.name }};
     {% endfor %}
     {% for contagion_name in source.edge_table.contagions %}
-    float_type* {{ contagion_name }}_transmission_prob;
+    StaticArray<float_type> {{ contagion_name }}_transmission_prob;
     {% endfor %}
-    node_index_type* target_node_index;
-    node_index_type* source_node_index;
+    StaticArray<node_index_type> target_node_index;
+    StaticArray<node_index_type> source_node_index;
 
     edge_table(const H5::H5File &file):
     {% set comma = joiner(", ") %}
     {% for field in source.edge_table.fields %}
-    {{ comma() }}{{ field.name }}{nullptr}
+    {{ comma() }}{{ field.name }}{NUM_EDGES}
     {% endfor %}
     {% for contagion_name in source.edge_table.contagions %}
-    {{ comma() }}{{ contagion_name }}_transmission_prob{nullptr}
+    {{ comma() }}{{ contagion_name }}_transmission_prob{NUM_EDGES}
     {% endfor %}
-    , target_node_index{nullptr}
-    , source_node_index{nullptr}
+    , target_node_index{NUM_EDGES}
+    , source_node_index{NUM_EDGES}
     {
-        // allocate
-        {% for field in source.edge_table.fields %}
-        {{ field.name }} = alloc_mem<{{ field.type }}>(NUM_EDGES);
-        {% endfor %}
-        {% for contagion_name in source.edge_table.contagions %}
-        {{ contagion_name }}_transmission_prob = alloc_mem<float_type>(NUM_EDGES);
-        {% endfor %}
-        target_node_index = alloc_mem<node_index_type>(NUM_EDGES);
-        source_node_index = alloc_mem<node_index_type>(NUM_EDGES);
-
         // initialize
         #pragma omp parallel
         {
@@ -342,28 +275,11 @@ struct edge_table {
         // load static fields
         {% for field in source.edge_table.fields %}
         {% if field.is_static %}
-        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_EDGES, {{ field.name }});
+        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_EDGES, {{ field.name }}.data());
         {% endif %}
         {% endfor %}
-        read_dataset(file, "{{ TARGET_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, target_node_index);
-        read_dataset(file, "{{ SOURCE_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, source_node_index);
-    }
-
-    edge_table() = delete;                              // default constructor
-    edge_table(const edge_table &) = delete;            // copy constructor
-    edge_table(edge_table &&) = delete;                 // move constructor
-    edge_table &operator=(const edge_table &) = delete; // copy assignment
-    edge_table &operator=(edge_table &&) = delete;      // move assignment
-
-    ~edge_table() {
-        {% for field in source.edge_table.fields %}
-        free_mem(&{{ field.name }});
-        {% endfor %}
-        {% for contagion_name in source.edge_table.contagions %}
-        free_mem(&{{ contagion_name }}_transmission_prob);
-        {% endfor %}
-        free_mem(&target_node_index);
-        free_mem(&source_node_index);
+        read_dataset(file, "{{ TARGET_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, target_node_index.data());
+        read_dataset(file, "{{ SOURCE_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, source_node_index.data());
     }
 } ;
 
