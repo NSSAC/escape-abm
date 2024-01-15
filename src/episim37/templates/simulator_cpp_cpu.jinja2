@@ -291,11 +291,6 @@ edge_table* EDGE_TABLE = nullptr;
 
 H5::H5File* OUTPUT_FILE = nullptr;
 
-void create_group(const std::string& group_name) {
-    H5::Group group = OUTPUT_FILE->createGroup(group_name);
-    group.close();
-}
-
 template <typename Type>
 void write_node_dataset(
         const std::string& dataset_name,
@@ -395,7 +390,7 @@ struct {{ co.name }}_output {
 
     void do_save_transitions(const std::string& transition_type) {
         auto group_name = fmt::format("/{{ co.print_name }}/{}/tick_{}", transition_type, CUR_TICK);
-        create_group(group_name);
+        create_group(*OUTPUT_FILE, group_name);
 
         {
             auto dataset_name = fmt::format("/{{ co.print_name }}/{}/tick_{}/node_index", transition_type, CUR_TICK);
@@ -435,7 +430,7 @@ struct {{ co.name }}_output {
 
     void save_transmissions() {
         auto group_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}", CUR_TICK);
-        create_group(group_name);
+        create_group(*OUTPUT_FILE, group_name);
 
         {
             auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/node_index", CUR_TICK);
@@ -1216,11 +1211,11 @@ int main() {
 
     {% for co in source.contagion_outputs %}
     {
-        create_group("/{{ co.print_name }}");
-        create_group("/{{ co.print_name }}/interventions");
-        create_group("/{{ co.print_name }}/transitions");
-        create_group("/{{ co.print_name }}/transmissions");
-        create_group("/{{ co.print_name }}/state_count");
+        create_group(output_file, "/{{ co.print_name }}");
+        create_group(output_file, "/{{ co.print_name }}/interventions");
+        create_group(output_file, "/{{ co.print_name }}/transitions");
+        create_group(output_file, "/{{ co.print_name }}/transmissions");
+        create_group(output_file, "/{{ co.print_name }}/state_count");
     }
 
     {{ co.name }}_output {{ co.name }}_out;
