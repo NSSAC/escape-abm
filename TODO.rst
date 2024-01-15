@@ -1,7 +1,6 @@
 TODOs
 =====
 
-* Change memory allocation to use aligned_alloc
 * Suport parallel node/edge reductions
 * Add builtin function to get nodeset/edgeset size
 * Use bitset/succinct datastructure instead of array of bytes
@@ -10,4 +9,5 @@ TODOs
 * Profile cpu code with vtune/advisor
 * Add distributed memory (MPI) support
 * Change parser from tree-sitter to lark
-* Remove redundant source node from transmission output
+* SIMD'ize the thread specific loops
+* Merge back to back parallel calls
