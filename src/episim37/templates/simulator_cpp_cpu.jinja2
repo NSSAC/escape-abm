@@ -664,10 +664,10 @@ void {{ c.name }}_transmit(
     assert(esel != NUM_EDGES);
 
     const auto u = EDGE_TABLE->source_node_index[esel];
-    const auto t_state = NODE_TABLE->{{ c.name }}_state_prev[v];
+    const auto v_state = NODE_TABLE->{{ c.name }}_state_prev[v];
     const auto u_state = NODE_TABLE->{{ c.name }}_state_prev[u];
 
-    switch (t_state) {
+    switch (v_state) {
     {% for entry, xs in c.transmission.transms %}
     case {{ entry }}:
             switch (u_state) {
