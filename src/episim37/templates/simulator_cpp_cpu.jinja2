@@ -296,12 +296,12 @@ void create_group(const std::string& group_name) {
     group.close();
 }
 
-template <typename T>
+template <typename Type>
 void write_node_dataset(
         const std::string& dataset_name,
         const H5::PredType& h5_type,
-        size_type* counts,
-        T* in) {
+        const StaticArray<size_type>& counts,
+        const StaticArray<Type>& in) {
     size_type dataset_size = 0;
     for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
         dataset_size += counts[thread_idx];
@@ -323,7 +323,7 @@ void write_node_dataset(
             file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
 
             auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-            auto data = &(in[v_start]);
+            auto data = in.data() + v_start;
             dataset.write(data, h5_type, mem_space, file_space);
 
             write_offset += count[0];
@@ -338,32 +338,23 @@ void write_node_dataset(
 
 {% for co in source.contagion_outputs %}
 struct {{ co.name }}_output {
-    node_index_type* transition_node_idx;
-    {{ co.state_type }}* transition_state;
-    size_type* num_transitions;
+    StaticArray<node_index_type> transition_node_idx;
+    StaticArray<{{ co.state_type }}> transition_state;
+    StaticArray<size_type> num_transitions;
 
-    node_index_type* transmission_node_idx;
-    edge_index_type* transmission_source;
-    {{ co.state_type }}* transmission_state;
-    size_type* num_transmissions;
+    StaticArray<node_index_type> transmission_node_idx;
+    StaticArray<edge_index_type> transmission_source;
+    StaticArray<{{ co.state_type }}> transmission_state;
+    StaticArray<size_type> num_transmissions;
 
     {{ co.name }}_output():
-    transition_node_idx{nullptr},
-    transition_state{nullptr},
-    num_transitions{nullptr},
-    transmission_node_idx{nullptr},
-    transmission_source{nullptr},
-    transmission_state{nullptr},
-    num_transmissions{nullptr} {
-        transition_node_idx = alloc_mem<node_index_type>(NUM_NODES);
-        transition_state = alloc_mem<{{ co.state_type }}>(NUM_NODES);
-        num_transitions = alloc_mem<size_type>(NUM_THREADS);
-
-        transmission_node_idx = alloc_mem<node_index_type>(NUM_NODES);
-        transmission_source = alloc_mem<edge_index_type>(NUM_NODES);
-        transmission_state = alloc_mem<{{ co.state_type }}>(NUM_NODES);
-        num_transmissions = alloc_mem<size_type>(NUM_THREADS);
-
+    transition_node_idx{NUM_NODES},
+    transition_state{NUM_NODES},
+    num_transitions{NUM_THREADS},
+    transmission_node_idx{NUM_NODES},
+    transmission_source{NUM_NODES},
+    transmission_state{NUM_NODES},
+    num_transmissions{NUM_THREADS} {
         // initialize
         #pragma omp parallel
         {
@@ -461,17 +452,6 @@ struct {{ co.name }}_output {
             write_node_dataset(dataset_name, {{ co.state_h5_type }}, num_transmissions, transmission_state);
         }
     }
-
-    ~{{ co.name }}_output() {
-        free_mem(&transition_node_idx);
-        free_mem(&transition_state);
-        free_mem(&num_transitions);
-
-        free_mem(&transmission_node_idx);
-        free_mem(&transmission_source);
-        free_mem(&transmission_state);
-        free_mem(&num_transmissions);
-    }
 };
 
 {{ co.name }}_output* {{ co.name }}_OUTPUT = nullptr;
@@ -485,12 +465,10 @@ struct {{ co.name }}_output {
 typedef std::mt19937 rnd_state_type;
 
 struct rnd_state {
-    rnd_state_type* rnd;
+    StaticArray<rnd_state_type> rnd;
 
     rnd_state():
-    rnd{nullptr} {
-        rnd = alloc_mem<rnd_state_type>(NUM_THREADS);
-
+    rnd{NUM_THREADS} {
         std::random_device rd;
         auto const now_t = omp_get_wtime();
 
@@ -503,10 +481,6 @@ struct rnd_state {
             rnd[thread_idx] = gen;
         }
     }
-
-    ~rnd_state() {
-        free_mem(&rnd);
-    }
 };
 
 rnd_state* RND_STATE = nullptr;
@@ -517,16 +491,11 @@ std::uniform_real_distribution<float_type> uniform01 { 0.0, 1.0 };
 // ----------------------------------------------------------------------------
 
 struct nodeset {
-    bool_type *is_in;
+    StaticArray<bool_type> is_in;
     size_type size;
 
     nodeset():
-    is_in{nullptr}, size{0} {
-        // allocate
-        is_in = alloc_mem<bool_type>(NUM_NODES);
-        size = 0;
-
-        // initialize
+    is_in{NUM_NODES}, size{0} {
         #pragma omp parallel
         {
             const auto thread_idx = omp_get_thread_num();
@@ -537,11 +506,6 @@ struct nodeset {
                 is_in[v] = 0;
             }
         }
-    }
-
-    ~nodeset() {
-        free_mem(&is_in);
-        size = 0;
     }
 };
 
@@ -554,16 +518,11 @@ nodeset* {{ name }} = nullptr;
 // ----------------------------------------------------------------------------
 
 struct edgeset {
-    bool_type *is_in;
+    StaticArray<bool_type> is_in;
     size_type size;
 
     edgeset():
-    is_in{nullptr}, size{0} {
-        // allocate
-        is_in = alloc_mem<bool_type>(NUM_EDGES);
-        size = 0;
-
-        // initialize
+    is_in{NUM_EDGES}, size{0} {
         #pragma omp parallel
         {
             const auto thread_idx = omp_get_thread_num();
@@ -574,11 +533,6 @@ struct edgeset {
                 is_in[e] = 0;
             }
         }
-    }
-
-    ~edgeset() {
-        free_mem(&is_in);
-        size = 0;
     }
 };
 

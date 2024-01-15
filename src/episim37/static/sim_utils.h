@@ -20,14 +20,6 @@ template <typename Type> Type *alloc_mem(const std::size_t n) {
   return static_cast<Type *>(ret);
 }
 
-template <typename Type> void free_mem(Type **p) {
-  if (p == nullptr || *p == nullptr) {
-    return;
-  }
-  std::free(*p);
-  *p = nullptr;
-}
-
 template <typename Type> struct StaticArray {
   Type *_data;
   std::size_t _size;
