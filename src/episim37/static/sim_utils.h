@@ -10,17 +10,23 @@
 
 const std::size_t L1_CACHE_SIZE = 64;
 
+template <typename IntType> IntType aligned_size(IntType n) {
+  auto rem = n % L1_CACHE_SIZE;
+  if (rem) {
+    n += L1_CACHE_SIZE - rem;
+  }
+  return n;
+}
+
 static std::size_t TOTAL_ALLOC = 0;
 
 template <typename Type> Type *alloc_mem(const std::size_t n) {
   auto alloc_size = sizeof(Type) * n;
-  auto rem = alloc_size % L1_CACHE_SIZE;
-  if (rem) {
-    alloc_size += L1_CACHE_SIZE - rem;
-  }
-
+  alloc_size = aligned_size(alloc_size);
   auto *ret = std::aligned_alloc(L1_CACHE_SIZE, alloc_size);
   assert(ret && "Failed to allocate memory");
+
+  TOTAL_ALLOC += alloc_size;
 
   return static_cast<Type *>(ret);
 }
@@ -168,7 +174,7 @@ template <typename Type> struct DynamicArrayList {
     for (std::size_t i = 0; i < n; i++) {
       _cap[i] = caps[i];
     }
-    
+
     _n = n;
   }
 
