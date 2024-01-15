@@ -2,11 +2,11 @@
 #define __SIM_UTILS_H__
 // Simulation utilities
 
+#include <H5Cpp.h>
 #include <cassert>
 #include <cinttypes>
 #include <cstdlib>
 #include <vector>
-#include <H5Cpp.h>
 
 const std::size_t L1_CACHE_SIZE = 64;
 
@@ -41,6 +41,12 @@ template <typename Type> struct StaticArray {
   StaticArray &operator=(const StaticArray &) = delete; // copy assignment
   StaticArray &operator=(StaticArray &&) = delete;      // move assignment
 
+  void init(std::size_t start, std::size_t end) {
+    for (std::size_t i = start; i < end; i++) {
+      _data[i] = 0;
+    }
+  }
+
   [[nodiscard]] Type &operator[](std::size_t i) { return _data[i]; }
   [[nodiscard]] Type operator[](std::size_t i) const { return _data[i]; }
 
@@ -56,6 +62,101 @@ template <typename Type> struct StaticArray {
   void set_minus(std::size_t i, Type x) { _data[i] -= x; }
   void set_times(std::size_t i, Type x) { _data[i] *= x; }
   void set_div(std::size_t i, Type x) { _data[i] /= x; }
+};
+
+template <typename Type> struct DynamicArrayList {
+  Type **_data;
+  std::size_t *_size;
+  std::size_t *_cap;
+  std::size_t _n;
+
+  DynamicArrayList(const StaticArray<std::size_t> &caps)
+      : _data{nullptr}, _size{nullptr}, _cap{nullptr}, _n{0} {
+    const auto n = caps.size();
+
+    _data = alloc_mem<Type *>(n);
+    for (std::size_t i = 0; i < n; i++) {
+      _data[i] = alloc_mem<Type>(caps[i]);
+    }
+    _size = alloc_mem<std::size_t>(n);
+    _cap = alloc_mem<std::size_t>(n);
+    _n = n;
+  }
+
+  ~DynamicArrayList() {
+    for (std::size_t i = 0; i < _n; i++) {
+      std::free(_data[i]);
+      _data[i] = nullptr;
+    }
+    std::free(_data);
+    _data = nullptr;
+
+    std::free(_size);
+    _size = nullptr;
+
+    std::free(_cap);
+    _cap = nullptr;
+
+    _n = 0;
+  }
+
+  DynamicArrayList() = delete;                         // default constructor
+  DynamicArrayList(const DynamicArrayList &) = delete; // copy constructor
+  DynamicArrayList(DynamicArrayList &&) = delete;      // move constructor
+  DynamicArrayList &
+  operator=(const DynamicArrayList &) = delete;              // copy assignment
+  DynamicArrayList &operator=(DynamicArrayList &&) = delete; // move assignment
+
+  [[nodiscard]] Type *begin(std::size_t i) const { return _data[i]; }
+  [[nodiscard]] Type *end(std::size_t i) const { return _data[i] + _size[i]; }
+  [[nodiscard]] std::size_t size(std::size_t i) const { return _size[i]; }
+  [[nodiscard]] Type *data(std::size_t i) const { return _data[i]; }
+
+  void init(std::size_t i) {
+    const auto a = _data[i];
+    const auto n = _cap[i];
+    for (std::size_t j = 0; j < n; j++) {
+      a[j] = 0;
+    }
+  }
+
+  void append(std::size_t i, const Type &v) {
+    _data[i][_size[i]] = v;
+    _size[i]++;
+  }
+
+  void clear(std::size_t i) { _size[i] = 0; }
+
+  void save(const H5::H5File &file, const std::string &dataset_name,
+            const H5::PredType &h5_type) {
+    std::size_t dataset_size = 0;
+    for (std::size_t i = 0; i < _n; i++) {
+      dataset_size += _size[i];
+    }
+
+    hsize_t dims[] = {dataset_size};
+    H5::DataSpace file_space(1, dims);
+
+    H5::DataSet dataset = file.createDataSet(dataset_name, h5_type, file_space);
+
+    std::size_t write_offset = 0;
+    for (std::size_t i = 0; i < _n; i++) {
+      hsize_t dims[] = {_size[i]};
+      H5::DataSpace mem_space(1, dims);
+
+      hsize_t count[] = {_size[i]};
+      hsize_t offset[] = {write_offset};
+      file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
+
+      dataset.write(_data[i], h5_type, mem_space, file_space);
+
+      write_offset += count[0];
+      mem_space.close();
+    }
+
+    dataset.close();
+    file_space.close();
+  }
 };
 
 template <typename Type> struct Range {

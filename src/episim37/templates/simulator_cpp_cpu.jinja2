@@ -291,101 +291,40 @@ edge_table* EDGE_TABLE = nullptr;
 
 H5::H5File* OUTPUT_FILE = nullptr;
 
-template <typename Type>
-void write_node_dataset(
-        const std::string& dataset_name,
-        const H5::PredType& h5_type,
-        const StaticArray<size_type>& counts,
-        const StaticArray<Type>& in) {
-    size_type dataset_size = 0;
-    for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-        dataset_size += counts[thread_idx];
-    }
-
-    hsize_t dims[] = {dataset_size};
-    H5::DataSpace file_space(1, dims);
-
-    {
-        H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, h5_type, file_space);
-
-        size_type write_offset = 0;
-        for (size_type thread_idx = 0; thread_idx < NUM_THREADS; thread_idx++) {
-            hsize_t dims[] = {counts[thread_idx]};
-            H5::DataSpace mem_space(1, dims);
-
-            hsize_t count[] = {counts[thread_idx]};
-            hsize_t offset[] = {write_offset};
-            file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
-
-            auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-            auto data = in.data() + v_start;
-            dataset.write(data, h5_type, mem_space, file_space);
-
-            write_offset += count[0];
-            mem_space.close();
-        }
-
-        dataset.close();
-    }
-
-    file_space.close();
-}
-
 {% for co in source.contagion_outputs %}
 struct {{ co.name }}_output {
-    StaticArray<node_index_type> transition_node_idx;
-    StaticArray<{{ co.state_type }}> transition_state;
-    StaticArray<size_type> num_transitions;
+    DynamicArrayList<node_index_type> transition_node_idx;
+    DynamicArrayList<{{ co.state_type }}> transition_state;
+    DynamicArrayList<edge_index_type> transmission_edge_idx;
+    DynamicArrayList<{{ co.state_type }}> transmission_state;
 
-    StaticArray<node_index_type> transmission_node_idx;
-    StaticArray<edge_index_type> transmission_source;
-    StaticArray<{{ co.state_type }}> transmission_state;
-    StaticArray<size_type> num_transmissions;
-
-    {{ co.name }}_output():
-    transition_node_idx{NUM_NODES},
-    transition_state{NUM_NODES},
-    num_transitions{NUM_THREADS},
-    transmission_node_idx{NUM_NODES},
-    transmission_source{NUM_NODES},
-    transmission_state{NUM_NODES},
-    num_transmissions{NUM_THREADS} {
+    {{ co.name }}_output(const StaticArray<std::size_t>& thread_node_count):
+            transition_node_idx{thread_node_count},
+            transition_state{thread_node_count},
+            transmission_edge_idx{thread_node_count},
+            transmission_state{thread_node_count} {
         // initialize
         #pragma omp parallel
         {
             const auto thread_idx = omp_get_thread_num();
-            num_transitions[thread_idx] = 0;
-            num_transmissions[thread_idx] = 0;
-
-            const auto start = THREAD_NODE_RANGE->start(thread_idx);
-            const auto end = THREAD_NODE_RANGE->end(thread_idx);
-
-            for (size_type v = start; v < end; v++) {
-                transition_node_idx[v] = 0;
-                transition_state[v] = 0;
-            }
-
-            for (size_type v = start; v < end; v++) {
-                transmission_node_idx[v] = 0;
-                transmission_source[v] = 0;
-                transmission_state[v] = 0;
-            }
+            transition_node_idx.init(thread_idx);
+            transition_state.init(thread_idx);
+            transmission_edge_idx.init(thread_idx);
+            transmission_state.init(thread_idx);
         }
     }
 
     void reset_transitions(const size_type thread_idx) {
-        num_transitions[thread_idx] = 0;
+        transition_node_idx.clear(thread_idx);
+        transition_state.clear(thread_idx);
     }
 
     void add_transition(
             const size_type thread_idx,
             const size_type v,
             const {{ co.state_type }} state) {
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto idx = v_start + num_transitions[thread_idx];
-        transition_node_idx[idx] = v;
-        transition_state[idx] = state;
-        num_transitions[thread_idx]++;
+        transition_node_idx.append(thread_idx, v);
+        transition_state.append(thread_idx, state);
     }
 
     void do_save_transitions(const std::string& transition_type) {
@@ -394,12 +333,12 @@ struct {{ co.name }}_output {
 
         {
             auto dataset_name = fmt::format("/{{ co.print_name }}/{}/tick_{}/node_index", transition_type, CUR_TICK);
-            write_node_dataset(dataset_name, NODE_INDEX_TYPE_H5_TYPE, num_transitions, transition_node_idx);
+            transition_node_idx.save(*OUTPUT_FILE, dataset_name, NODE_INDEX_TYPE_H5_TYPE);
         }
 
         {
             auto dataset_name = fmt::format("/{{ co.print_name }}/{}/tick_{}/state", transition_type, CUR_TICK);
-            write_node_dataset(dataset_name, {{ co.state_h5_type }}, num_transitions, transition_state);
+            transition_state.save(*OUTPUT_FILE, dataset_name, {{ co.state_h5_type }});
         }
     }
 
@@ -412,20 +351,16 @@ struct {{ co.name }}_output {
     }
 
     void reset_transmissions(const size_type thread_idx) {
-        num_transmissions[thread_idx] = 0;
+        transmission_edge_idx.clear(thread_idx);
+        transmission_state.clear(thread_idx);
     }
 
     void add_transmission(
             const size_type thread_idx,
-            const size_type v,
             const size_type e,
             const {{ co.state_type }} state) {
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto idx = v_start + num_transmissions[thread_idx];
-        transmission_node_idx[idx] = v;
-        transmission_source[idx] = e;
-        transmission_state[idx] = state;
-        num_transmissions[thread_idx]++;
+        transmission_edge_idx.append(thread_idx, e);
+        transmission_state.append(thread_idx, state);
     }
 
     void save_transmissions() {
@@ -433,18 +368,13 @@ struct {{ co.name }}_output {
         create_group(*OUTPUT_FILE, group_name);
 
         {
-            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/node_index", CUR_TICK);
-            write_node_dataset(dataset_name, NODE_INDEX_TYPE_H5_TYPE, num_transmissions, transmission_node_idx);
-        }
-
-        {
-            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/source_edge_index", CUR_TICK);
-            write_node_dataset(dataset_name, EDGE_INDEX_TYPE_H5_TYPE, num_transmissions, transmission_source);
+            auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/edge_index", CUR_TICK);
+            transmission_edge_idx.save(*OUTPUT_FILE, dataset_name, EDGE_INDEX_TYPE_H5_TYPE);
         }
 
         {
             auto dataset_name = fmt::format("/{{ co.print_name }}/transmissions/tick_{}/state", CUR_TICK);
-            write_node_dataset(dataset_name, {{ co.state_h5_type }}, num_transmissions, transmission_state);
+            transmission_state.save(*OUTPUT_FILE, dataset_name, {{ co.state_h5_type }});
         }
     }
 };
@@ -761,7 +691,7 @@ void {{ c.name }}_transmit(
             case {{ contact }}:
             {% endfor %}
                 NODE_TABLE->{{ c.name }}_state[v] = {{ exit }};
-                {{ c.name }}_OUTPUT->add_transmission(thread_idx, v, esel, {{ exit }});
+                {{ c.name }}_OUTPUT->add_transmission(thread_idx, esel, {{ exit }});
                 break;
             {% endfor %}
             }
@@ -1193,10 +1123,6 @@ int main() {
         attribute.write(INT_TYPE_H5_TYPE, &NUM_TICKS);
         attribute.close();
 
-        // attribute = output_file.createAttribute("num_threads", SIZE_TYPE_H5_TYPE, dataspace);
-        // attribute.write(SIZE_TYPE_H5_TYPE, &NUM_THREADS);
-        // attribute.close();
-
         dataspace.close();
     }
 
@@ -1209,7 +1135,12 @@ int main() {
         create_group(output_file, "/{{ co.print_name }}/state_count");
     }
 
-    {{ co.name }}_output {{ co.name }}_out;
+    StaticArray<std::size_t> thread_node_count(NUM_THREADS);
+    for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        thread_node_count[i] = THREAD_NODE_RANGE->end(i) - THREAD_NODE_RANGE->start(i);
+    }
+
+    {{ co.name }}_output {{ co.name }}_out(thread_node_count);
     {{ co.name }}_OUTPUT = &{{ co.name }}_out;
     {% endfor %}
 

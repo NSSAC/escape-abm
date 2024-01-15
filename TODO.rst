@@ -10,5 +10,4 @@ TODOs
 * Profile cpu code with vtune/advisor
 * Add distributed memory (MPI) support
 * Change parser from tree-sitter to lark
-
-
+* Remove redundant source node from transmission output
