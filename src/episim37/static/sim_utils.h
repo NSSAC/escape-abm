@@ -14,11 +14,51 @@ static std::size_t TOTAL_ALLOC = 0;
 
 template <typename Type> Type *alloc_mem(const std::size_t n) {
   auto alloc_size = sizeof(Type) * n;
+  auto rem = alloc_size % L1_CACHE_SIZE;
+  if (rem) {
+    alloc_size += L1_CACHE_SIZE - rem;
+  }
+
   auto *ret = std::aligned_alloc(L1_CACHE_SIZE, alloc_size);
   assert(ret && "Failed to allocate memory");
 
   return static_cast<Type *>(ret);
 }
+
+template <typename Type> struct Range {
+  Type _start;
+  Type _stop;
+
+  struct iterator {
+    Type cur;
+
+    explicit iterator(Type c = 0) : cur{c} {}
+    iterator &operator++() {
+      ++cur;
+      return *this;
+    }
+    bool operator==(iterator rhs) const { return cur == rhs.cur; }
+    bool operator!=(iterator rhs) const { return cur != rhs.cur; }
+    Type operator*() const { return cur; }
+    Type operator-(iterator rhs) const { return cur - rhs.cur; }
+    iterator &operator+=(Type rhs) {
+      cur += rhs;
+      return *this;
+    }
+  };
+
+  Range() : _start{0}, _stop{0} {}
+  Range(Type a, Type b) : _start{a}, _stop{b} {}
+
+  Range(const Range &) = default;            // copy constructor
+  Range(Range &&) = default;                 // move constructor
+  Range &operator=(const Range &) = default; // copy assignment
+  Range &operator=(Range &&) = default;      // move assignment
+
+  [[nodiscard]] iterator begin() const { return iterator(_start); }
+  [[nodiscard]] iterator end() const { return iterator(_stop); }
+  [[nodiscard]] std::size_t size() const { return _stop - _start; }
+};
 
 template <typename Type> struct StaticArray {
   Type *_data;
@@ -41,10 +81,15 @@ template <typename Type> struct StaticArray {
   StaticArray &operator=(const StaticArray &) = delete; // copy assignment
   StaticArray &operator=(StaticArray &&) = delete;      // move assignment
 
-  void init(std::size_t start, std::size_t end) {
+  void init(const std::size_t start, const std::size_t end) {
     for (std::size_t i = start; i < end; i++) {
       _data[i] = 0;
     }
+  }
+
+  void init(const Range<std::size_t> &range) {
+    const auto [start, stop] = range;
+    init(start, stop);
   }
 
   [[nodiscard]] Type &operator[](std::size_t i) { return _data[i]; }
@@ -113,8 +158,17 @@ template <typename Type> struct DynamicArrayList {
     for (std::size_t i = 0; i < n; i++) {
       _data[i] = alloc_mem<Type>(caps[i]);
     }
+
     _size = alloc_mem<std::size_t>(n);
+    for (std::size_t i = 0; i < n; i++) {
+      _size[i] = 0;
+    }
+
     _cap = alloc_mem<std::size_t>(n);
+    for (std::size_t i = 0; i < n; i++) {
+      _cap[i] = caps[i];
+    }
+    
     _n = n;
   }
 
@@ -192,41 +246,6 @@ template <typename Type> struct DynamicArrayList {
     dataset.close();
     file_space.close();
   }
-};
-
-template <typename Type> struct Range {
-  Type _start;
-  Type _stop;
-
-  struct iterator {
-    Type cur;
-
-    explicit iterator(Type c = 0) : cur{c} {}
-    iterator &operator++() {
-      ++cur;
-      return *this;
-    }
-    bool operator==(iterator rhs) const { return cur == rhs.cur; }
-    bool operator!=(iterator rhs) const { return cur != rhs.cur; }
-    Type operator*() const { return cur; }
-    Type operator-(iterator rhs) const { return cur - rhs.cur; }
-    iterator &operator+=(Type rhs) {
-      cur += rhs;
-      return *this;
-    }
-  };
-
-  Range() : _start{0}, _stop{0} {}
-  Range(Type a, Type b) : _start{a}, _stop{b} {}
-
-  Range(const Range &) = default;            // copy constructor
-  Range(Range &&) = default;                 // move constructor
-  Range &operator=(const Range &) = default; // copy assignment
-  Range &operator=(Range &&) = default;      // move assignment
-
-  [[nodiscard]] iterator begin() const { return iterator(_start); }
-  [[nodiscard]] iterator end() const { return iterator(_stop); }
-  [[nodiscard]] std::size_t size() const { return _stop - _start; }
 };
 
 template <typename Type>

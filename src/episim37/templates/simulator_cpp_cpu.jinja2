@@ -93,82 +93,91 @@ in_inc_csr* IN_INC_CSR = nullptr;
 // Thread to node range mapping
 // ----------------------------------------------------------------------------
 
-struct thread_node_range {
-    StaticArray<size_type> ptr;
+extern Range<std::size_t> THREAD_NODE_RANGE;
+#pragma omp threadprivate(THREAD_NODE_RANGE)
+Range<std::size_t> THREAD_NODE_RANGE;
 
-    thread_node_range():
-    ptr{NUM_THREADS + 1} {
-        StaticArray<edge_index_type> cum_in_neighbors(NUM_NODES);
-        size_type total_load = 0;
-        for (size_type i = 0; i < NUM_NODES; i++) {
-            total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
-            cum_in_neighbors[i] = total_load;
+void init_thread_node_range() {
+    StaticArray<size_type> ptr{NUM_THREADS + 1};
+
+    StaticArray<edge_index_type> cum_in_neighbors(NUM_NODES);
+    size_type total_load = 0;
+    for (size_type i = 0; i < NUM_NODES; i++) {
+        total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
+        cum_in_neighbors[i] = total_load;
+    }
+
+    auto thread_load = total_load / NUM_THREADS;
+    thread_load += (total_load % NUM_THREADS != 0);
+
+    ptr[0] = 0;
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        auto needle = thread_load * (thread_idx + 1);
+        if (needle > total_load) {
+            needle = total_load;
         }
 
-        auto thread_load = total_load / NUM_THREADS;
-        thread_load += (total_load % NUM_THREADS != 0);
+        auto pos = std::upper_bound(cum_in_neighbors.begin(), cum_in_neighbors.end(), needle);
+        ptr[thread_idx + 1] = pos - cum_in_neighbors.begin();
+    }
 
-        ptr[0] = 0;
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
-            auto needle = thread_load * (thread_idx + 1);
-            if (needle > total_load) {
-                needle = total_load;
-            }
+    assert(ptr[0] == 0);
+    assert(ptr[NUM_THREADS] == NUM_NODES);
+    for (size_type i = 0; i < NUM_THREADS; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
 
-            auto end = std::upper_bound(cum_in_neighbors.begin(), cum_in_neighbors.end(), needle);
-            ptr[thread_idx + 1] = end - cum_in_neighbors.begin();
-        }
-
-        assert(ptr[0] == 0);
-        assert(ptr[NUM_THREADS] == NUM_NODES);
-        for (size_type i = 0; i < NUM_THREADS; i++) {
-            assert(ptr[i] <= ptr[i+1]);
-        }
-  }
-
-  size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
-  size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-};
-
-thread_node_range* THREAD_NODE_RANGE = nullptr;
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto start = ptr[thread_idx];
+        const auto end = ptr[thread_idx + 1];
+        THREAD_NODE_RANGE = Range<std::size_t>(start, end);
+    }
+}
 
 // ----------------------------------------------------------------------------
 // Thread to edge range mapping
 // ----------------------------------------------------------------------------
 
-struct thread_edge_range {
-    StaticArray<size_type> ptr;
+extern Range<std::size_t> THREAD_EDGE_RANGE;
+#pragma omp threadprivate(THREAD_EDGE_RANGE)
+Range<std::size_t> THREAD_EDGE_RANGE;
 
-    thread_edge_range():
-    ptr{NUM_THREADS + 1} {
-        auto thread_load = NUM_EDGES / NUM_THREADS;
-        thread_load += (NUM_EDGES % NUM_THREADS != 0);
+void init_thread_edge_range() {
+    StaticArray<size_type> ptr{NUM_THREADS + 1};
 
-        ptr[0] = 0;
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
-            auto end = thread_load * (thread_idx + 1);
-            if (end > NUM_EDGES) {
-                end = NUM_EDGES;
-            }
-            ptr[thread_idx +1] = end;
+    auto thread_load = NUM_EDGES / NUM_THREADS;
+    thread_load += (NUM_EDGES % NUM_THREADS != 0);
+
+    ptr[0] = 0;
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        auto end = thread_load * (thread_idx + 1);
+        if (end > NUM_EDGES) {
+            end = NUM_EDGES;
         }
-
-        assert(ptr[0] == 0);
-        assert(ptr[NUM_THREADS] == NUM_EDGES);
-        for (size_type i = 0; i < NUM_THREADS; i++) {
-            assert(ptr[i] <= ptr[i+1]);
-        }
+        ptr[thread_idx +1] = end;
     }
 
-    size_type start(size_type thread_idx) const { return ptr[thread_idx]; };
-    size_type end(size_type thread_idx) const { return ptr[thread_idx + 1]; };
-};
+    assert(ptr[0] == 0);
+    assert(ptr[NUM_THREADS] == NUM_EDGES);
+    for (size_type i = 0; i < NUM_THREADS; i++) {
+        assert(ptr[i] <= ptr[i+1]);
+    }
 
-thread_edge_range* THREAD_EDGE_RANGE = nullptr;
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        const auto start = ptr[thread_idx];
+        const auto end = ptr[thread_idx + 1];
+        THREAD_EDGE_RANGE = Range<std::size_t>(start, end);
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 // Node table
@@ -200,18 +209,14 @@ struct node_table {
         // initialize
         #pragma omp parallel
         {
-            const auto thread_idx = omp_get_thread_num();
-            const auto start = THREAD_NODE_RANGE->start(thread_idx);
-            const auto end = THREAD_NODE_RANGE->end(thread_idx);
-
             {% for field in source.node_table.fields %}
-            {{ field.name }}.init(start, end);
+            {{ field.name }}.init(THREAD_NODE_RANGE);
             {% endfor %}
             {% for contagion_name, _ in source.node_table.contagions %}
-            {{ contagion_name }}_state.init(start, end);
-            {{ contagion_name }}_state_prev.init(start, end);
-            {{ contagion_name }}_next_state.init(start, end);
-            {{ contagion_name }}_dwell_time.init(start, end);
+            {{ contagion_name }}_state.init(THREAD_NODE_RANGE);
+            {{ contagion_name }}_state_prev.init(THREAD_NODE_RANGE);
+            {{ contagion_name }}_next_state.init(THREAD_NODE_RANGE);
+            {{ contagion_name }}_dwell_time.init(THREAD_NODE_RANGE);
             {% endfor %}
         }
 
@@ -254,18 +259,14 @@ struct edge_table {
         // initialize
         #pragma omp parallel
         {
-            const auto thread_idx = omp_get_thread_num();
-            const auto start = THREAD_EDGE_RANGE->start(thread_idx);
-            const auto end = THREAD_EDGE_RANGE->end(thread_idx);
-
             {% for field in source.edge_table.fields %}
-            {{ field.name }}.init(start, end);
+            {{ field.name }}.init(THREAD_EDGE_RANGE);
             {% endfor %}
             {% for contagion_name in source.edge_table.contagions %}
-            {{ contagion_name }}_transmission_prob.init(start, end);
+            {{ contagion_name }}_transmission_prob.init(THREAD_EDGE_RANGE);
             {% endfor %}
-            target_node_index.init(start, end);
-            source_node_index.init(start, end);
+            target_node_index.init(THREAD_EDGE_RANGE);
+            source_node_index.init(THREAD_EDGE_RANGE);
         }
 
         // load static fields
@@ -422,13 +423,7 @@ struct nodeset {
     is_in{NUM_NODES}, size{0} {
         #pragma omp parallel
         {
-            const auto thread_idx = omp_get_thread_num();
-            const auto start = THREAD_NODE_RANGE->start(thread_idx);
-            const auto end = THREAD_NODE_RANGE->end(thread_idx);
-
-            for (size_type v = start; v < end; v++) {
-                is_in[v] = 0;
-            }
+            is_in.init(THREAD_NODE_RANGE);
         }
     }
 };
@@ -449,13 +444,7 @@ struct edgeset {
     is_in{NUM_EDGES}, size{0} {
         #pragma omp parallel
         {
-            const auto thread_idx = omp_get_thread_num();
-            const auto start = THREAD_EDGE_RANGE->start(thread_idx);
-            const auto end = THREAD_EDGE_RANGE->end(thread_idx);
-
-            for (size_type e = start; e < end; e++) {
-                is_in[e] = 0;
-            }
+            is_in.init(THREAD_EDGE_RANGE);
         }
     }
 };
@@ -701,13 +690,9 @@ void {{ c.name }}_save_state_count() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-
         size_type thread_state_count[{{ c.num_states }}] = {0};
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
 
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             thread_state_count[NODE_TABLE->{{ c.name }}_state[v]] += 1;
         }
 
@@ -745,9 +730,7 @@ void {{ c.name }}_step() {
         const auto thread_idx = omp_get_thread_num();
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             {{ c.name }}_transition_node(v, 0.0, thread_idx);
         }
     }
@@ -766,17 +749,13 @@ void {{ c.name }}_step() {
         const auto thread_idx = omp_get_thread_num();
         {{ c.name }}_OUTPUT->reset_transmissions(thread_idx);
 
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
-        for (size_type e = e_start; e < e_end; e++) {
+        for (auto e : THREAD_EDGE_RANGE) {
             {{ c.name }}_update_transmission_prob(e);
         }
 
         #pragma omp barrier
 
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             {{ c.name }}_transmit(v, thread_idx);
         }
     }
@@ -795,9 +774,7 @@ void {{ c.name }}_step() {
         const auto thread_idx = omp_get_thread_num();
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             {{ c.name }}_transition_node(v, TICK_ELAPSED, thread_idx);
         }
     }
@@ -823,12 +800,8 @@ void {{ f.name }}() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             const auto b = {{ f.function_name }}(v);
             {{ f.set_name }}->is_in[v] = b;
             size += b;
@@ -848,12 +821,8 @@ void {{ f.name }}() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type e = e_start; e < e_end; v++) {
+        for (auto e : THREAD_EDGE_RANGE) {
             const auto b = {{ f.function_name }}(edge_type(EDGE_TABLE, NODE_TABLE, e));
             {{ f.set_name }}->is_in[e] = b;
             size += b;
@@ -874,12 +843,8 @@ void {{ f.name }}() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             {{ f.set_name }}->is_in[v] = 0;
             if ({{ f.parent_set_name }}->is_in[v]) {
                 const auto p = uniform01(THREAD_RND_STATE);
@@ -905,12 +870,8 @@ void {{ f.name }}() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type e = e_start; e < e_end; e++) {
+        for (auto e : THREAD_EDGE_RANGE) {
             {{ f.set_name }}->is_in[e] = 0;
             if ({{ f.parent_set_name }}->is_in[e]) {
                 const auto p = uniform01(THREAD_RND_STATE);
@@ -934,12 +895,8 @@ void {{ f.name }}() {
     {{ f.set_name }}->size = 0;
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v : THREAD_NODE_RANGE) {
             {{ f.set_name }}->is_in[v] = 0;
             if ({{ f.parent_set_name }}->is_in[v]) {
                 const auto p = uniform01(THREAD_RND_STATE);
@@ -964,12 +921,8 @@ void {{ f.name }}() {
 
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
-
         size_type size = 0;
-        for (size_type e = e_start; e < e_end; e++) {
+        for (auto e : THREAD_EDGE_RANGE) {
             {{ f.set_name }}->is_in[e] = 0;
             if ({{ f.parent_set_name }}->is_in[e]) {
                 const auto p = uniform01(THREAD_RND_STATE);
@@ -992,11 +945,7 @@ void {{ f.name }}() {
 void {{ f.name }}() {
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
-        const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
-
-        for (size_type v = v_start; v < v_end; v++) {
+        for (auto v: THREAD_NODE_RANGE) {
             if ({{ f.set_name }}->is_in[v]) {
                {{ f.function_name }}(v);
             }
@@ -1009,11 +958,7 @@ void {{ f.name }}() {
 void {{ f.name }}() {
     #pragma omp parallel
     {
-        const auto thread_idx = omp_get_thread_num();
-        const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
-        const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
-
-        for (size_type e = e_start; e < e_end; e++) {
+        for (auto e : THREAD_EDGE_RANGE) {
             if ({{ f.set_name }}->is_in[e]) {
                {{ f.function_name }}(e);
             }
@@ -1094,11 +1039,8 @@ int main() {
     in_inc_csr csr(input_file);
     IN_INC_CSR = &csr;
 
-    thread_node_range tnr;
-    THREAD_NODE_RANGE = &tnr;
-
-    thread_edge_range ter;
-    THREAD_EDGE_RANGE = &ter;
+    init_thread_node_range();
+    init_thread_edge_range();
 
     node_table nt(input_file);
     NODE_TABLE = &nt;
@@ -1132,8 +1074,13 @@ int main() {
     }
 
     StaticArray<std::size_t> thread_node_count(NUM_THREADS);
-    for (std::size_t i = 0; i < NUM_THREADS; i++) {
-        thread_node_count[i] = THREAD_NODE_RANGE->end(i) - THREAD_NODE_RANGE->start(i);
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        #pragma omp critical
+        {
+            thread_node_count[thread_idx] = THREAD_NODE_RANGE.size();
+        }
     }
 
     {{ co.name }}_output {{ co.name }}_out(thread_node_count);
