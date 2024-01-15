@@ -2,11 +2,11 @@
 #define __SIM_UTILS_H__
 // Simulation utilities
 
-#include <H5Cpp.h>
 #include <cassert>
 #include <cinttypes>
 #include <cstdlib>
 #include <vector>
+#include <H5Cpp.h>
 
 const std::size_t L1_CACHE_SIZE = 64;
 

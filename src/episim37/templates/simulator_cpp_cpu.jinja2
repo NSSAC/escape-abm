@@ -459,26 +459,29 @@ struct {{ co.name }}_output {
 
 typedef std::mt19937 rnd_state_type;
 
-struct rnd_state {
-    StaticArray<rnd_state_type> rnd;
+extern rnd_state_type THREAD_RND_STATE;
+#pragma omp threadprivate(THREAD_RND_STATE)
+rnd_state_type THREAD_RND_STATE;
 
-    rnd_state():
-    rnd{NUM_THREADS} {
-        std::random_device rd;
-        auto const now_t = omp_get_wtime();
+void init_thread_rnd_state() {
+    // get the default random device
+    std::random_device rd;
 
-        #pragma omp parallel
-        {
-            const auto thread_idx = omp_get_thread_num();
+    // make seed generator using the random device
+    std::seed_seq seq{rd(), rd(), rd(), rd(), rd()};
 
-            rnd_state_type gen(rd());
-            gen.seed(now_t + thread_idx);
-            rnd[thread_idx] = gen;
-        }
+    // make seeds for each thread
+    StaticArray<std::uint32_t> seeds(NUM_THREADS);
+    seq.generate(seeds.begin(), seeds.end());
+
+    // assign the seeds to each thread
+    #pragma omp parallel
+    {
+        const auto thread_idx = omp_get_thread_num();
+        THREAD_RND_STATE = rnd_state_type(seeds[thread_idx]);
     }
-};
+}
 
-rnd_state* RND_STATE = nullptr;
 std::uniform_real_distribution<float_type> uniform01 { 0.0, 1.0 };
 
 // ----------------------------------------------------------------------------
@@ -540,7 +543,7 @@ edgeset* {{ name }} = nullptr;
 // ----------------------------------------------------------------------------
 
 {% for d in source.constant_dists %}
-float_type {{ d.name }}(rnd_state_type *const rnd) {
+float_type {{ d.name }}() {
     return {{ d.v }} ;
 }
 {% endfor %}
@@ -558,9 +561,9 @@ const size_type {{ d.name }}_ALIAS[] = { {% for a in d.alias %}{{ comma() }}{{ a
 const float_type {{ d.name }}_VS[] = { {% for v in d.vs %}{{ comma() }}{{ v }}{% endfor %} };
 std::uniform_int_distribution<size_type> {{ d.name }}_INDEX_DIST { 0, {{ d.probs|length - 1 }} };
 
-float_type {{ d.name }}(rnd_state_type *const rnd) {
-    auto i = {{ d.name }}_INDEX_DIST(*rnd);
-    const auto u = uniform01(*rnd);
+float_type {{ d.name }}() {
+    auto i = {{ d.name }}_INDEX_DIST(THREAD_RND_STATE);
+    const auto u = uniform01(THREAD_RND_STATE);
 
     if ({{ d.name }}_PROBS[i] < u) {
         i = {{ d.name }}_ALIAS[i];
@@ -577,8 +580,8 @@ float_type {{ d.name }}(rnd_state_type *const rnd) {
 {% for d in source.uniform_dists %}
 std::uniform_real_distribution<float_type> {{ d.name }}_UNIFORM_DIST { {{ d.low }}, {{ d.high }} };
 
-float_type {{ d.name }}(rnd_state_type *const rnd) {
-    return {{ d.name }}_UNIFORM_DIST(*rnd);
+float_type {{ d.name }}() {
+    return {{ d.name }}_UNIFORM_DIST(THREAD_RND_STATE);
 }
 {% endfor %}
 
@@ -589,8 +592,8 @@ float_type {{ d.name }}(rnd_state_type *const rnd) {
 {% for d in source.normal_dists %}
 std::normal_distribution<float_type> {{ d.name }}_NORMAL_DIST { {{ d.mean }}, {{ d.std }} };
 
-float_type {{ d.name }}(rnd_state_type *const rnd) {
-    auto ret = {{ d.name }}_NORMAL_DIST(*rnd);
+float_type {{ d.name }}() {
+    auto ret = {{ d.name }}_NORMAL_DIST(THREAD_RND_STATE);
     if (ret > {{ d.max }}) {
         ret = {{ d.max }};
     }
@@ -628,7 +631,6 @@ std::uniform_int_distribution<size_type> {{ c.name }}_{{ mt.entry }}_transition_
 
 void {{ c.name }}_transition_node(
         const size_type v,
-        rnd_state_type *const rnd,
         const float_type elapsed,
         const size_type thread_idx) {
     auto state = NODE_TABLE->{{ c.name }}_state[v];
@@ -663,14 +665,14 @@ void {{ c.name }}_transition_node(
     {% for st in c.transition.single %}
     case {{ st.entry }}:
         next_state = {{ st.exit }};
-        dwell_time = {{ st.dwell_dist }}(rnd);
+        dwell_time = {{ st.dwell_dist }}();
         break;
     {% endfor %}
     {% for mt in c.transition.multi %}
     case {{ mt.entry }}:
         {
-            auto i = {{ c.name }}_{{ mt.entry }}_transition_INDEX_DIST(*rnd);
-            const auto u = uniform01(*rnd);
+            auto i = {{ c.name }}_{{ mt.entry }}_transition_INDEX_DIST(THREAD_RND_STATE);
+            const auto u = uniform01(THREAD_RND_STATE);
 
             if ({{ c.name }}_{{ mt.entry }}_transition_PROBS[i] < u) {
                 i = {{ c.name }}_{{ mt.entry }}_transition_ALIAS[i];
@@ -680,7 +682,7 @@ void {{ c.name }}_transition_node(
             {% for j in range(mt.probs|length) %}
             case {{ j }}:
                 next_state = {{ mt.exits[j] }};
-                dwell_time = {{ mt.dwell_dists[j] }}(rnd);
+                dwell_time = {{ mt.dwell_dists[j] }}();
                 break;
             {% endfor %}
             }
@@ -715,7 +717,6 @@ void {{ c.name }}_update_transmission_prob(const size_type e) {
 
 void {{ c.name }}_transmit(
         const size_type v,
-        rnd_state_type *const rnd,
         const size_type thread_idx) {
     const auto start = IN_INC_CSR->indptr[v];
     const auto end = IN_INC_CSR->indptr[v+1];
@@ -729,13 +730,13 @@ void {{ c.name }}_transmit(
     }
     tprob = 1.0 - tprob;
 
-    auto prob = uniform01(*rnd);
+    auto prob = uniform01(THREAD_RND_STATE);
     if (prob >= tprob) {
         return;
     }
 
     auto esel = NUM_EDGES;
-    auto esel_weight = uniform01(*rnd) * tprob_sum;
+    auto esel_weight = uniform01(THREAD_RND_STATE) * tprob_sum;
     tprob_sum = 0.0;
     for (size_type e = start; e < end; e++) {
         auto p = EDGE_TABLE->{{ c.name }}_transmission_prob[e];
@@ -816,14 +817,12 @@ void {{ c.name }}_step() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
-
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transition_node(v, rnd, 0.0, thread_idx);
+            {{ c.name }}_transition_node(v, 0.0, thread_idx);
         }
     }
     end = omp_get_wtime();
@@ -839,8 +838,6 @@ void {{ c.name }}_step() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
-
         {{ c.name }}_OUTPUT->reset_transmissions(thread_idx);
 
         const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
@@ -854,7 +851,7 @@ void {{ c.name }}_step() {
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transmit(v, rnd, thread_idx);
+            {{ c.name }}_transmit(v, thread_idx);
         }
     }
     end = omp_get_wtime();
@@ -870,14 +867,12 @@ void {{ c.name }}_step() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
-
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
         for (size_type v = v_start; v < v_end; v++) {
-            {{ c.name }}_transition_node(v, rnd, TICK_ELAPSED, thread_idx);
+            {{ c.name }}_transition_node(v, TICK_ELAPSED, thread_idx);
         }
     }
     end = omp_get_wtime();
@@ -954,7 +949,6 @@ void {{ f.name }}() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
 
@@ -962,7 +956,7 @@ void {{ f.name }}() {
         for (size_type v = v_start; v < v_end; v++) {
             {{ f.set_name }}->is_in[v] = 0;
             if ({{ f.parent_set_name }}->is_in[v]) {
-                const auto p = uniform01(*rnd);
+                const auto p = uniform01(THREAD_RND_STATE);
                 if (p < prob) {
                     {{ f.set_name }}->is_in[v] = 1;
                     size += 1;
@@ -986,7 +980,6 @@ void {{ f.name }}() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
         const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
         const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
 
@@ -994,7 +987,7 @@ void {{ f.name }}() {
         for (size_type e = e_start; e < e_end; e++) {
             {{ f.set_name }}->is_in[e] = 0;
             if ({{ f.parent_set_name }}->is_in[e]) {
-                const auto p = uniform01(*rnd);
+                const auto p = uniform01(THREAD_RND_STATE);
                 if (p < prob) {
                     {{ f.set_name }}->p[e] = 1;
                     size += 1;
@@ -1016,7 +1009,6 @@ void {{ f.name }}() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
         const auto v_start = THREAD_NODE_RANGE->start(thread_idx);
         const auto v_end = THREAD_NODE_RANGE->end(thread_idx);
 
@@ -1024,7 +1016,7 @@ void {{ f.name }}() {
         for (size_type v = v_start; v < v_end; v++) {
             {{ f.set_name }}->is_in[v] = 0;
             if ({{ f.parent_set_name }}->is_in[v]) {
-                const auto p = uniform01(*rnd);
+                const auto p = uniform01(THREAD_RND_STATE);
                 if (p < {{ f.amount }}) {
                     {{ f.set_name }}->is_in[v] = 1;
                     size += 1;
@@ -1047,7 +1039,6 @@ void {{ f.name }}() {
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        const auto rnd = &(RND_STATE->rnd[thread_idx]);
         const auto e_start = THREAD_EDGE_RANGE->start(thread_idx);
         const auto e_end = THREAD_EDGE_RANGE->end(thread_idx);
 
@@ -1055,7 +1046,7 @@ void {{ f.name }}() {
         for (size_type e = e_start; e < e_end; e++) {
             {{ f.set_name }}->is_in[e] = 0;
             if ({{ f.parent_set_name }}->is_in[e]) {
-                const auto p = uniform01(*rnd);
+                const auto p = uniform01(THREAD_RND_STATE);
                 if (p < {{ f.amount }}) {
                     {{ f.set_name }}->is_in[e] = 1;
                     size += 1;
@@ -1222,8 +1213,7 @@ int main() {
     {{ co.name }}_OUTPUT = &{{ co.name }}_out;
     {% endfor %}
 
-    rnd_state rnd;
-    RND_STATE = &rnd;
+    init_thread_rnd_state();
 
     {% for name in source.nodesets %}
     nodeset {{ name }}_;
