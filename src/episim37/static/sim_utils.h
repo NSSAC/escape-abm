@@ -62,6 +62,41 @@ template <typename Type> struct StaticArray {
   void set_minus(std::size_t i, Type x) { _data[i] -= x; }
   void set_times(std::size_t i, Type x) { _data[i] *= x; }
   void set_div(std::size_t i, Type x) { _data[i] /= x; }
+
+  void load(const H5::H5File &file, const char *dataset_name,
+            const H5::PredType &h5_type) {
+    H5::DataSet dataset = file.openDataSet(dataset_name);
+
+    // Ensure datatype is correct
+    H5::DataType dataset_type = dataset.getDataType();
+    assert(dataset_type == h5_type);
+
+    // Ensure count is correct
+    H5::DataSpace dataspace = dataset.getSpace();
+    const auto ndims = dataspace.getSimpleExtentNdims();
+    std::vector<hsize_t> dims(ndims);
+    dataspace.getSimpleExtentDims(&dims[0]);
+    assert(dims.size() == 1);
+    assert(dims[0] == _size);
+
+    dataset.read(_data, h5_type);
+
+    dataspace.close();
+    dataset_type.close();
+    dataset.close();
+  }
+
+  void save(const H5::H5File &file, const std::string &dataset_name,
+            const H5::PredType &h5_type) {
+    hsize_t dims[1] = {_size};
+    H5::DataSpace dataspace(1, dims);
+
+    H5::DataSet dataset = file.createDataSet(dataset_name, h5_type, dataspace);
+    dataset.write(_data, h5_type);
+
+    dataset.close();
+    dataspace.close();
+  }
 };
 
 template <typename Type> struct DynamicArrayList {
@@ -203,32 +238,6 @@ Type get_attribute(const H5::H5File &file, const char *attr_name) {
   attr.close();
 
   return ret;
-}
-
-template <typename Type>
-void read_dataset(const H5::H5File &file, const char *dataset_name,
-                  const H5::PredType &h5_type, const std::size_t count,
-                  Type *out) {
-
-  H5::DataSet dataset = file.openDataSet(dataset_name);
-
-  // Ensure datatype is correct
-  H5::DataType dataset_type = dataset.getDataType();
-  assert(dataset_type == h5_type);
-
-  // Ensure count is correct
-  H5::DataSpace dataspace = dataset.getSpace();
-  const auto ndims = dataspace.getSimpleExtentNdims();
-  std::vector<hsize_t> dims(ndims);
-  dataspace.getSimpleExtentDims(&dims[0]);
-  assert(dims.size() == 1);
-  assert(dims[0] == count);
-
-  dataset.read(out, h5_type);
-
-  dataspace.close();
-  dataset_type.close();
-  dataset.close();
 }
 
 static void create_group(H5::H5File &output_file,

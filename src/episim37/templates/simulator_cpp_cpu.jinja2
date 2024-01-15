@@ -83,7 +83,7 @@ struct in_inc_csr {
 
     in_inc_csr(const H5::H5File &file):
     indptr{NUM_NODES + 1} {
-        read_dataset(file, "{{ INC_CSR_INDPTR_DATASET_NAME }}", EDGE_INDEX_TYPE_H5_TYPE, NUM_NODES + 1, indptr.data());
+        indptr.load(file, "{{ INC_CSR_INDPTR_DATASET_NAME }}", EDGE_INDEX_TYPE_H5_TYPE);
     }
 } ;
 
@@ -204,23 +204,21 @@ struct node_table {
             const auto start = THREAD_NODE_RANGE->start(thread_idx);
             const auto end = THREAD_NODE_RANGE->end(thread_idx);
 
-            for (size_type v = start; v < end; v++) {
-                {% for field in source.node_table.fields %}
-                {{ field.name }}[v] = 0;
-                {% endfor %}
-                {% for contagion_name, _ in source.node_table.contagions %}
-                {{ contagion_name }}_state[v] = 0;
-                {{ contagion_name }}_state_prev[v] = 0;
-                {{ contagion_name }}_next_state[v] = 0;
-                {{ contagion_name }}_dwell_time[v] = 0.0;
-                {% endfor %}
-            }
+            {% for field in source.node_table.fields %}
+            {{ field.name }}.init(start, end);
+            {% endfor %}
+            {% for contagion_name, _ in source.node_table.contagions %}
+            {{ contagion_name }}_state.init(start, end);
+            {{ contagion_name }}_state_prev.init(start, end);
+            {{ contagion_name }}_next_state.init(start, end);
+            {{ contagion_name }}_dwell_time.init(start, end);
+            {% endfor %}
         }
 
         // load the static fields
         {% for field in source.node_table.fields %}
         {% if field.is_static %}
-        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_NODES, {{ field.name }}.data());
+        {{ field.name }}.load(file, "{{ field.dataset_name }}", {{ field.h5_type}});
         {% endif %}
         {% endfor %}
     }
@@ -260,26 +258,24 @@ struct edge_table {
             const auto start = THREAD_EDGE_RANGE->start(thread_idx);
             const auto end = THREAD_EDGE_RANGE->end(thread_idx);
 
-            for (size_type e = start; e < end; e++) {
-                {% for field in source.edge_table.fields %}
-                {{ field.name }}[e] = 0;
-                {% endfor %}
-                {% for contagion_name in source.edge_table.contagions %}
-                {{ contagion_name }}_transmission_prob[e] = 0.0;
-                {% endfor %}
-                target_node_index[e] = 0;
-                source_node_index[e] = 0;
-            }
+            {% for field in source.edge_table.fields %}
+            {{ field.name }}.init(start, end);
+            {% endfor %}
+            {% for contagion_name in source.edge_table.contagions %}
+            {{ contagion_name }}_transmission_prob.init(start, end);
+            {% endfor %}
+            target_node_index.init(start, end);
+            source_node_index.init(start, end);
         }
 
         // load static fields
         {% for field in source.edge_table.fields %}
         {% if field.is_static %}
-        read_dataset(file, "{{ field.dataset_name }}", {{ field.h5_type}}, NUM_EDGES, {{ field.name }}.data());
+        {{ field.name }}.load(file, "{{ field.dataset_name }}", {{ field.h5_type}});
         {% endif %}
         {% endfor %}
-        read_dataset(file, "{{ TARGET_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, target_node_index.data());
-        read_dataset(file, "{{ SOURCE_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE, NUM_EDGES, source_node_index.data());
+        target_node_index.load(file, "{{ TARGET_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE);
+        source_node_index.load(file, "{{ SOURCE_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE);
     }
 } ;
 
