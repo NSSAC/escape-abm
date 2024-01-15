@@ -102,6 +102,7 @@ void init_thread_node_range() {
 
     StaticArray<edge_index_type> cum_in_neighbors(NUM_NODES);
     size_type total_load = 0;
+    #pragma omp parallel for simd reduction(+:total_load)
     for (size_type i = 0; i < NUM_NODES; i++) {
         total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
         cum_in_neighbors[i] = total_load;
