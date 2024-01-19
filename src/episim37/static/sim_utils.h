@@ -93,7 +93,8 @@ template <typename Type> struct StaticArray {
     }
   }
 
-  void init(const Range<std::size_t> &range) {
+  template <typename Type1>
+  void init(const Range<Type1> &range) {
     const auto [start, stop] = range;
     init(start, stop);
   }

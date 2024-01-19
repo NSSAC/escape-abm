@@ -93,35 +93,25 @@ in_inc_csr* IN_INC_CSR = nullptr;
 // Thread to node range mapping
 // ----------------------------------------------------------------------------
 
-extern Range<std::size_t> THREAD_NODE_RANGE;
+extern Range<node_index_type> THREAD_NODE_RANGE;
 #pragma omp threadprivate(THREAD_NODE_RANGE)
-Range<std::size_t> THREAD_NODE_RANGE;
+Range<node_index_type> THREAD_NODE_RANGE;
 
 void init_thread_node_range() {
     StaticArray<size_type> ptr{NUM_THREADS + 1};
 
-    StaticArray<edge_index_type> cum_in_neighbors(NUM_NODES);
-    size_type total_load = 0;
-    #pragma omp parallel for simd reduction(+:total_load)
-    for (size_type i = 0; i < NUM_NODES; i++) {
-        total_load += IN_INC_CSR->indptr[i+1] - IN_INC_CSR->indptr[i];
-        cum_in_neighbors[i] = total_load;
-    }
-
-    auto thread_load = total_load / NUM_THREADS;
-    thread_load += (total_load % NUM_THREADS != 0);
+    auto thread_load = NUM_NODES / NUM_THREADS;
+    thread_load += (NUM_NODES % NUM_THREADS != 0);
 
     ptr[0] = 0;
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
-        auto needle = thread_load * (thread_idx + 1);
-        if (needle > total_load) {
-            needle = total_load;
+        auto end = thread_load * (thread_idx + 1);
+        if (end > NUM_NODES) {
+            end = NUM_NODES;
         }
-
-        auto pos = std::upper_bound(cum_in_neighbors.begin(), cum_in_neighbors.end(), needle);
-        ptr[thread_idx + 1] = pos - cum_in_neighbors.begin();
+        ptr[thread_idx +1] = end;
     }
 
     assert(ptr[0] == 0);
@@ -130,12 +120,16 @@ void init_thread_node_range() {
         assert(ptr[i] <= ptr[i+1]);
     }
 
+    // for (size_type i = 0; i < NUM_THREADS; i++) {
+    //    std::cout << "thread node count: " << i << " " << ptr[i+1] - ptr[i] << "\n";
+    // }
+
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
         const auto start = ptr[thread_idx];
         const auto end = ptr[thread_idx + 1];
-        THREAD_NODE_RANGE = Range<std::size_t>(start, end);
+        THREAD_NODE_RANGE = Range<node_index_type>(start, end);
     }
 }
 
@@ -143,9 +137,9 @@ void init_thread_node_range() {
 // Thread to edge range mapping
 // ----------------------------------------------------------------------------
 
-extern Range<std::size_t> THREAD_EDGE_RANGE;
+extern Range<edge_index_type> THREAD_EDGE_RANGE;
 #pragma omp threadprivate(THREAD_EDGE_RANGE)
-Range<std::size_t> THREAD_EDGE_RANGE;
+Range<edge_index_type> THREAD_EDGE_RANGE;
 
 void init_thread_edge_range() {
     StaticArray<size_type> ptr{NUM_THREADS + 1};
@@ -170,12 +164,16 @@ void init_thread_edge_range() {
         assert(ptr[i] <= ptr[i+1]);
     }
 
+    // for (size_type i = 0; i < NUM_THREADS; i++) {
+    //    std::cout << "thread edge count: " << i << " " << ptr[i+1] - ptr[i] << "\n";
+    // }
+
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
         const auto start = ptr[thread_idx];
         const auto end = ptr[thread_idx + 1];
-        THREAD_EDGE_RANGE = Range<std::size_t>(start, end);
+        THREAD_EDGE_RANGE = Range<edge_index_type>(start, end);
     }
 }
 
@@ -296,7 +294,7 @@ struct {{ co.name }}_output {
     DynamicArrayList<edge_index_type> transmission_edge_idx;
     DynamicArrayList<{{ co.state_type }}> transmission_state;
 
-    {{ co.name }}_output(const StaticArray<std::size_t>& thread_node_count):
+    {{ co.name }}_output(const StaticArray<size_type>& thread_node_count):
             transition_node_idx{thread_node_count},
             transition_state{thread_node_count},
             transmission_edge_idx{thread_node_count},
@@ -613,22 +611,30 @@ void {{ c.name }}_transition_node(
     NODE_TABLE->{{ c.name }}_dwell_time[v] = dwell_time;
 }
 
-void {{ c.name }}_update_transmission_prob(const size_type e) {
-    const auto v = EDGE_TABLE->target_node_index[e];
-    const auto u = EDGE_TABLE->source_node_index[e];
+void {{ c.name }}_update_transmission_prob() {
+    for (auto e : THREAD_EDGE_RANGE) {
+        const auto u = EDGE_TABLE->source_node_index[e];
+        const auto v = EDGE_TABLE->target_node_index[e];
 
-    float_type tprob = {{ c.transmission.enabled }}(e);
-    tprob *= {{ c.transmission.susceptibility }}(v);
-    tprob *= {{ c.transmission.infectivity }}(u);
-    tprob *= {{ c.transmission.transmissibility }}(e);
-    if (tprob < 0.0) {
-        tprob = 0.0;
-    }
-    if (tprob > 1.0) {
-        tprob = 1.0;
+        float_type tprob = {{ c.transmission.susceptibility }}(v);
+        if (tprob > 0) {
+            tprob *= {{ c.transmission.infectivity }}(u);
+        }
+
+        EDGE_TABLE->{{ c.name }}_transmission_prob[e] = tprob;
     }
 
-    EDGE_TABLE->{{ c.name }}_transmission_prob[e] = tprob;
+    for (auto e : THREAD_EDGE_RANGE) {
+        auto tprob = EDGE_TABLE->{{ c.name }}_transmission_prob[e];
+        if (tprob > 0) {
+            tprob *= {{ c.transmission.transmissibility }}(e);
+        }
+        if (tprob > 0) {
+            tprob *= {{ c.transmission.enabled }}(e);
+        }
+
+        EDGE_TABLE->{{ c.name }}_transmission_prob[e] = tprob;
+    }
 }
 
 void {{ c.name }}_transmit(
@@ -716,77 +722,56 @@ void {{ c.name }}_save_state_count() {
     dataspace.close();
 }
 
-double OUTPUT_TIME = 0;
-double I_TRANSITION_TIME = 0;
-double TRANSMISSION_TIME = 0;
-double T_TRANSITION_TIME = 0;
-
 void {{ c.name }}_step() {
-    double start, end;
-
-    // First we do transitions caused by interventions
-    start = omp_get_wtime();
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
+
+        // First we do transitions caused by interventions
+
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
         for (auto v : THREAD_NODE_RANGE) {
             {{ c.name }}_transition_node(v, 0.0, thread_idx);
         }
-    }
-    end = omp_get_wtime();
-    I_TRANSITION_TIME += end - start;
 
-    start = omp_get_wtime();
-    {{ c.name }}_OUTPUT->save_interventions();
-    end = omp_get_wtime();
-    OUTPUT_TIME += end - start;
+        #pragma omp barrier
 
-    // Second to the transmissions
-    start = omp_get_wtime();
-    #pragma omp parallel
-    {
-        const auto thread_idx = omp_get_thread_num();
+        #pragma omp master
+        {{ c.name }}_OUTPUT->save_interventions();
+
+        // Second we do transmissions
+
+        {{ c.name }}_update_transmission_prob();
+
+        #pragma omp barrier
+
         {{ c.name }}_OUTPUT->reset_transmissions(thread_idx);
-
-        for (auto e : THREAD_EDGE_RANGE) {
-            {{ c.name }}_update_transmission_prob(e);
+        for (auto v : THREAD_NODE_RANGE) {
+            {{ c.name }}_transmit(v, thread_idx);
         }
 
         #pragma omp barrier
 
-        for (auto v : THREAD_NODE_RANGE) {
-            {{ c.name }}_transmit(v, thread_idx);
-        }
-    }
-    end = omp_get_wtime();
-    TRANSMISSION_TIME += end - start;
+        #pragma omp master
+        {{ c.name }}_OUTPUT->save_transmissions();
 
-    start = omp_get_wtime();
-    {{ c.name }}_OUTPUT->save_transmissions();
-    end = omp_get_wtime();
-    OUTPUT_TIME += end - start;
+        // Third we do do transitions caused by progression
 
-    // Third we do do transitions caused by progression
-    start = omp_get_wtime();
-    #pragma omp parallel
-    {
-        const auto thread_idx = omp_get_thread_num();
         {{ c.name }}_OUTPUT->reset_transitions(thread_idx);
 
         for (auto v : THREAD_NODE_RANGE) {
             {{ c.name }}_transition_node(v, TICK_ELAPSED, thread_idx);
         }
-    }
-    end = omp_get_wtime();
-    T_TRANSITION_TIME += end - start;
 
-    start = omp_get_wtime();
-    {{ c.name }}_OUTPUT->save_transitions();
-    {{ c.name }}_save_state_count();
-    end = omp_get_wtime();
-    OUTPUT_TIME += end - start;
+        #pragma omp barrier
+
+        #pragma omp master
+        {
+            {{ c.name }}_OUTPUT->save_transitions();
+            {{ c.name }}_save_state_count();
+        }
+    }
 }
 
 {% endfor %}
@@ -989,6 +974,8 @@ void {{ f.name }}() {
 // ----------------------------------------------------------------------------
 
 int main() {
+    const auto main_start = omp_get_wtime();
+
     NUM_THREADS = omp_get_max_threads();
     fmt::print("### num_threads = {}\n", NUM_THREADS);
 
@@ -1027,7 +1014,6 @@ int main() {
         fmt::print("### output_file = {}\n", output_file_name);
     }
 
-    const auto init_start = omp_get_wtime();
 
     H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
 
@@ -1074,7 +1060,7 @@ int main() {
         create_group(output_file, "/{{ co.print_name }}/state_count");
     }
 
-    StaticArray<std::size_t> thread_node_count(NUM_THREADS);
+    StaticArray<size_type> thread_node_count(NUM_THREADS);
     #pragma omp parallel
     {
         const auto thread_idx = omp_get_thread_num();
@@ -1100,42 +1086,30 @@ int main() {
     {{ name }} = &{{ name }}_;
     {% endfor %}
 
-    const auto init_end = omp_get_wtime();
 
     CUR_TICK = -1;
     fmt::print("### cur_tick = {}\n", CUR_TICK);
-    const auto initialize_start = omp_get_wtime();
     do_initialize();
-    const auto initialize_end = omp_get_wtime();
 
     {% for c in source.contagions %}
     {{ c.name }}_step();
     {% endfor %}
 
-    double intervene_time = 0;
     for (CUR_TICK = 0; CUR_TICK < NUM_TICKS; CUR_TICK++) {
         fmt::print("### cur_tick = {}\n", CUR_TICK);
-        const auto intervene_start = omp_get_wtime();
         do_intervene();
-        const auto intervene_end = omp_get_wtime();
-        intervene_time += intervene_end - intervene_start;
 
         {% for c in source.contagions %}
         {{ c.name }}_step();
         {% endfor %}
     }
-    fmt::print("### total_alloc_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
-
-    fmt::print("### init_time_s = {:g}\n", init_end - init_start);
-    fmt::print("### initialize_time_s = {:g}\n", initialize_end - initialize_start);
-    fmt::print("### intervene_time_s = {:g}\n", intervene_time);
-    fmt::print("### i_transition_time_s = {:g}\n", I_TRANSITION_TIME);
-    fmt::print("### t_transition_time_s = {:g}\n", T_TRANSITION_TIME);
-    fmt::print("### transmission_time_s = {:g}\n", TRANSMISSION_TIME);
-    fmt::print("### output_time_s = {:g}\n", OUTPUT_TIME);
-
     output_file.close();
     OUTPUT_FILE = nullptr;
+
+    const auto main_end = omp_get_wtime();
+
+    fmt::print("### mem_use_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
+    fmt::print("### runtime_s = {:g}\n", main_end - main_start);
 
     return 0;
 }
