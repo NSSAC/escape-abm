@@ -11,7 +11,6 @@ import rich
 
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
-from .codegen_cpu import SOURCE_NODE_INDEX_DATASET_NAME
 
 
 def find_contagion(name: str, source: Source) -> Contagion:
@@ -99,10 +98,8 @@ def do_extract_interventions(
 
 
 def do_extract_transmissions(
-    sim_input: h5.File,
     sim_output: h5.File,
     contagion: Contagion,
-    node_key_dataset: str,
 ) -> pd.DataFrame:
     states = [const for const in contagion.state_type.resolve().consts]
     states = {i: n for i, n in enumerate(states)}
@@ -110,28 +107,15 @@ def do_extract_transmissions(
     group = sim_output[contagion.name]["transmissions"]  # type: ignore
     num_ticks = sim_output.attrs["num_ticks"]
 
-    node_key = sim_input[node_key_dataset][...]  # type: ignore
-    source_node_index = sim_input[SOURCE_NODE_INDEX_DATASET_NAME][...]  # type: ignore
-
     parts = []
     for tick in range(-1, num_ticks):  # type: ignore
         tick_gname = f"tick_{tick}"
         tick_group = group[tick_gname]  # type: ignore
 
-        node_index = tick_group["node_index"][...]  # type: ignore
-        node = node_key[node_index]  # type: ignore
-
-        source_edge_index = tick_group["source_edge_index"][...]  # type: ignore
-        source_node_ix = source_node_index[source_edge_index]  # type: ignore
-        source_node = node_key[source_node_ix]  # type: ignore
+        edge_index = tick_group["edge_index"][...]  # type: ignore
 
         state = tick_group["state"][...]  # type: ignore
-        part = {
-            "node": node,
-            "source_node": source_node,
-            "edge_index": source_edge_index,
-            "state": state,
-        }
+        part = {"edge_index": edge_index, "state": state}
         part = pd.DataFrame(part)
         part["tick"] = tick
         part["state"] = part.state.map(states)
@@ -326,13 +310,11 @@ def extract_transitions(
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_input_option
 @simulation_output_option
 @transmissions_file_option
 def extract_transmissions(
     simulation_file: Path,
     contagion_name: str,
-    sim_input_file: Path,
     sim_output_file: Path,
     transmissions_file: Path,
 ):
@@ -342,14 +324,9 @@ def extract_transmissions(
         pt = mk_pt(str(simulation_file), simulation_bytes)
         ast1 = mk_ast1(simulation_file, pt)
 
-        node_key_dataset = f"/node/{ast1.node_table.key.name}"
-
         contagion = find_contagion(contagion_name, ast1)
-        with h5.File(sim_input_file, "r") as sim_input:
-            with h5.File(sim_output_file, "r") as sim_output:
-                df = do_extract_transmissions(
-                    sim_input, sim_output, contagion, node_key_dataset
-                )
+        with h5.File(sim_output_file, "r") as sim_output:
+            df = do_extract_transmissions(sim_output, contagion)
 
         save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
@@ -404,9 +381,7 @@ def extract_all(
                 save_df(df, transitions_file)
 
                 rich.print("[yellow]Extracting transmissions.[/yellow]")
-                df = do_extract_transmissions(
-                    sim_input, sim_output, contagion, node_key_dataset
-                )
+                df = do_extract_transmissions(sim_output, contagion)
                 save_df(df, transmissions_file)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
