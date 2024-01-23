@@ -33,7 +33,7 @@ SOURCE_NODE_INDEX_DATASET_NAME = "/edge/_source_node_index"
 DEFERRED_TYPES = {
     "int_type": "int64_t",
     "uint_type": "uint64_t",
-    "float_type": "double",
+    "float_type": "float",
     "bool_type": "uint8_t",
     "size_type": "uint64_t",
     "node_index_type": "uint32_t",
