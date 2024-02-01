@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, TypeVar, Generic, Literal, cast, assert_never
+from typing import (
+    Any,
+    TypeVar,
+    Generic,
+    Literal,
+    Callable as TypingCallable,
+    cast,
+    assert_never,
+)
 
 import attrs
 import click
@@ -104,7 +112,7 @@ class Scope:
         self.names[k] = v
 
 
-def make_literal(n: PTNode, types: type) -> int | float | bool:
+def make_literal(n: PTNode, types: Any) -> int | float | bool:
     match n.type:
         case "integer":
             v = int(n.text)
@@ -122,32 +130,54 @@ def make_literal(n: PTNode, types: type) -> int | float | bool:
 
 
 @attrs.define
-class BuiltinType:
-    name: str
-
-
-@attrs.define
-class BuiltinTypeRef:
-    type: str
+class Ref(Generic[T]):
+    ref: str
+    expected_type: Any
+    type_desc: str
+    resolved_obj: Any
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> BuiltinTypeRef:
-        return cls(node.text, scope, node.pos)
+    def make(
+        cls, node: PTNode, expected_type: Any, type_desc: str, scope: Scope
+    ) -> Ref:
+        return cls(node.text, expected_type, type_desc, None, scope, node.pos)
 
-    def resolve(self) -> BuiltinType:
+    def resolve(self) -> T:
+        if self.resolved_obj is not None:
+            return self.resolved_obj
+
         assert self.scope is not None
 
-        v = self.scope.resolve(self.type, self.pos)
-        if isinstance(v, BuiltinType):
-            return v
+        resolved_obj = self.scope.resolve(self.ref, self.pos)
+        try:
+            check_type(resolved_obj, self.expected_type)
+        except TypeCheckError:
+            raise Error(
+                "Invalid type",
+                f"Expected {self.type_desc}",
+                self.pos,
+            )
+        self.resolved_obj = resolved_obj
+        return self.resolved_obj
 
-        raise Error(
-            "Invalid type",
-            "Expected a built in type.",
-            self.pos,
-        )
+
+def ref_maker(
+    expected_type: Any, type_desc: str
+) -> TypingCallable[[PTNode, Scope], Ref]:
+    def make(node: PTNode, scope: Scope) -> Ref:
+        return Ref.make(node, expected_type, type_desc, scope)
+
+    return make
+
+
+@attrs.define
+class BuiltinType:
+    name: str
+
+
+make_builtin_type_ref = ref_maker(BuiltinType, "builtin type")
 
 
 @attrs.define
@@ -170,28 +200,7 @@ class EnumConstant:
     type: EnumType
 
 
-@attrs.define
-class EnumConstantRef:
-    const: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> EnumConstantRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> EnumConstant:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.const, self.pos)
-        if isinstance(v, EnumConstant):
-            return v
-
-        raise Error(
-            "Invalid value",
-            "Expected an enumeration constant.",
-            self.pos,
-        )
+make_enum_constant_ref = ref_maker(EnumConstant, "enumeration constant")
 
 
 @attrs.define
@@ -214,65 +223,21 @@ class EnumType:
         return obj
 
 
-@attrs.define
-class EnumTypeRef:
-    type: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> EnumTypeRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> EnumType:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.type, self.pos)
-        if isinstance(v, EnumType):
-            return v
-
-        raise Error(
-            "Invalid type",
-            "Expected an enumerated type.",
-            self.pos,
-        )
-
-
-@attrs.define
-class TypeRef:
-    type: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> TypeRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> BuiltinType | EnumType:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.type, self.pos)
-        if isinstance(v, BuiltinType | EnumType):
-            return v
-
-        raise Error(
-            "Invalid type",
-            "Expected a built in or enumerated type.",
-            self.pos,
-        )
+make_enum_type_ref = ref_maker(EnumType, "enumerated type")
+make_type_ref = ref_maker(BuiltinType | EnumType, "builtin or enumerated type")
 
 
 @attrs.define
 class Config:
     name: str
-    type: BuiltinTypeRef
+    type: Ref[BuiltinType]
     default: int | float | bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Config:
         name = node.field("name").text
-        type = BuiltinTypeRef.make(node.field("type"), scope)
+        type = make_builtin_type_ref(node.field("type"), scope)
         default = make_literal(node.field("default"), int | float | bool)
         obj = cls(name, type, default, node.pos)
         scope.define(name, obj, node.pos)
@@ -288,14 +253,14 @@ class BuiltinConfig:
 @attrs.define
 class Global:
     name: str
-    type: BuiltinTypeRef
+    type: Ref[BuiltinType]
     default: int | float | bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Global:
         name = node.field("name").text
-        type = BuiltinTypeRef.make(node.field("type"), scope)
+        type = make_builtin_type_ref(node.field("type"), scope)
         default = make_literal(node.field("default"), int | float | bool)
         obj = cls(name, type, default, node.pos)
         scope.define(name, obj, node.pos)
@@ -311,7 +276,7 @@ class BuiltinGlobal:
 @attrs.define
 class NodeField:
     name: str
-    type: TypeRef
+    type: Ref[BuiltinType | EnumType]
     is_node_key: bool
     is_static: bool
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -319,7 +284,7 @@ class NodeField:
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> NodeField:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
+        type = make_type_ref(node.field("type"), scope)
 
         annotations = [c.text for c in node.fields("annotation")]
         is_node_key = "node key" in annotations
@@ -370,7 +335,7 @@ class NodeTable:
 @attrs.define
 class EdgeField:
     name: str
-    type: TypeRef
+    type: Ref[BuiltinType | EnumType]
     is_target_node_key: bool
     is_source_node_key: bool
     is_static: bool
@@ -379,7 +344,7 @@ class EdgeField:
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> EdgeField:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
+        type = make_type_ref(node.field("type"), scope)
 
         annotations = [c.text for c in node.fields("annotation")]
         is_source_node_key = "source node key" in annotations
@@ -570,63 +535,42 @@ def parse_distribution(node: PTNode, scope: Scope) -> Distribution:
             raise UnexpectedValue(unexpected, node.pos)
 
 
-@attrs.define
-class DistRef:
-    dist: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> DistRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> Distribution:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.dist, self.pos)
-        if isinstance(v, Distribution):
-            return v
-
-        raise Error(
-            "Invalid value",
-            "Expected a reference to a distribution.",
-            self.pos,
-        )
+make_dist_ref = ref_maker(Distribution, "reference to a distribution")
 
 
 @attrs.define
 class Transition:
-    entry: EnumConstantRef
-    exit: EnumConstantRef
+    entry: Ref[EnumConstant]
+    exit: Ref[EnumConstant]
     p: int | float
-    dwell: DistRef
+    dwell: Ref[Distribution]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Transition:
-        entry = EnumConstantRef.make(node.field("entry"), scope)
-        exit = EnumConstantRef.make(node.field("exit"), scope)
+        entry = make_enum_constant_ref(node.field("entry"), scope)
+        exit = make_enum_constant_ref(node.field("exit"), scope)
         p_node = node.maybe_field("p")
         if p_node is None:
             p = 1.0
         else:
             p = make_literal(p_node, int | float)
-        dwell = DistRef.make(node.field("dwell"), scope)
+        dwell = make_dist_ref(node.field("dwell"), scope)
         return cls(entry, exit, p, dwell, node.pos)
 
 
 @attrs.define
 class Transmission:
-    contact: EnumConstantRef
-    entry: EnumConstantRef
-    exit: EnumConstantRef
+    contact: Ref[EnumConstant]
+    entry: Ref[EnumConstant]
+    exit: Ref[EnumConstant]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Transmission:
-        contact = EnumConstantRef.make(node.field("contact"), scope)
-        entry = EnumConstantRef.make(node.field("entry"), scope)
-        exit = EnumConstantRef.make(node.field("exit"), scope)
+        contact = make_enum_constant_ref(node.field("contact"), scope)
+        entry = make_enum_constant_ref(node.field("entry"), scope)
+        exit = make_enum_constant_ref(node.field("exit"), scope)
         return cls(contact, entry, exit, node.pos)
 
 
@@ -638,7 +582,7 @@ class StateAccessor:
 @attrs.define
 class Contagion:
     name: str
-    state_type: EnumTypeRef
+    state_type: Ref[EnumType]
     transitions: list[Transition]
     transmissions: list[Transmission]
     susceptibility: Function
@@ -654,7 +598,7 @@ class Contagion:
         name = node.field("name").text
         scope = Scope(name=name, parent=parent_scope)
 
-        state_type: UniqueObject[EnumTypeRef] = UniqueObject()
+        state_type: UniqueObject[Ref[EnumType]] = UniqueObject()
         transitions: list[Transition] = []
         transmissions: list[Transmission] = []
         susceptibility: UniqueObject[Function] = UniqueObject()
@@ -670,7 +614,7 @@ class Contagion:
                         "Contagion state type is multiply defined.",
                         child.pos,
                     )
-                    state_type.set(EnumTypeRef.make(child.field("type"), scope))
+                    state_type.set(make_enum_type_ref(child.field("type"), scope))
                 case "transitions":
                     for grand_child in child.fields("body"):
                         transitions.append(Transition.make(grand_child, scope))
@@ -786,28 +730,7 @@ class EdgeSet:
         return obj
 
 
-@attrs.define
-class SetRef:
-    name: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> SetRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> NodeSet | EdgeSet:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.name, self.pos)
-        if isinstance(v, NodeSet | EdgeSet):
-            return v
-
-        raise Error(
-            "Invalid value",
-            "Expected a reference to a nodeset or edgeset.",
-            self.pos,
-        )
+make_set_ref = ref_maker(NodeSet | EdgeSet, "nodeset or edgeset")
 
 
 @attrs.define
@@ -969,7 +892,7 @@ class FunctionCall:
 @attrs.define
 class Variable:
     name: str
-    type: TypeRef
+    type: Ref[BuiltinType | EnumType]
     init: Expression
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -977,17 +900,17 @@ class Variable:
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Variable:
         var = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
+        type = make_type_ref(node.field("type"), scope)
         init = parse_expression(node.field("init"), scope)
         obj = cls(var, type, init, None, node.pos)
         scope.define(var, obj, node.pos)
         return obj
 
     def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
-        match self.type:
-            case TypeRef("node"):
+        match self.type.ref:
+            case "node":
                 self.scope = node_table.scope
-            case TypeRef("edge"):
+            case "edge":
                 self.scope = edge_table.scope
 
 
@@ -1124,15 +1047,15 @@ class PrintStatement:
 @attrs.define
 class SelectUsing:
     name: str
-    set: SetRef
-    function: FunctionRef
+    set: Ref[NodeSet | EdgeSet]
+    function: Ref[Function]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> SelectUsing:
-        set = SetRef.make(node.field("set"), scope)
-        function = FunctionRef.make(node.field("function"), scope)
-        name = f"select_{set.name}_using__{function.name}_{node.pos.line}"
+        set = make_set_ref(node.field("set"), scope)
+        function = make_function_ref(node.field("function"), scope)
+        name = f"select_{set.ref}_using__{function.ref}_{node.pos.line}"
         obj = cls(name, set, function, node.pos)
         scope.define(name, obj, node.pos)
         return obj
@@ -1165,17 +1088,17 @@ class SelectUsing:
 @attrs.define
 class SelectApprox:
     name: str
-    set: SetRef
+    set: Ref[NodeSet | EdgeSet]
     amount: int | float
-    parent: SetRef
+    parent: Ref[NodeSet | EdgeSet]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> SelectApprox:
-        set = SetRef.make(node.field("set"), scope)
+        set = make_set_ref(node.field("set"), scope)
         amount = make_literal(node.field("amount"), int | float)
-        parent = SetRef.make(node.field("parent"), scope)
-        name = f"select_{set.name}_from_{parent.name}_approx_{node.pos.line}"
+        parent = make_set_ref(node.field("parent"), scope)
+        name = f"select_{set.ref}_from_{parent.ref}_approx_{node.pos.line}"
         obj = cls(name, set, amount, parent, node.pos)
         scope.define(name, obj, node.pos)
         return obj
@@ -1205,17 +1128,17 @@ class SelectApprox:
 @attrs.define
 class SelectRelative:
     name: str
-    set: SetRef
+    set: Ref[NodeSet | EdgeSet]
     amount: int | float
-    parent: SetRef
+    parent: Ref[NodeSet | EdgeSet]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> SelectRelative:
-        set = SetRef.make(node.field("set"), scope)
+        set = make_set_ref(node.field("set"), scope)
         amount = make_literal(node.field("amount"), int | float)
-        parent = SetRef.make(node.field("parent"), scope)
-        name = f"select_{set.name}_from_{parent.name}_relative_{node.pos.line}"
+        parent = make_set_ref(node.field("parent"), scope)
+        name = f"select_{set.ref}_from_{parent.ref}_relative_{node.pos.line}"
         obj = cls(name, set, amount, parent, node.pos)
         scope.define(name, obj, node.pos)
         return obj
@@ -1246,17 +1169,17 @@ class SelectRelative:
 class ForeachStatement:
     name: str
     type: Literal["node", "edge"]
-    set: SetRef
-    function: FunctionRef
+    set: Ref[NodeSet | EdgeSet]
+    function: Ref[Function]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> ForeachStatement:
         type = node.field("type").text
         type = cast(Literal["node", "edge"], type)
-        set = SetRef.make(node.field("set"), scope)
-        function = FunctionRef.make(node.field("function"), scope)
-        name = f"foreach_{type}_in_{set.name}_run_{function.name}_{node.pos.line}"
+        set = make_set_ref(node.field("set"), scope)
+        function = make_function_ref(node.field("function"), scope)
+        name = f"foreach_{type}_in_{set.ref}_run_{function.ref}_{node.pos.line}"
         obj = cls(name, type, set, function, node.pos)
         scope.define(name, obj, node.pos)
         return obj
@@ -1306,23 +1229,23 @@ class ForeachStatement:
 @attrs.define
 class Param:
     name: str
-    type: TypeRef
+    type: Ref[BuiltinType | EnumType]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Param:
         name = node.field("name").text
-        type = TypeRef.make(node.field("type"), scope)
+        type = make_type_ref(node.field("type"), scope)
         obj = cls(name, type, None, node.pos)
         scope.define(name, obj, node.pos)
         return obj
 
     def link_tables(self, node_table: NodeTable, edge_table: EdgeTable):
-        match self.type:
-            case TypeRef("node"):
+        match self.type.ref:
+            case "node":
                 self.scope = node_table.scope
-            case TypeRef("edge"):
+            case "edge":
                 self.scope = edge_table.scope
 
 
@@ -1330,7 +1253,7 @@ class Param:
 class Function:
     name: str
     params: list[Param]
-    return_: TypeRef | None
+    return_: Ref[BuiltinType | EnumType] | None
     body: list[Statement]
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -1348,7 +1271,7 @@ class Function:
         if return_node is None:
             return_ = None
         else:
-            return_ = TypeRef.make(return_node, scope)
+            return_ = make_type_ref(return_node, scope)
 
         body: list[Statement] = []
         for child in node.field("body").named_children:
@@ -1384,68 +1307,27 @@ class Function:
             c.type_check()
 
 
-@attrs.define
-class FunctionRef:
-    name: str
-    scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
-    pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> FunctionRef:
-        return cls(node.text, scope, node.pos)
-
-    def resolve(self) -> Function:
-        assert self.scope is not None
-
-        v = self.scope.resolve(self.name, self.pos)
-        if isinstance(v, Function):
-            return v
-
-        raise Error(
-            "Invalid value",
-            "Expected a reference to a function",
-            self.pos,
-        )
+make_function_ref = ref_maker(Function, "function")
 
 
 def is_node_func(f: Function) -> bool:
-    match f.params:
-        case [Param(_, TypeRef("node"))]:
-            return True
-        case _:
-            return False
+    return len(f.params) == 1 and f.params[0].type.ref == "node"
 
 
 def is_edge_func(f: Function) -> bool:
-    match f.params:
-        case [Param(_, TypeRef("edge"))]:
-            return True
-        case _:
-            return False
+    return len(f.params) == 1 and f.params[0].type.ref == "edge"
 
 
 def is_int_func(f: Function) -> bool:
-    match f.return_:
-        case TypeRef("int"):
-            return True
-        case _:
-            return False
+    return f.return_ is not None and f.return_.ref == "int"
 
 
 def is_float_func(f: Function) -> bool:
-    match f.return_:
-        case TypeRef("float"):
-            return True
-        case _:
-            return False
+    return f.return_ is not None and f.return_.ref == "float"
 
 
 def is_bool_func(f: Function) -> bool:
-    match f.return_:
-        case TypeRef("bool"):
-            return True
-        case _:
-            return False
+    return f.return_ is not None and f.return_.ref == "bool"
 
 
 def is_void_func(f: Function) -> bool:
