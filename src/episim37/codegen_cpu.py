@@ -551,6 +551,7 @@ class Field:
     type: str
     h5_type: str
     is_static: bool
+    is_used: bool
 
 
 @attrs.define
@@ -569,8 +570,12 @@ class NodeTable:
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
+            if field == tab.key:
+                is_used = False
+            else:
+                is_used = True
             fields.append(
-                Field(name, print_name, dataset_name, type, h5_type, is_static)
+                Field(name, print_name, dataset_name, type, h5_type, is_static, is_used)
             )
 
         contagions = []
@@ -599,8 +604,12 @@ class EdgeTable:
             type = typename(field.type.resolve())
             h5_type = h5_typename(field.type.resolve())
             is_static = field.is_static
+            if field == tab.target_node_key or field == tab.source_node_key:
+                is_used = False
+            else:
+                is_used = True
             fields.append(
-                Field(name, print_name, dataset_name, type, h5_type, is_static)
+                Field(name, print_name, dataset_name, type, h5_type, is_static, is_used)
             )
 
         contagions = []

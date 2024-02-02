@@ -180,7 +180,7 @@ void init_thread_edge_range() {
 // ----------------------------------------------------------------------------
 
 struct node_table {
-    {% for field in source.node_table.fields %}
+    {% for field in source.node_table.fields if field.is_used %}
     StaticArray<{{ field.type }}> {{ field.name }};
     {% endfor %}
     {% for contagion_name, state_type in source.node_table.contagions %}
@@ -192,7 +192,7 @@ struct node_table {
 
     node_table(const H5::H5File &file)
         : {% set comma = joiner(",") %}
-        {% for field in source.node_table.fields %}
+        {% for field in source.node_table.fields if field.is_used %}
         {{ comma() }} {{ field.name }}{NUM_NODES}
         {% endfor %}
         {% for contagion_name, _ in source.node_table.contagions %}
@@ -205,7 +205,7 @@ struct node_table {
         // initialize
         #pragma omp parallel
         {
-            {% for field in source.node_table.fields %}
+            {% for field in source.node_table.fields if field.is_used %}
             {{ field.name }}.range_init(TN_START, TN_END);
             {% endfor %}
             {% for contagion_name, _ in source.node_table.contagions %}
@@ -217,10 +217,8 @@ struct node_table {
         }
 
         // load the static fields
-        {% for field in source.node_table.fields %}
-        {% if field.is_static %}
+        {% for field in source.node_table.fields if field.is_used and field.is_static %}
         {{ field.name }}.load(file, "{{ field.dataset_name }}", {{ field.h5_type}});
-        {% endif %}
         {% endfor %}
     }
 } ;
@@ -232,7 +230,7 @@ node_table *NODE_TABLE = nullptr;
 // ----------------------------------------------------------------------------
 
 struct edge_table {
-    {% for field in source.edge_table.fields %}
+    {% for field in source.edge_table.fields if field.is_used %}
     StaticArray<{{ field.type }}> {{ field.name }};
     {% endfor %}
     {% for contagion_name in source.edge_table.contagions %}
@@ -243,7 +241,7 @@ struct edge_table {
 
     edge_table(const H5::H5File &file)
         : {% set comma = joiner(", ") %}
-        {% for field in source.edge_table.fields %}
+        {% for field in source.edge_table.fields if field.is_used %}
         {{ comma() }}{{ field.name }}{NUM_EDGES}
         {% endfor %}
         {% for contagion_name in source.edge_table.contagions %}
@@ -255,7 +253,7 @@ struct edge_table {
         // initialize
         #pragma omp parallel
         {
-            {% for field in source.edge_table.fields %}
+            {% for field in source.edge_table.fields if field.is_used %}
             {{ field.name }}.range_init(TE_START, TE_END);
             {% endfor %}
             {% for contagion_name in source.edge_table.contagions %}
@@ -266,10 +264,8 @@ struct edge_table {
         }
 
         // load static fields
-        {% for field in source.edge_table.fields %}
-        {% if field.is_static %}
+        {% for field in source.edge_table.fields if field.is_used and field.is_static %}
         {{ field.name }}.load(file, "{{ field.dataset_name }}", {{ field.h5_type}});
-        {% endif %}
         {% endfor %}
         target_node_index.load(file, "{{ TARGET_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE);
         source_node_index.load(file, "{{ SOURCE_NODE_INDEX_DATASET_NAME }}", NODE_INDEX_TYPE_H5_TYPE);

@@ -291,7 +291,8 @@ class NodeField:
         is_static = "static" in annotations or is_node_key
 
         obj = cls(name, type, is_node_key, is_static, node.pos)
-        scope.define(name, obj, node.pos)
+        if not is_node_key:
+            scope.define(name, obj, node.pos)
         return obj
 
 
@@ -354,7 +355,8 @@ class EdgeField:
         obj = cls(
             name, type, is_target_node_key, is_source_node_key, is_static, node.pos
         )
-        scope.define(name, obj, node.pos)
+        if not (is_target_node_key or is_source_node_key):
+            scope.define(name, obj, node.pos)
         return obj
 
 
