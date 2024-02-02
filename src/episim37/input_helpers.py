@@ -1,8 +1,7 @@
-"""Prepare input data."""
+"""Helper utilities for creating/reading input.h5 file."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import attrs
@@ -22,33 +21,31 @@ from .codegen_cpu import (
     INC_CSR_INDPTR_DATASET_NAME,
     EnumType as Enum,
     Source as SourceCPU,
-    DEFERRED_TYPES as DEFERRED_TYPES_CPU,
+    DEFERRED_TYPES,
 )
 
 # fmt: off
 CTYPE_TO_DTYPE = {
-    "uint8_t": np.uint8,
+    "uint8_t":  np.uint8,
     "uint16_t": np.uint16,
     "uint32_t": np.uint32,
     "uint64_t": np.uint64,
 
-    "int8_t": np.int8,
+    "int8_t":  np.int8,
     "int16_t": np.int16,
     "int32_t": np.int32,
     "int64_t": np.int64,
 
-    "float": np.float32,
+    "float":  np.float32,
     "double": np.float64
 }
 # fmt: on
 
 
-def make_in_dtypes(
-    deferred_types: dict[str, str], enums: list[Enum]
-) -> dict[str, type]:
+def make_in_dtypes(enums: list[Enum]) -> dict[str, type]:
     type_map = dict(CTYPE_TO_DTYPE)
 
-    for deferred_type, base_type in deferred_types.items():
+    for deferred_type, base_type in DEFERRED_TYPES.items():
         type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
 
     for enum in enums:
@@ -57,12 +54,10 @@ def make_in_dtypes(
     return type_map
 
 
-def make_out_dtypes(
-    deferred_types: dict[str, str], enums: list[Enum]
-) -> dict[str, type]:
+def make_out_dtypes(enums: list[Enum]) -> dict[str, type]:
     type_map = dict(CTYPE_TO_DTYPE)
 
-    for deferred_type, base_type in deferred_types.items():
+    for deferred_type, base_type in DEFERRED_TYPES.items():
         type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
 
     for enum in enums:
@@ -86,8 +81,8 @@ class NodeTableMeta:
 
     @classmethod
     def from_source_cpu(cls, source: SourceCPU) -> NodeTableMeta:
-        in_dtypes_all = make_in_dtypes(DEFERRED_TYPES_CPU, source.enums)
-        out_dtypes_all = make_out_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        in_dtypes_all = make_in_dtypes(source.enums)
+        out_dtypes_all = make_out_dtypes(source.enums)
         enum_encoders_all = {
             enum.name: make_enum_encoder(enum) for enum in source.enums
         }
@@ -124,8 +119,8 @@ class EdgeTableMeta:
 
     @classmethod
     def from_source_cpu(cls, source: SourceCPU) -> EdgeTableMeta:
-        in_dtypes_all = make_in_dtypes(DEFERRED_TYPES_CPU, source.enums)
-        out_dtypes_all = make_out_dtypes(DEFERRED_TYPES_CPU, source.enums)
+        in_dtypes_all = make_in_dtypes(source.enums)
+        out_dtypes_all = make_out_dtypes(source.enums)
         enum_encoders_all = {
             enum.name: make_enum_encoder(enum) for enum in source.enums
         }
@@ -172,7 +167,7 @@ def read_table(file: Path, columns: list, dtype: dict) -> pd.DataFrame:
         return pq.read_table(file, columns=columns, schema=schema).to_pandas()
     else:
         rich.print("[red]Unknown filetype for node file[/red]")
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 def check_null(table: pd.DataFrame, name: str):
@@ -232,7 +227,7 @@ def make_input_file_cpu(
     etm: EdgeTableMeta,
     in_inc_csr_indptr: np.ndarray,
 ):
-    size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES_CPU["size_type"]]
+    size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES["size_type"]]
 
     with h5.File(data_file, "w") as fobj:
         for col, dtype in ntm.out_dtypes.items():
@@ -281,10 +276,10 @@ def make_input_file_cpu(
     show_default=True,
     help="Path to data file for simulator.",
 )
-def prepare_cpu(
+def prepare_input(
     simulation_file: Path, node_file: Path, edge_file: Path, data_file: Path
 ):
-    """Prepare input for simulation on CPUs."""
+    """Prepare input for simulation."""
     rich.print("[cyan]Parsing simulator code.[/cyan]")
     source = make_source_cpu(simulation_file)
     ntm = NodeTableMeta.from_source_cpu(source)
@@ -310,7 +305,7 @@ def prepare_cpu(
     edge_table = make_edge_table(edge_file, etm, key_idx)
 
     # Step 5: Sort the edge table dataset
-    rich.print("[cyan]Sorting edges table.[/cyan]")
+    rich.print("[cyan]Sorting edge table.[/cyan]")
     edge_table.sort_values(
         ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
     )

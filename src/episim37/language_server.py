@@ -78,7 +78,7 @@ async def make_diagnostics(
 
 @click.group()
 def language_server():
-    """Esl37 language server."""
+    """ESL37 language server."""
 
 
 @language_server.command()

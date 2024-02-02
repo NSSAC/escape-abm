@@ -1057,9 +1057,6 @@ def do_prepare(output: Path | None, input: Path) -> Path:
         template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
         fobj.write(template.render(source=source, input=str(input.absolute())))
 
-    with open(output / "sim_utils.h", "wt") as fobj:
-        fobj.write(STATIC_DIR.joinpath("sim_utils.h").read_text())
-
     return output
 
 
@@ -1077,6 +1074,9 @@ def do_compile(output: Path | None, input: Path) -> Path:
     with open(output / "simulator.cpp", "wt") as fobj:
         template = ENVIRONMENT.get_template("simulator_cpp_cpu.jinja2")
         fobj.write(template.render(source=source))
+
+    with open(output / "sim_utils.h", "wt") as fobj:
+        fobj.write(STATIC_DIR.joinpath("sim_utils.h").read_text())
 
     return output
 
@@ -1099,9 +1099,11 @@ def print_cpu_ir(input: Path):
         e.rich_print()
         sys.exit(1)
 
+
 @click.group()
 def codegen_cpu():
     """Generate code targeted for CPUs."""
+
 
 @codegen_cpu.command()
 @click.option(
@@ -1169,20 +1171,20 @@ def run(input: Path):
             output = Path(temp_output_dir).absolute()
             rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
 
-            rich.print("[cyan]Creating simulator[/cyan]")
+            rich.print("[cyan]Creating CmakeList.txt[/cyan]")
             output = do_prepare(output, input)
 
             rich.print("[cyan]Running cmake[/cyan]")
-            cmd = "cmake -S . -B build"
+            cmd = f"cmake -S . -B '{output!s}/build'"
             verbose_run(cmd, cwd=output)
 
             rich.print("[cyan]Running make[/cyan]")
-            cmd = "make -C build"
-            verbose_run(cmd, cwd=output)
+            cmd = f"make -C '{output!s}/build'"
+            verbose_run(cmd)
 
             rich.print("[cyan]Running simulator[/cyan]")
-            cmd = "./build/simulator"
-            verbose_run(cmd, cwd=output)
+            cmd = f"'{output!s}/build/simulator'"
+            verbose_run(cmd)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
         sys.exit(1)

@@ -20,18 +20,22 @@ FetchContent_Declare(Fmt
 FetchContent_MakeAvailable(Fmt)
 
 add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/simulator.cpp
-    COMMAND episim37 codegen-cpu compile {{ input }} -o ${CMAKE_CURRENT_BINARY_DIR}
+    OUTPUT
+        ${CMAKE_CURRENT_BINARY_DIR}/simulator.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/sim_utils.h
+    COMMAND
+        episim37 codegen-cpu compile {{ input }} -o ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS {{ input }}
     VERBATIM
 )
 
-# SET(DEV_COMPILE_FLAGS -g -fno-omit-frame-pointer -O3 -march=native)
+SET(SIMULATOR_COMPILE_FLAGS -O3 -march=native)
+# SET(SIMULATOR_COMPILE_FLAGS -g -fno-omit-frame-pointer -O3 -march=native)
 
 add_executable(simulator
     ${CMAKE_CURRENT_BINARY_DIR}/simulator.cpp)
 target_include_directories(simulator
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(simulator
     hdf5::hdf5
     hdf5::hdf5_cpp
@@ -39,4 +43,4 @@ target_link_libraries(simulator
     fmt::fmt
 )
 target_compile_features(simulator PRIVATE cxx_std_17)
-# target_compile_options(simulator PRIVATE ${DEV_COMPILE_FLAGS})
+target_compile_options(simulator PRIVATE ${SIMULATOR_COMPILE_FLAGS})
