@@ -1081,17 +1081,12 @@ def do_compile(output: Path | None, input: Path) -> Path:
     return output
 
 
-@click.group()
-def codegen_cpu():
-    """Generate code targeted for CPUs."""
-
-
-@codegen_cpu.command()
+@click.command()
 @click.argument(
     "input",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
 )
-def print_ir(input: Path):
+def print_cpu_ir(input: Path):
     """Print intermediate representation."""
     input_bytes = input.read_bytes()
 
@@ -1104,6 +1099,9 @@ def print_ir(input: Path):
         e.rich_print()
         sys.exit(1)
 
+@click.group()
+def codegen_cpu():
+    """Generate code targeted for CPUs."""
 
 @codegen_cpu.command()
 @click.option(
@@ -1175,15 +1173,15 @@ def run(input: Path):
             output = do_prepare(output, input)
 
             rich.print("[cyan]Running cmake[/cyan]")
-            cmd = "cmake ."
+            cmd = "cmake -S . -B build"
             verbose_run(cmd, cwd=output)
 
             rich.print("[cyan]Running make[/cyan]")
-            cmd = "make"
+            cmd = "make -C build"
             verbose_run(cmd, cwd=output)
 
             rich.print("[cyan]Running simulator[/cyan]")
-            cmd = "./simulator"
+            cmd = "./build/simulator"
             verbose_run(cmd, cwd=output)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
