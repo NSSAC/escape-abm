@@ -318,10 +318,6 @@ def call_str(x: ast1.Callable) -> str:
             return mangle(x.name)
         case ast1.Function():
             return mangle(x.name)
-        case [ast1.Contagion() as c, ast1.BuiltinFunction() as f]:
-            return mangle(c.name, f.name)
-        case [ast1.Contagion() as c, ast1.Function() as f]:
-            return mangle(c.name, f.name)
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -830,10 +826,10 @@ class Transmission:
             for entry, xs in transms.items()
         ]
 
-        susceptibility = call_str((c, c.susceptibility))
-        infectivity = call_str((c, c.infectivity))
-        transmissibility = call_str((c, c.transmissibility))
-        enabled = call_str((c, c.enabled))
+        susceptibility = call_str(c.susceptibility.resolve())
+        infectivity = call_str(c.infectivity.resolve())
+        transmissibility = call_str(c.transmissibility.resolve())
+        enabled = call_str(c.enabled.resolve())
 
         return cls(
             transms=transms,
@@ -981,10 +977,6 @@ class Source:
                     assert_never(unexpected)
 
         functions: list[Function] = []
-        for c in source.contagions:
-            for fn in [c.susceptibility, c.infectivity, c.transmissibility, c.enabled]:
-                name = call_str((c, fn))
-                functions.append(Function.make(name, fn))
         for fn in source.functions:
             name = call_str(fn)
             functions.append(Function.make(name, fn))

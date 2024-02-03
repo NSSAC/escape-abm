@@ -587,10 +587,10 @@ class Contagion:
     state_type: Ref[EnumType]
     transitions: list[Transition]
     transmissions: list[Transmission]
-    susceptibility: Function
-    infectivity: Function
-    transmissibility: Function
-    enabled: Function
+    susceptibility: Ref[Function]
+    infectivity: Ref[Function]
+    transmissibility: Ref[Function]
+    enabled: Ref[Function]
     state: StateAccessor
     scope: Scope | None = attrs.field(default=None, repr=False, eq=False)
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
@@ -603,10 +603,10 @@ class Contagion:
         state_type: UniqueObject[Ref[EnumType]] = UniqueObject()
         transitions: list[Transition] = []
         transmissions: list[Transmission] = []
-        susceptibility: UniqueObject[Function] = UniqueObject()
-        infectivity: UniqueObject[Function] = UniqueObject()
-        transmissibility: UniqueObject[Function] = UniqueObject()
-        enabled: UniqueObject[Function] = UniqueObject()
+        susceptibility: UniqueObject[Ref[Function]] = UniqueObject()
+        infectivity: UniqueObject[Ref[Function]] = UniqueObject()
+        transmissibility: UniqueObject[Ref[Function]] = UniqueObject()
+        enabled: UniqueObject[Ref[Function]] = UniqueObject()
 
         for child in node.fields("body"):
             match child.type:
@@ -623,36 +623,36 @@ class Contagion:
                 case "transmissions":
                     for grand_child in child.fields("body"):
                         transmissions.append(Transmission.make(grand_child, scope))
-                case "function":
-                    match child.field("name").text:
+                case "contagion_function":
+                    match child.field("type").text:
                         case "susceptibility":
                             susceptibility.dup_error(
                                 "Multiple susceptibility",
                                 "Susceptibility function is multiply defined.",
                                 child.pos,
                             )
-                            susceptibility.set(make_susceptibility(child, scope))
+                            susceptibility.set(make_function_ref(child.field("function"), scope))
                         case "infectivity":
                             infectivity.dup_error(
                                 "Multiple infectivity",
                                 "Infectivity function is multiply defined.",
                                 child.pos,
                             )
-                            infectivity.set(make_infectivity(child, scope))
+                            infectivity.set(make_function_ref(child.field("function"), scope))
                         case "transmissibility":
                             transmissibility.dup_error(
                                 "Multiple transmissibility",
                                 "Transmissibility function is multiply defined.",
                                 child.pos,
                             )
-                            transmissibility.set(make_transmissibility(child, scope))
+                            transmissibility.set(make_function_ref(child.field("function"), scope))
                         case "enabled":
                             enabled.dup_error(
                                 "Multiple enabled",
                                 "Enabled (edge) function is multiply defined.",
                                 child.pos,
                             )
-                            enabled.set(make_enabled(child, scope))
+                            enabled.set(make_function_ref(child.field("function"), scope))
                         case _:
                             raise Error(
                                 "Invalid function",
@@ -1369,8 +1369,7 @@ def make_intervene(node: PTNode, parent_scope: Scope) -> Function:
     return f
 
 
-def make_susceptibility(node: PTNode, parent_scope: Scope) -> Function:
-    f = Function.make(node, parent_scope)
+def ensure_susceptibility(f: Function):
     if not is_node_func(f):
         raise Error(
             "Bad susceptibility",
@@ -1389,11 +1388,9 @@ def make_susceptibility(node: PTNode, parent_scope: Scope) -> Function:
             "Susceptibility function must not have parallel statements.",
             f.pos,
         )
-    return f
 
 
-def make_infectivity(node: PTNode, parent_scope: Scope) -> Function:
-    f = Function.make(node, parent_scope)
+def ensure_infectivity(f: Function):
     if not is_node_func(f):
         raise Error(
             "Bad infectivity",
@@ -1412,11 +1409,9 @@ def make_infectivity(node: PTNode, parent_scope: Scope) -> Function:
             "Infectivity function must not have parallel statements.",
             f.pos,
         )
-    return f
 
 
-def make_transmissibility(node: PTNode, parent_scope: Scope) -> Function:
-    f = Function.make(node, parent_scope)
+def ensure_transmissibility(f: Function):
     if not is_edge_func(f):
         raise Error(
             "Bad transmissibility",
@@ -1435,11 +1430,9 @@ def make_transmissibility(node: PTNode, parent_scope: Scope) -> Function:
             "Transmissibility function must not have parallel statements.",
             f.pos,
         )
-    return f
 
 
-def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
-    f = Function.make(node, parent_scope)
+def ensure_enabled(f: Function):
     if not is_edge_func(f):
         raise Error(
             "Bad enabled (edge)",
@@ -1458,7 +1451,6 @@ def make_enabled(node: PTNode, parent_scope: Scope) -> Function:
             "Enabled (edge) function must not have parallel statements.",
             f.pos,
         )
-    return f
 
 
 def add_builtins(scope: Scope, pos: SourcePosition):
@@ -1588,19 +1580,14 @@ class Source:
 
         for func in functions:
             func.link_tables(node_table.get(), edge_table.get())
-        for contagion in contagions:
-            contagion.susceptibility.link_tables(node_table.get(), edge_table.get())
-            contagion.infectivity.link_tables(node_table.get(), edge_table.get())
-            contagion.transmissibility.link_tables(node_table.get(), edge_table.get())
-            contagion.enabled.link_tables(node_table.get(), edge_table.get())
         initialize.get().link_tables(node_table.get(), edge_table.get())
         intervene.get().link_tables(node_table.get(), edge_table.get())
 
         for contagion in contagions:
-            contagion.susceptibility.type_check()
-            contagion.infectivity.type_check()
-            contagion.transmissibility.type_check()
-            contagion.enabled.type_check()
+            ensure_susceptibility(contagion.susceptibility.resolve())
+            ensure_infectivity(contagion.infectivity.resolve())
+            ensure_transmissibility(contagion.transmissibility.resolve())
+            ensure_enabled(contagion.enabled.resolve())
         for func in functions:
             func.type_check()
         initialize.get().type_check()
@@ -1726,12 +1713,7 @@ Referable = (
     | tuple[Param | Variable, TargetNodeAccessor, NodeField]
 )
 
-Callable = (
-    BuiltinFunction
-    | Function
-    | tuple[Contagion, BuiltinFunction]
-    | tuple[Contagion, Function]
-)
+Callable = BuiltinFunction | Function
 
 Updateable = (
     Global
