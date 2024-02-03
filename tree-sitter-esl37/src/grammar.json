@@ -804,15 +804,15 @@
                 },
                 {
                   "type": "SYMBOL",
+                  "name": "contagion_function"
+                },
+                {
+                  "type": "SYMBOL",
                   "name": "transitions"
                 },
                 {
                   "type": "SYMBOL",
                   "name": "transmissions"
-                },
-                {
-                  "type": "SYMBOL",
-                  "name": "function"
                 }
               ]
             }
@@ -839,6 +839,52 @@
         {
           "type": "FIELD",
           "name": "type",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_terminator"
+        }
+      ]
+    },
+    "contagion_function": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "type",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "susceptibility"
+              },
+              {
+                "type": "STRING",
+                "value": "infectivity"
+              },
+              {
+                "type": "STRING",
+                "value": "transmissibility"
+              },
+              {
+                "type": "STRING",
+                "value": "enabled"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "fn"
+        },
+        {
+          "type": "FIELD",
+          "name": "function",
           "content": {
             "type": "SYMBOL",
             "name": "identifier"

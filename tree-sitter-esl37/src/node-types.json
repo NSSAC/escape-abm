@@ -242,11 +242,11 @@
         "required": false,
         "types": [
           {
-            "type": "contagion_state_type",
+            "type": "contagion_function",
             "named": true
           },
           {
-            "type": "function",
+            "type": "contagion_state_type",
             "named": true
           },
           {
@@ -266,6 +266,44 @@
           {
             "type": "identifier",
             "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "contagion_function",
+    "named": true,
+    "fields": {
+      "function": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "enabled",
+            "named": false
+          },
+          {
+            "type": "infectivity",
+            "named": false
+          },
+          {
+            "type": "susceptibility",
+            "named": false
+          },
+          {
+            "type": "transmissibility",
+            "named": false
           }
         ]
       }
@@ -2258,6 +2296,10 @@
     "named": false
   },
   {
+    "type": "enabled",
+    "named": false
+  },
+  {
     "type": "end",
     "named": false
   },
@@ -2272,6 +2314,10 @@
   {
     "type": "float",
     "named": true
+  },
+  {
+    "type": "fn",
+    "named": false
   },
   {
     "type": "foreach",
@@ -2299,6 +2345,10 @@
   },
   {
     "type": "in",
+    "named": false
+  },
+  {
+    "type": "infectivity",
     "named": false
   },
   {
@@ -2394,7 +2444,15 @@
     "named": true
   },
   {
+    "type": "susceptibility",
+    "named": false
+  },
+  {
     "type": "transition",
+    "named": false
+  },
+  {
+    "type": "transmissibility",
     "named": false
   },
   {

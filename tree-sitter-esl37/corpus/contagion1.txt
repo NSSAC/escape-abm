@@ -16,6 +16,11 @@ contagion c1
         I => S -> E
         I => V -> E
     end
+
+    susceptibility fn c1_susceptibility
+    infectivity fn c1_infectivity
+    transmissibility fn c1_transmissibility
+    enabled fn c1_enabled
 end
 
 ---
@@ -59,6 +64,10 @@ end
                 exit: (identifier)
             )
         )
+        body: (contagion_function function: (identifier))
+        body: (contagion_function function: (identifier))
+        body: (contagion_function function: (identifier))
+        body: (contagion_function function: (identifier))
     )
 )
 

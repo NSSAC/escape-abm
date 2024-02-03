@@ -70,6 +70,9 @@
 [ "contagion" "transition" "transmission" ] @keyword
 
 (contagion_state_type "state type" @keyword)
+(contagion_function "fn" @keyword)
+(contagion_function ["susceptibility" "infectivity" "transmissibility" "enabled"] @keyword)
+(contagion_function function: (identifier) @function)
 
 (transition
     entry: (identifier) @constant

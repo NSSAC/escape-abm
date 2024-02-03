@@ -159,9 +159,9 @@ module.exports = grammar({
             field('name', $.identifier),
             field('body', repeat(choice(
                 $.contagion_state_type,
+                $.contagion_function,
                 $.transitions,
                 $.transmissions,
-                $.function,
             ))),
             'end'
         ),
@@ -169,6 +169,13 @@ module.exports = grammar({
         contagion_state_type: $ => seq(
             alias(/state\s+type/, 'state type'),
             field('type', $.identifier),
+            $._terminator
+        ),
+
+        contagion_function: $ => seq(
+            field('type', choice('susceptibility', 'infectivity', 'transmissibility', 'enabled')),
+            'fn',
+            field('function', $.identifier),
             $._terminator
         ),
 
