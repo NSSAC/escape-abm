@@ -6,7 +6,7 @@ contagion c1
     state type c1_state_t
 
     transition
-        E -> I , p = 1.0 , dwell = fixed1
+        E -> I , p = p_E_I , dwell = fixed1
         I -> R , dwell = normal1
     end
 
@@ -33,7 +33,7 @@ end
             body: (transition
                 entry: (identifier)
                 exit: (identifier)
-                p: (float)
+                p_function: (identifier)
                 dwell: (identifier)
             )
             body: (transition

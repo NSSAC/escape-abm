@@ -963,10 +963,10 @@
                 },
                 {
                   "type": "FIELD",
-                  "name": "p",
+                  "name": "p_function",
                   "content": {
                     "type": "SYMBOL",
-                    "name": "_number"
+                    "name": "identifier"
                   }
                 },
                 {

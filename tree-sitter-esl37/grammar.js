@@ -188,7 +188,7 @@ module.exports = grammar({
         transition: $ => seq(
             field('entry', $.identifier), '->',
             field('exit', $.identifier), ',',
-            optional(seq('p', '=', field('p', $._number), ',')),
+            optional(seq('p', '=', field('p_function', $.identifier), ',')),
             'dwell', '=', field('dwell', $.identifier),
             $._terminator
         ),

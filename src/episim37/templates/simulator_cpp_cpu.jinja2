@@ -495,16 +495,6 @@ float_type {{ d.name }}() {
 
 {% for c in source.contagions %}
 
-// alias table for transitions with multiple exits
-{% for mt in c.transition.multi %}
-{% set comma = joiner(", ") %}
-const float_type {{ c.name }}_{{ mt.entry }}_transition_PROBS[] = { {% for p in mt.probs %}{{ comma() }}{{ p }}{% endfor %} };
-{% set comma = joiner(", ") %}
-const size_type {{ c.name }}_{{ mt.entry }}_transition_ALIAS[] = { {% for a in mt.alias %}{{ comma() }}{{ a }}{% endfor %} };
-std::uniform_int_distribution<size_type> {{ c.name }}_{{ mt.entry }}_transition_INDEX_DIST { 0, {{ mt.probs|length - 1 }} };
-
-{% endfor %}
-
 void {{ c.name }}_transition_node(const node_index_type v, const float_type elapsed) {
     auto state = NODE_TABLE->{{ c.name }}_state[v];
     auto state_prev = NODE_TABLE->{{ c.name }}_state_prev[v];
@@ -544,23 +534,25 @@ void {{ c.name }}_transition_node(const node_index_type v, const float_type elap
     {% for mt in c.transition.multi %}
     case {{ mt.entry }}:
         {
-            auto i = {{ c.name }}_{{ mt.entry }}_transition_INDEX_DIST(*THREAD_RND_STATE);
-            const auto u = uniform01(*THREAD_RND_STATE);
-
-            if ({{ c.name }}_{{ mt.entry }}_transition_PROBS[i] < u) {
-                i = {{ c.name }}_{{ mt.entry }}_transition_ALIAS[i];
-            }
-
-            switch (i) {
-            {% for j in range(mt.probs|length) %}
-            case {{ j }}:
-                next_state = {{ mt.exits[j] }};
-                dwell_time = {{ mt.dwell_dists[j] }}();
-                break;
+            float_type cum_probs[{{ mt.p_functions | length}}] = {0};
+            {% for i in range(mt.p_functions|length) %}
+            cum_probs[{{ i }}] = {{ mt.p_functions[i] }}(v);
+            {% if i > 0 %}
+            cum_probs[{{ i }}] += cum_probs[{{ i }} - 1];
+            {% endif %}
             {% endfor %}
+            
+            auto p = uniform01(*THREAD_RND_STATE);
+            p *= cum_probs[{{ mt.p_functions | length}} - 1];
+
+            {% for i in range(mt.p_functions|length) %}
+            if (p <= cum_probs[{{ i }}]) {
+                next_state = {{ mt.exits[i] }};
+                dwell_time = {{ mt.dwell_dists[i] }}();
+                break;
             }
+            {% endfor %}
         }
-        break;
     {% endfor %}
     }
 

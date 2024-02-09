@@ -544,7 +544,7 @@ make_dist_ref = ref_maker(Distribution, "reference to a distribution")
 class Transition:
     entry: Ref[EnumConstant]
     exit: Ref[EnumConstant]
-    p: int | float
+    p_function: Ref[Function] | None
     dwell: Ref[Distribution]
     pos: SourcePosition | None = attrs.field(default=None, repr=False, eq=False)
 
@@ -552,13 +552,11 @@ class Transition:
     def make(cls, node: PTNode, scope: Scope) -> Transition:
         entry = make_enum_constant_ref(node.field("entry"), scope)
         exit = make_enum_constant_ref(node.field("exit"), scope)
-        p_node = node.maybe_field("p")
-        if p_node is None:
-            p = 1.0
-        else:
-            p = make_literal(p_node, int | float)
+        p_function = node.maybe_field("p_function")
+        if p_function is not None:
+            p_function = make_function_ref(p_function, scope)
         dwell = make_dist_ref(node.field("dwell"), scope)
-        return cls(entry, exit, p, dwell, node.pos)
+        return cls(entry, exit, p_function, dwell, node.pos)
 
 
 @attrs.define
@@ -631,28 +629,36 @@ class Contagion:
                                 "Susceptibility function is multiply defined.",
                                 child.pos,
                             )
-                            susceptibility.set(make_function_ref(child.field("function"), scope))
+                            susceptibility.set(
+                                make_function_ref(child.field("function"), scope)
+                            )
                         case "infectivity":
                             infectivity.dup_error(
                                 "Multiple infectivity",
                                 "Infectivity function is multiply defined.",
                                 child.pos,
                             )
-                            infectivity.set(make_function_ref(child.field("function"), scope))
+                            infectivity.set(
+                                make_function_ref(child.field("function"), scope)
+                            )
                         case "transmissibility":
                             transmissibility.dup_error(
                                 "Multiple transmissibility",
                                 "Transmissibility function is multiply defined.",
                                 child.pos,
                             )
-                            transmissibility.set(make_function_ref(child.field("function"), scope))
+                            transmissibility.set(
+                                make_function_ref(child.field("function"), scope)
+                            )
                         case "enabled":
                             enabled.dup_error(
                                 "Multiple enabled",
                                 "Enabled (edge) function is multiply defined.",
                                 child.pos,
                             )
-                            enabled.set(make_function_ref(child.field("function"), scope))
+                            enabled.set(
+                                make_function_ref(child.field("function"), scope)
+                            )
                         case _:
                             raise Error(
                                 "Invalid function",
@@ -1453,6 +1459,27 @@ def ensure_enabled(f: Function):
         )
 
 
+def ensure_probability(f: Function):
+    if not is_node_func(f):
+        raise Error(
+            "Bad probability function",
+            "Probability function must have one parameter of type `node'",
+            f.pos,
+        )
+    if not is_float_func(f):
+        raise Error(
+            "Bad probability function",
+            "Probability function must have a return type `float'.",
+            f.pos,
+        )
+    if not is_kernel_func(f):
+        raise Error(
+            "Bad probability function",
+            "Probability function must not have parallel statements.",
+            f.pos,
+        )
+
+
 def add_builtins(scope: Scope, pos: SourcePosition):
     # fmt: off
     builtin_types = [
@@ -1588,6 +1615,9 @@ class Source:
             ensure_infectivity(contagion.infectivity.resolve())
             ensure_transmissibility(contagion.transmissibility.resolve())
             ensure_enabled(contagion.enabled.resolve())
+            for transition in contagion.transitions:
+                if transition.p_function is not None:
+                    ensure_probability(transition.p_function.resolve())
         for func in functions:
             func.type_check()
         initialize.get().type_check()

@@ -79,6 +79,9 @@
     exit: (identifier) @constant
     dwell: (identifier) @function
 )
+(transition
+    p_function: (identifier) @function
+)
 (transition ["p" "dwell"] @keyword)
 
 (transmission

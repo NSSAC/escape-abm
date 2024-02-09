@@ -1683,16 +1683,12 @@
           }
         ]
       },
-      "p": {
+      "p_function": {
         "multiple": false,
         "required": false,
         "types": [
           {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "integer",
+            "type": "identifier",
             "named": true
           }
         ]

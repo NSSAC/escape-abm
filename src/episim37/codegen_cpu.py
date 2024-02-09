@@ -751,8 +751,7 @@ class SingleEdgeTransition:
 @attrs.define
 class MultiEdgeTransition:
     entry: str
-    probs: list[str]
-    alias: list[str]
+    p_functions: list[str]
     exits: list[str]
     dwell_dists: list[str]
 
@@ -760,14 +759,20 @@ class MultiEdgeTransition:
     def make(cls, ts: list[ast1.Transition]) -> MultiEdgeTransition:
         entry = ref_str(ts[0].entry.resolve())
 
-        ps = [t.p for t in ts]
-        table = AliasTable.make(ps)
-        probs = [str(p) for p in table.probs]
-        alias = [str(p) for p in table.alias]
+        p_functions = []
+        for t in ts:
+            if t.p_function is None:
+                raise Error(
+                    "Invalid multi edge transition",
+                    "Every transition in a multi edge transition must provide a probability function",
+                    t.pos,
+                )
+            else:
+                p_functions.append(call_str(t.p_function.resolve()))
 
         exits = [ref_str(t.exit.resolve()) for t in ts]
         dwell_dists = [mangle(t.dwell.resolve().name) for t in ts]
-        return cls(entry, probs, alias, exits, dwell_dists)
+        return cls(entry, p_functions, exits, dwell_dists)
 
 
 @attrs.define
