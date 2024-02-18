@@ -30,6 +30,7 @@ dependencies = [
     "scipy",
     "pandas",
     "pyarrow",
+    "polars",
     "h5py",
     "typeguard",
 ]

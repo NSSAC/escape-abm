@@ -6,9 +6,7 @@ from pathlib import Path
 
 import attrs
 import numpy as np
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
+import polars as pl
 import h5py as h5
 
 import click
@@ -42,18 +40,6 @@ CTYPE_TO_DTYPE = {
 # fmt: on
 
 
-def make_in_dtypes(enums: list[Enum]) -> dict[str, type]:
-    type_map = dict(CTYPE_TO_DTYPE)
-
-    for deferred_type, base_type in DEFERRED_TYPES.items():
-        type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
-
-    for enum in enums:
-        type_map[enum.name] = str
-
-    return type_map
-
-
 def make_out_dtypes(enums: list[Enum]) -> dict[str, type]:
     type_map = dict(CTYPE_TO_DTYPE)
 
@@ -73,7 +59,6 @@ def make_enum_encoder(enum: Enum) -> dict[str, int]:
 @attrs.define
 class NodeTableMeta:
     columns: list[str]
-    in_dtypes: dict[str, type]
     enum_encoders: dict[str, dict[str, int]]
     out_dtypes: dict[str, type]
     dataset_names: dict[str, str]
@@ -81,14 +66,12 @@ class NodeTableMeta:
 
     @classmethod
     def from_source_cpu(cls, source: SourceCPU) -> NodeTableMeta:
-        in_dtypes_all = make_in_dtypes(source.enums)
         out_dtypes_all = make_out_dtypes(source.enums)
         enum_encoders_all = {
             enum.name: make_enum_encoder(enum) for enum in source.enums
         }
 
         columns = []
-        in_dtypes = {}
         enum_encoders = {}
         out_dtypes = {}
         dataset_names = {}
@@ -96,20 +79,18 @@ class NodeTableMeta:
             if not field.is_static:
                 continue
             columns.append(field.print_name)
-            in_dtypes[field.print_name] = in_dtypes_all[field.type]
             if field.type in enum_encoders_all:
                 enum_encoders[field.print_name] = enum_encoders_all[field.type]
             out_dtypes[field.print_name] = out_dtypes_all[field.type]
             dataset_names[field.print_name] = field.dataset_name
         key = source.node_table.key
 
-        return cls(columns, in_dtypes, enum_encoders, out_dtypes, dataset_names, key)
+        return cls(columns, enum_encoders, out_dtypes, dataset_names, key)
 
 
 @attrs.define
 class EdgeTableMeta:
     columns: list[str]
-    in_dtypes: dict[str, type]
     enum_encoders: dict[str, dict[str, int]]
     out_dtypes: dict[str, type]
     dataset_names: dict[str, str]
@@ -119,14 +100,12 @@ class EdgeTableMeta:
 
     @classmethod
     def from_source_cpu(cls, source: SourceCPU) -> EdgeTableMeta:
-        in_dtypes_all = make_in_dtypes(source.enums)
         out_dtypes_all = make_out_dtypes(source.enums)
         enum_encoders_all = {
             enum.name: make_enum_encoder(enum) for enum in source.enums
         }
 
         columns = []
-        in_dtypes = {}
         enum_encoders = {}
         out_dtypes = {}
         dataset_names = {}
@@ -134,7 +113,6 @@ class EdgeTableMeta:
             if not field.is_static:
                 continue
             columns.append(field.print_name)
-            in_dtypes[field.print_name] = in_dtypes_all[field.type]
             if field.type in enum_encoders_all:
                 enum_encoders[field.print_name] = enum_encoders_all[field.type]
             out_dtypes[field.print_name] = out_dtypes_all[field.type]
@@ -149,7 +127,6 @@ class EdgeTableMeta:
 
         return cls(
             columns,
-            in_dtypes,
             enum_encoders,
             out_dtypes,
             dataset_names,
@@ -159,20 +136,20 @@ class EdgeTableMeta:
         )
 
 
-def read_table(file: Path, columns: list, dtype: dict) -> pd.DataFrame:
+def read_table(file: Path, columns: list[str]) -> pl.DataFrame:
     if file.suffix == ".csv":
-        return pd.read_csv(file, usecols=columns, dtype=dtype)  # type: ignore
+        return pl.read_csv(file, columns=columns)
     elif file.suffix == ".parquet":
-        schema = pa.schema([(c, pa.from_numpy_dtype(t)) for c, t in dtype.items()])
-        return pq.read_table(file, columns=columns, schema=schema).to_pandas()
+        return pl.read_parquet(file, columns=columns)
     else:
         rich.print("[red]Unknown filetype for node file[/red]")
         raise SystemExit(1)
 
 
-def check_null(table: pd.DataFrame, name: str):
+def check_null(table: pl.DataFrame, name: str):
+    null_count = table.null_count()
     for col in table.columns:
-        if table[col].isnull().any():  # type: ignore
+        if null_count[col][0] > 0:
             rich.print(f"[red]Column {col} in {name} has null values.[/red]")
             raise SystemExit(1)
 
@@ -189,29 +166,31 @@ def make_source_cpu(simulation_file: Path) -> SourceCPU:
         raise SystemExit(1)
 
 
-def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pd.DataFrame:
-    node_table = read_table(node_file, ntm.columns, ntm.in_dtypes)
+def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
+    node_table = read_table(node_file, ntm.columns)
     for col, encoder in ntm.enum_encoders.items():
-        node_table[col] = node_table[col].map(encoder)  # type: ignore
+        node_table = node_table.with_columns(node_table[col].replace(encoder))
     check_null(node_table, "node table")
     return node_table
 
 
-def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pd.DataFrame:
-    edge_table = read_table(edge_file, etm.columns, etm.in_dtypes)
+def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pl.DataFrame:
+    edge_table = read_table(edge_file, etm.columns)
     for col, encoder in etm.enum_encoders.items():
-        edge_table[col] = edge_table[col].map(encoder)  # type: ignore
+        edge_table = edge_table.with_columns(edge_table[col].replace(encoder))
     check_null(edge_table, "edge table")
 
-    edge_table["_target_node_index"] = edge_table[etm.target_node_key].map(key_idx)  # type: ignore
-    edge_table["_source_node_index"] = edge_table[etm.source_node_key].map(key_idx)  # type: ignore
+    edge_table = edge_table.with_columns(
+        edge_table[etm.target_node_key].replace(key_idx).alias("_target_node_index"),
+        edge_table[etm.source_node_key].replace(key_idx).alias("_source_node_index"),
+    )
     return edge_table
 
 
 def make_in_inc_csr_indptr(
-    edge_table: pd.DataFrame, Vn: int, etm: EdgeTableMeta
+    edge_table: pl.DataFrame, Vn: int, etm: EdgeTableMeta
 ) -> np.ndarray:
-    target_node_index = edge_table._target_node_index.to_numpy()
+    target_node_index = edge_table["_target_node_index"].to_numpy()
     edge_count = np.bincount(target_node_index, minlength=Vn)
     cum_edge_count = np.cumsum(edge_count)
     in_inc_csr_indptr = np.zeros(Vn + 1, dtype=etm.edge_index_dtype)
@@ -221,8 +200,8 @@ def make_in_inc_csr_indptr(
 
 def make_input_file_cpu(
     data_file: Path,
-    node_table: pd.DataFrame,
-    edge_table: pd.DataFrame,
+    node_table: pl.DataFrame,
+    edge_table: pl.DataFrame,
     ntm: NodeTableMeta,
     etm: EdgeTableMeta,
     in_inc_csr_indptr: np.ndarray,
@@ -231,10 +210,14 @@ def make_input_file_cpu(
 
     with h5.File(data_file, "w") as fobj:
         for col, dtype in ntm.out_dtypes.items():
-            fobj.create_dataset(f"/node/{col}", data=node_table[col].to_numpy(dtype))
+            data = node_table[col].to_numpy()
+            data = np.asarray(data, dtype)
+            fobj.create_dataset(f"/node/{col}", data=data)
 
         for col, dtype in etm.out_dtypes.items():
-            fobj.create_dataset(f"/edge/{col}", data=edge_table[col].to_numpy(dtype))
+            data = edge_table[col].to_numpy()
+            data = np.asarray(data, dtype)
+            fobj.create_dataset(f"/edge/{col}", data=data)
 
         fobj.create_dataset(INC_CSR_INDPTR_DATASET_NAME, data=in_inc_csr_indptr)
 
@@ -291,7 +274,7 @@ def prepare_input(
 
     # Step 2: Sort the node table dataset
     rich.print("[cyan]Sorting node table.[/cyan]")
-    node_table.sort_values(ntm.key, inplace=True, ignore_index=True)
+    node_table = node_table.sort(ntm.key)
 
     # Step 3: Create a node index
     rich.print("[cyan]Making node index.[/cyan]")
@@ -306,9 +289,7 @@ def prepare_input(
 
     # Step 5: Sort the edge table dataset
     rich.print("[cyan]Sorting edge table.[/cyan]")
-    edge_table.sort_values(
-        ["_target_node_index", "_source_node_index"], inplace=True, ignore_index=True
-    )
+    edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
 
     # Step 6: Make incoming incidence CSR graph's indptr
     rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
