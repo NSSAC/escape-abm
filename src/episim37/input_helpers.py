@@ -225,6 +225,48 @@ def make_input_file_cpu(
         fobj.attrs.create("num_edges", len(edge_table), dtype=size_dtype)
 
 
+def do_read_nodes_df(data_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
+    df = {}
+    with h5.File(data_file, "r") as fobj:
+        for col in ntm.columns:
+            s = fobj[f"/node/{col}"][...]  # type: ignore
+            s = pl.Series(s)
+            df[col] = s
+
+    for col, encoder in ntm.enum_encoders.items():
+        decoder = {v: k for k, v in encoder.items()}
+        df[col] = df[col].replace(decoder)
+
+    return pl.DataFrame(df)
+
+
+def read_nodes_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
+    source = make_source_cpu(simulation_file)
+    ntm = NodeTableMeta.from_source_cpu(source)
+    return do_read_nodes_df(input_file, ntm)
+
+
+def do_read_edges_df(data_file: Path, etm: EdgeTableMeta) -> pl.DataFrame:
+    df = {}
+    with h5.File(data_file, "r") as fobj:
+        for col in etm.columns + ["_target_node_index", "_source_node_index"]:
+            s = fobj[f"/edge/{col}"][...]  # type: ignore
+            s = pl.Series(s)
+            df[col] = s
+
+    for col, encoder in etm.enum_encoders.items():
+        decoder = {v: k for k, v in encoder.items()}
+        df[col] = [decoder[v] for v in df[col]]
+
+    return pl.DataFrame(df)
+
+
+def read_edges_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
+    source = make_source_cpu(simulation_file)
+    etm = EdgeTableMeta.from_source_cpu(source)
+    return do_read_edges_df(input_file, etm)
+
+
 @click.command()
 @click.option(
     "-s",
