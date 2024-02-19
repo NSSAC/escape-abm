@@ -16,13 +16,12 @@ Performance improvement
 
 * Merge back to back parallel calls
 * SIMD'ize the thread specific loops and node/edge functions
+* Use differnt random number generator
 
 Pipeline
 ........
 
-* Add pandas read support for input.h5 and output.h5
 * Create Parsl based pipeline for running studies
-
 
 * Add distributed memory (MPI) support
 * Change parser from tree-sitter to lark
