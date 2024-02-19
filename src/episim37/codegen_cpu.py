@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import shlex
 from pathlib import Path
-from textwrap import dedent
-from typing import assert_never
+from typing import assert_never, Any
 from subprocess import run as do_run
 from tempfile import TemporaryDirectory
 from collections import defaultdict
@@ -19,7 +19,6 @@ import jinja2
 
 import rich
 import rich.markup
-from rich.syntax import Syntax
 
 from .parse_tree import mk_pt, ParseTreeConstructionError, SourcePosition
 from .ast1 import mk_ast1, ASTConstructionError
@@ -184,7 +183,7 @@ def mangle(*args: str) -> str:
 
 def cstr_to_ctype_fn(t: str) -> str:
     match t:
-        case ("int_type" | "int8_t" | "int16_t" | "int32_t" | "int64_t"):
+        case "int_type" | "int8_t" | "int16_t" | "int32_t" | "int64_t":
             return "std::stol"
         case (
             "uint_type"
@@ -198,7 +197,7 @@ def cstr_to_ctype_fn(t: str) -> str:
             | "uint64_t"
         ):
             return "std::stoul"
-        case ("float_type" | "float" | "double"):
+        case "float_type" | "float" | "double":
             return "std::stod"
         case _ as unexpected:
             raise ValueError(unexpected)
@@ -1048,58 +1047,75 @@ class Source:
         )
 
 
-def do_prepare(output: Path | None, input: Path) -> Path:
+def mk_ir(input: Path) -> Source:
     input_bytes = input.read_bytes()
     pt = mk_pt(str(input), input_bytes)
     ast1 = mk_ast1(input, pt)
-
-    if output is None:
-        output = input.parent
-    output.mkdir(parents=True, exist_ok=True)
-
     source = Source.make(ast1)
+    return source
 
-    with open(output / "CMakeLists.txt", "wt") as fobj:
+
+def do_prepare(gen_src_dir: Path, input: Path, source: Source) -> None:
+    gen_src_dir.mkdir(parents=True, exist_ok=True)
+
+    with open(gen_src_dir / "CMakeLists.txt", "wt") as fobj:
         template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
         fobj.write(template.render(source=source, input=str(input.absolute())))
 
-    return output
+    cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build'"
+    cmd = shlex.split(cmd)
+    do_run(cmd)
 
 
-def do_compile(output: Path | None, input: Path) -> Path:
-    input_bytes = input.read_bytes()
-    pt = mk_pt(str(input), input_bytes)
-    ast1 = mk_ast1(input, pt)
-
-    if output is None:
-        output = input.parent
-    output.mkdir(parents=True, exist_ok=True)
-
-    source = Source.make(ast1)
-
-    with open(output / "simulator.cpp", "wt") as fobj:
+def do_compile(build_dir: Path, source: Source) -> None:
+    with open(build_dir / "simulator.cpp", "wt") as fobj:
         template = ENVIRONMENT.get_template("simulator_cpp_cpu.jinja2")
         fobj.write(template.render(source=source))
 
-    with open(output / "sim_utils.h", "wt") as fobj:
+    with open(build_dir / "sim_utils.h", "wt") as fobj:
         fobj.write(STATIC_DIR.joinpath("sim_utils.h").read_text())
 
-    return output
+
+def do_build(gen_src_dir: Path) -> None:
+    cmd = f"make -C '{gen_src_dir!s}/build'"
+    cmd = shlex.split(cmd)
+    do_run(cmd)
+
+
+def do_simulate(
+    gen_src_dir: Path,
+    input_file: Path,
+    output_file: Path,
+    num_ticks: int,
+    configs: dict[str, Any],
+) -> None:
+    env = dict(os.environ)
+
+    env["OMP_PROC_BIND"] = "true"
+    env["OMP_PLACES"] = "sockets"
+
+    env["INPUT_FILE"] = str(input_file)
+    env["OUTPUT_FILE"] = str(output_file)
+    env["NUM_TICKS"] = str(num_ticks)
+    for key, value in configs.items():
+        env[key.upper()] = str(value)
+
+    cmd = f"'{gen_src_dir!s}/build/simulator'"
+    cmd = shlex.split(cmd)
+    do_run(cmd, env=env)
+
+
+ExistingFile = click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path)
+NewFile = click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path)
+Directory = click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path)
 
 
 @click.command()
-@click.argument(
-    "input",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
+@click.argument("input", type=ExistingFile)
 def print_cpu_ir(input: Path):
     """Print intermediate representation."""
-    input_bytes = input.read_bytes()
-
     try:
-        pt = mk_pt(str(input), input_bytes)
-        ast1 = mk_ast1(input, pt)
-        source = Source.make(ast1)
+        source = mk_ir(input)
         rich.print(source)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
@@ -1115,17 +1131,18 @@ def codegen_cpu():
 @click.option(
     "-o",
     "--output",
-    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    type=Directory,
     help="Output directory.",
 )
-@click.argument(
-    "input",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
+@click.argument("input", type=ExistingFile)
 def prepare(output: Path | None, input: Path):
     """Generate CMakeLists.txt."""
+    if output is None:
+        output = input.parent
+
     try:
-        do_prepare(output, input)
+        source = mk_ir(input)
+        do_prepare(output, input, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
@@ -1135,62 +1152,74 @@ def prepare(output: Path | None, input: Path):
 @click.option(
     "-o",
     "--output",
-    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    type=Directory,
     help="Output directory.",
 )
-@click.argument(
-    "input",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
+@click.argument("input", type=ExistingFile)
 def compile(output: Path | None, input: Path):
     """Compile simulator code."""
+    if output is None:
+        output = input.parent
+
     try:
-        do_compile(output, input)
+        source = mk_ir(input)
+        do_compile(output, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
         sys.exit(1)
 
 
-def pprint_cmd(cmd):
-    cmd = dedent(cmd).strip()
-    cmd = Syntax(cmd, "bash", theme="gruvbox-dark")
-    rich.print(cmd)
-
-
-def verbose_run(cmd, *args, **kwargs):
-    pprint_cmd(cmd)
-    cmd = shlex.split(cmd)
-    return do_run(cmd, *args, **kwargs)
-
-
 @codegen_cpu.command()
-@click.argument(
-    "input",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+@click.option(
+    "-n",
+    "--num-ticks",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Number of ticks.",
 )
-def run(input: Path):
+@click.option(
+    "-o",
+    "--output",
+    type=NewFile,
+    default="output.h5",
+    show_default=True,
+    help="Output file.",
+)
+@click.option(
+    "-i",
+    "--input",
+    type=ExistingFile,
+    default="input.h5",
+    show_default=True,
+    help="Output file.",
+)
+@click.argument("simulation_file", type=ExistingFile)
+def run(num_ticks: int, output: Path, input: Path, simulation_file: Path):
     """Build and run simulator."""
     try:
         with TemporaryDirectory(
             prefix=f"{input.stem}-", suffix="-episim37"
         ) as temp_output_dir:
-            output = Path(temp_output_dir).absolute()
-            rich.print(f"[cyan]Temp output dir:[/cyan] {output!s}")
+            gen_src_dir = Path(temp_output_dir).absolute()
+            rich.print(f"[cyan]Temp output dir:[/cyan] {gen_src_dir!s}")
 
-            rich.print("[cyan]Creating CmakeList.txt[/cyan]")
-            output = do_prepare(output, input)
+            source = mk_ir(simulation_file)
 
-            rich.print("[cyan]Running cmake[/cyan]")
-            cmd = f"cmake -S . -B '{output!s}/build'"
-            verbose_run(cmd, cwd=output)
+            rich.print("[cyan]Preparing ...[/cyan]")
+            do_prepare(gen_src_dir, simulation_file, source)
 
-            rich.print("[cyan]Running make[/cyan]")
-            cmd = f"make -C '{output!s}/build'"
-            verbose_run(cmd)
+            rich.print("[cyan]Building ...[/cyan]")
+            do_build(gen_src_dir)
 
-            rich.print("[cyan]Running simulator[/cyan]")
-            cmd = f"'{output!s}/build/simulator'"
-            verbose_run(cmd)
+            rich.print("[cyan]Simulating ...[/cyan]")
+            do_simulate(
+                gen_src_dir,
+                input_file=input,
+                output_file=output,
+                num_ticks=num_ticks,
+                configs={},
+            )
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
         sys.exit(1)
