@@ -166,14 +166,10 @@ def check_null(table: pl.DataFrame, name: str):
 
 def make_source_cpu(simulation_file: Path) -> SourceCPU:
     simulation_bytes = simulation_file.read_bytes()
-    try:
-        pt = mk_pt(str(simulation_file), simulation_bytes)
-        ast1 = mk_ast1(simulation_file, pt)
-        source = SourceCPU.make(ast1)
-        return source
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
-        e.rich_print()
-        raise SystemExit(1)
+    pt = mk_pt(str(simulation_file), simulation_bytes)
+    ast1 = mk_ast1(simulation_file, pt)
+    source = SourceCPU.make(ast1)
+    return source
 
 
 def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
@@ -286,46 +282,52 @@ def prepare_input(
     simulation_file: Path, node_file: Path, edge_file: Path, input_file: Path
 ):
     """Prepare input for simulation."""
-    rich.print("[cyan]Parsing simulator code.[/cyan]")
-    source = make_source_cpu(simulation_file)
-    ntm = NodeTableMeta.from_source_cpu(source)
-    etm = EdgeTableMeta.from_source_cpu(source)
+    try:
+        rich.print("[cyan]Parsing simulator code.[/cyan]")
+        source = make_source_cpu(simulation_file)
+        ntm = NodeTableMeta.from_source_cpu(source)
+        etm = EdgeTableMeta.from_source_cpu(source)
 
-    # Step 1: Preprocess the node table files
-    rich.print("[cyan]Reading node table.[/cyan]")
-    node_table = make_node_table(node_file, ntm)
+        # Step 1: Preprocess the node table files
+        rich.print("[cyan]Reading node table.[/cyan]")
+        node_table = make_node_table(node_file, ntm)
 
-    # Step 2: Sort the node table dataset
-    rich.print("[cyan]Sorting node table.[/cyan]")
-    node_table = node_table.sort(ntm.key)
+        # Step 2: Sort the node table dataset
+        rich.print("[cyan]Sorting node table.[/cyan]")
+        node_table = node_table.sort(ntm.key)
 
-    # Step 3: Create a node index
-    rich.print("[cyan]Making node index.[/cyan]")
-    key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
+        # Step 3: Create a node index
+        rich.print("[cyan]Making node index.[/cyan]")
+        key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
 
-    Vn = len(node_table)
-    print("### num_nodes: ", Vn)
+        Vn = len(node_table)
+        print("### num_nodes: ", Vn)
 
-    # Step 4: Preprocess the edge table files
-    rich.print("[cyan]Reading edge table.[/cyan]")
-    edge_table = make_edge_table(edge_file, etm, key_idx)
+        # Step 4: Preprocess the edge table files
+        rich.print("[cyan]Reading edge table.[/cyan]")
+        edge_table = make_edge_table(edge_file, etm, key_idx)
 
-    # Step 5: Sort the edge table dataset
-    rich.print("[cyan]Sorting edge table.[/cyan]")
-    edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
+        # Step 5: Sort the edge table dataset
+        rich.print("[cyan]Sorting edge table.[/cyan]")
+        edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
 
-    # Step 6: Make incoming incidence CSR graph's indptr
-    rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
-    in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
+        # Step 6: Make incoming incidence CSR graph's indptr
+        rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
+        in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
 
-    En = len(edge_table)
-    print("### num_edges: ", En)
+        En = len(edge_table)
+        print("### num_edges: ", En)
 
-    # Step 7: Create the data file.
-    rich.print("[cyan]Creating data file.[/cyan]")
-    make_input_file_cpu(input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
+        # Step 7: Create the data file.
+        rich.print("[cyan]Creating data file.[/cyan]")
+        make_input_file_cpu(
+            input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr
+        )
 
-    rich.print("[green]Data file created successfully.[/green]")
+        rich.print("[green]Data file created successfully.[/green]")
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @click.group
@@ -343,8 +345,12 @@ def extract_nodes(
     node_file: Path,
 ):
     """Extract node table from simulation input."""
-    df = read_nodes_df(simulation_file, input_file)
-    save_df(df, node_file)
+    try:
+        df = read_nodes_df(simulation_file, input_file)
+        save_df(df, node_file)
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @process_input.command()
@@ -357,5 +363,9 @@ def extract_edges(
     edge_file: Path,
 ):
     """Extract edge table from simulation input."""
-    df = read_edges_df(simulation_file, input_file)
-    save_df(df, edge_file)
+    try:
+        df = read_edges_df(simulation_file, input_file)
+        save_df(df, edge_file)
+    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+        e.rich_print()
+        raise SystemExit(1)

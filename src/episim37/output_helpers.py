@@ -47,13 +47,9 @@ def save_df(df: pl.DataFrame, fname: Path):
 
 def make_source(simulation_file: Path) -> Source:
     simulation_bytes = simulation_file.read_bytes()
-    try:
-        pt = mk_pt(str(simulation_file), simulation_bytes)
-        ast1 = mk_ast1(simulation_file, pt)
-        return ast1
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
-        e.rich_print()
-        raise SystemExit(1)
+    pt = mk_pt(str(simulation_file), simulation_bytes)
+    ast1 = mk_ast1(simulation_file, pt)
+    return ast1
 
 
 def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pl.DataFrame:
@@ -214,8 +210,12 @@ def extract_summary(
     summary_file: Path,
 ):
     """Extract summary from simulation output."""
-    df = read_summary_df(simulation_file, output_file, contagion_name)
-    save_df(df, summary_file)
+    try:
+        df = read_summary_df(simulation_file, output_file, contagion_name)
+        save_df(df, summary_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @process_output.command()
@@ -230,8 +230,12 @@ def extract_interventions(
     interventions_file: Path,
 ):
     """Extract interventions from simulation output."""
-    df = read_interventions_df(simulation_file, output_file, contagion_name)
-    save_df(df, interventions_file)
+    try:
+        df = read_interventions_df(simulation_file, output_file, contagion_name)
+        save_df(df, interventions_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @process_output.command()
@@ -246,8 +250,12 @@ def extract_transitions(
     transitions_file: Path,
 ):
     """Extract transitions from simulation output."""
-    df = read_transitions_df(simulation_file, output_file, contagion_name)
-    save_df(df, transitions_file)
+    try:
+        df = read_transitions_df(simulation_file, output_file, contagion_name)
+        save_df(df, transitions_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @process_output.command()
@@ -262,8 +270,12 @@ def extract_transmissions(
     transmissions_file: Path,
 ):
     """Extract transmissions from simulation output."""
-    df = read_transmissions_df(simulation_file, output_file, contagion_name)
-    save_df(df, transmissions_file)
+    try:
+        df = read_transmissions_df(simulation_file, output_file, contagion_name)
+        save_df(df, transmissions_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        raise SystemExit(1)
 
 
 @process_output.command()
@@ -284,22 +296,26 @@ def extract_all(
     transmissions_file: Path,
 ):
     """Extract summary,interventions,transitions,transmissions from simulation output."""
-    ast1 = make_source(simulation_file)
-    contagion = find_contagion(contagion_name, ast1)
+    try:
+        ast1 = make_source(simulation_file)
+        contagion = find_contagion(contagion_name, ast1)
 
-    with h5.File(output_file, "r") as sim_output:
-        rich.print("[yellow]Extracting summary.[/yellow]")
-        df = do_extract_summary(sim_output, contagion)
-        save_df(df, summary_file)
+        with h5.File(output_file, "r") as sim_output:
+            rich.print("[yellow]Extracting summary.[/yellow]")
+            df = do_extract_summary(sim_output, contagion)
+            save_df(df, summary_file)
 
-        rich.print("[yellow]Extracting interventions.[/yellow]")
-        df = do_extract_interventions(sim_output, contagion)
-        save_df(df, interventions_file)
+            rich.print("[yellow]Extracting interventions.[/yellow]")
+            df = do_extract_interventions(sim_output, contagion)
+            save_df(df, interventions_file)
 
-        rich.print("[yellow]Extracting transitions.[/yellow]")
-        df = do_extract_transitions(sim_output, contagion)
-        save_df(df, transitions_file)
+            rich.print("[yellow]Extracting transitions.[/yellow]")
+            df = do_extract_transitions(sim_output, contagion)
+            save_df(df, transitions_file)
 
-        rich.print("[yellow]Extracting transmissions.[/yellow]")
-        df = do_extract_transmissions(sim_output, contagion)
-        save_df(df, transmissions_file)
+            rich.print("[yellow]Extracting transmissions.[/yellow]")
+            df = do_extract_transmissions(sim_output, contagion)
+            save_df(df, transmissions_file)
+    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        e.rich_print()
+        raise SystemExit(1)
