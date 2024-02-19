@@ -1053,12 +1053,8 @@ class Source:
         )
 
 
-def mk_ir(input: Path) -> Source:
-    input_bytes = input.read_bytes()
-    pt = mk_pt(str(input), input_bytes)
-    ast1 = mk_ast1(input, pt)
-    source = Source.make(ast1)
-    return source
+def mk_ir(ast1: ast1.Source) -> Source:
+    return Source.make(ast1)
 
 
 def do_prepare(gen_src_dir: Path, input: Path, source: Source) -> None:
@@ -1070,7 +1066,7 @@ def do_prepare(gen_src_dir: Path, input: Path, source: Source) -> None:
 
     cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
-    do_run(cmd)
+    do_run(cmd, check=True)
 
 
 def do_compile(build_dir: Path, source: Source) -> None:
@@ -1085,7 +1081,7 @@ def do_compile(build_dir: Path, source: Source) -> None:
 def do_build(gen_src_dir: Path) -> None:
     cmd = f"make -C '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
-    do_run(cmd)
+    do_run(cmd, check=True)
 
 
 def do_simulate(
@@ -1095,6 +1091,9 @@ def do_simulate(
     num_ticks: int,
     configs: dict[str, Any],
 ) -> None:
+    assert (gen_src_dir / "build/simulator").exists(), "Simulator doesn't exist"
+    assert input_file.exists(), "Input file doesn't exist"
+
     env = dict(os.environ)
 
     env["OMP_PROC_BIND"] = "true"
@@ -1104,11 +1103,13 @@ def do_simulate(
     env["OUTPUT_FILE"] = str(output_file)
     env["NUM_TICKS"] = str(num_ticks)
     for key, value in configs.items():
+        if isinstance(value, bool):
+            value = int(value)
         env[key.upper()] = str(value)
 
     cmd = f"'{gen_src_dir!s}/build/simulator'"
     cmd = shlex.split(cmd)
-    do_run(cmd, env=env)
+    do_run(cmd, env=env, check=True)
 
 
 @click.command()
@@ -1116,7 +1117,9 @@ def do_simulate(
 def print_cpu_ir(simulation_file: Path):
     """Print intermediate representation."""
     try:
-        source = mk_ir(simulation_file)
+        pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
+        ast1 = mk_ast1(simulation_file, pt)
+        source = mk_ir(ast1)
         rich.print(source)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
@@ -1137,7 +1140,9 @@ def prepare(gen_code_dir: Path, simulation_file: Path):
         gen_code_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        source = mk_ir(simulation_file)
+        pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
+        ast1 = mk_ast1(simulation_file, pt)
+        source = mk_ir(ast1)
         do_prepare(gen_code_dir, simulation_file, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
@@ -1150,7 +1155,9 @@ def prepare(gen_code_dir: Path, simulation_file: Path):
 def compile(gen_code_dir: Path, simulation_file: Path):
     """Compile simulator code."""
     try:
-        source = mk_ir(simulation_file)
+        pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
+        ast1 = mk_ast1(simulation_file, pt)
+        source = mk_ir(ast1)
         do_compile(gen_code_dir, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
@@ -1178,7 +1185,9 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
             gen_src_dir = Path(temp_output_dir).absolute()
             rich.print(f"[cyan]Temp output dir:[/cyan] {gen_src_dir!s}")
 
-            source = mk_ir(simulation_file)
+            pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
+            ast1 = mk_ast1(simulation_file, pt)
+            source = mk_ir(ast1)
 
             rich.print("[cyan]Preparing ...[/cyan]")
             do_prepare(gen_src_dir, simulation_file, source)

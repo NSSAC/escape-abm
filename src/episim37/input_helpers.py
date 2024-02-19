@@ -319,12 +319,12 @@ def prepare_input(
         print("### num_edges: ", En)
 
         # Step 7: Create the data file.
-        rich.print("[cyan]Creating data file.[/cyan]")
+        rich.print("[cyan]Creating input file.[/cyan]")
         make_input_file_cpu(
             input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr
         )
 
-        rich.print("[green]Data file created successfully.[/green]")
+        rich.print("[green]Input file created successfully.[/green]")
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
         raise SystemExit(1)

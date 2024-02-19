@@ -24,7 +24,7 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/simulator.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/sim_utils.h
     COMMAND
-        episim37 codegen-cpu compile {{ input }} -o ${CMAKE_CURRENT_BINARY_DIR}
+        episim37 codegen-cpu compile -s {{ input }} -g ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS {{ input }}
     VERBATIM
 )
