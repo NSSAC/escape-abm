@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import (
     Any,
@@ -21,6 +20,7 @@ import rich.markup
 from typeguard import TypeCheckError, check_type
 
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError, SourcePosition
+from .click_helpers import simulation_file_option
 
 
 class ASTConstructionError(Exception):
@@ -1765,17 +1765,14 @@ def mk_ast1(filename: Path, node: PTNode) -> Source:
 
 
 @click.command()
-@click.argument(
-    "filename",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
-def print_ast1(filename: Path):
+@simulation_file_option
+def print_ast1(simulation_file: Path):
     """Print the AST1."""
-    file_bytes = filename.read_bytes()
+    file_bytes = simulation_file.read_bytes()
     try:
-        pt = mk_pt(str(filename), file_bytes)
-        ast1 = mk_ast1(filename, pt)
+        pt = mk_pt(str(simulation_file), file_bytes)
+        ast1 = mk_ast1(simulation_file, pt)
         rich.print(ast1)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
-        sys.exit(1)
+        raise SystemExit(1)

@@ -22,6 +22,15 @@ from .codegen_cpu import (
     DEFERRED_TYPES,
 )
 from .output_helpers import save_df
+from .click_helpers import (
+    simulation_file_option,
+    existing_node_file_option,
+    existing_edge_file_option,
+    input_file_option,
+    existing_input_file_option,
+    node_file_option,
+    edge_file_option,
+)
 
 # fmt: off
 CTYPE_TO_DTYPE = {
@@ -268,48 +277,13 @@ def read_edges_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
     return do_read_edges_df(input_file, etm)
 
 
-ExistingFile = click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path)
-NewFile = click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path)
-
-simulation_file_option = click.option(
-    "-s",
-    "--simulation",
-    "simulation_file",
-    type=ExistingFile,
-    required=True,
-    help="Path to simulation file.",
-)
-
-
 @click.command()
 @simulation_file_option
-@click.option(
-    "-n",
-    "--node",
-    "node_file",
-    type=ExistingFile,
-    required=True,
-    help="Path to node attributes file.",
-)
-@click.option(
-    "-e",
-    "--edge",
-    "edge_file",
-    type=ExistingFile,
-    required=True,
-    help="Path to edge attributes file.",
-)
-@click.option(
-    "-i",
-    "--simulation-input",
-    "sim_input_file",
-    type=NewFile,
-    default="input.h5",
-    show_default=True,
-    help="Path to simulation input file.",
-)
+@existing_node_file_option
+@existing_edge_file_option
+@input_file_option
 def prepare_input(
-    simulation_file: Path, node_file: Path, edge_file: Path, data_file: Path
+    simulation_file: Path, node_file: Path, edge_file: Path, input_file: Path
 ):
     """Prepare input for simulation."""
     rich.print("[cyan]Parsing simulator code.[/cyan]")
@@ -349,7 +323,7 @@ def prepare_input(
 
     # Step 7: Create the data file.
     rich.print("[cyan]Creating data file.[/cyan]")
-    make_input_file_cpu(data_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
+    make_input_file_cpu(input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
 
     rich.print("[green]Data file created successfully.[/green]")
 
@@ -359,59 +333,29 @@ def process_input():
     """Process input file."""
 
 
-simulation_input_option = click.option(
-    "-i",
-    "--simulation-input",
-    "sim_input_file",
-    type=ExistingFile,
-    default="input.h5",
-    show_default=True,
-    help="Path to simulation input file.",
-)
-
-
-node_file_option = click.option(
-    "-n",
-    "--node",
-    "node_file",
-    type=NewFile,
-    required=True,
-    help="Path to node attributes file.",
-)
-
-edge_file_option = click.option(
-    "-e",
-    "--edge",
-    "edge_file",
-    type=NewFile,
-    required=True,
-    help="Path to edge attributes file.",
-)
-
-
 @process_input.command()
 @simulation_file_option
-@simulation_input_option
+@existing_input_file_option
 @node_file_option
 def extract_nodes(
     simulation_file: Path,
-    sim_input_file: Path,
+    input_file: Path,
     node_file: Path,
 ):
-    """Extract summary from simulation output."""
-    df = read_nodes_df(simulation_file, sim_input_file)
+    """Extract node table from simulation input."""
+    df = read_nodes_df(simulation_file, input_file)
     save_df(df, node_file)
 
 
 @process_input.command()
 @simulation_file_option
-@simulation_input_option
+@existing_input_file_option
 @edge_file_option
 def extract_edges(
     simulation_file: Path,
-    sim_input_file: Path,
+    input_file: Path,
     edge_file: Path,
 ):
-    """Extract summary from simulation output."""
-    df = read_edges_df(simulation_file, sim_input_file)
+    """Extract edge table from simulation input."""
+    df = read_edges_df(simulation_file, input_file)
     save_df(df, edge_file)

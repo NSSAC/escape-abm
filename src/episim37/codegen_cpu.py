@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import shlex
 from pathlib import Path
 from typing import assert_never, Any
@@ -24,6 +23,13 @@ from .parse_tree import mk_pt, ParseTreeConstructionError, SourcePosition
 from .ast1 import mk_ast1, ASTConstructionError
 from .alias_table import AliasTable
 from . import ast1
+from .click_helpers import (
+    simulation_file_option,
+    gen_code_dir_option,
+    existing_gen_code_dir_option,
+    existing_input_file_option,
+    output_file_option,
+)
 
 INC_CSR_INDPTR_DATASET_NAME = "/incoming/incidence/csr/indptr"
 TARGET_NODE_INDEX_DATASET_NAME = "/edge/_target_node_index"
@@ -1105,21 +1111,16 @@ def do_simulate(
     do_run(cmd, env=env)
 
 
-ExistingFile = click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path)
-NewFile = click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path)
-Directory = click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path)
-
-
 @click.command()
-@click.argument("input", type=ExistingFile)
-def print_cpu_ir(input: Path):
+@simulation_file_option
+def print_cpu_ir(simulation_file: Path):
     """Print intermediate representation."""
     try:
-        source = mk_ir(input)
+        source = mk_ir(simulation_file)
         rich.print(source)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @click.group()
@@ -1128,45 +1129,32 @@ def codegen_cpu():
 
 
 @codegen_cpu.command()
-@click.option(
-    "-o",
-    "--output",
-    type=Directory,
-    help="Output directory.",
-)
-@click.argument("input", type=ExistingFile)
-def prepare(output: Path | None, input: Path):
-    """Generate CMakeLists.txt."""
-    if output is None:
-        output = input.parent
+@gen_code_dir_option
+@simulation_file_option
+def prepare(gen_code_dir: Path, simulation_file: Path):
+    """Generate CMakeLists.txt and run cmake."""
+    if not gen_code_dir.exists():
+        gen_code_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        source = mk_ir(input)
-        do_prepare(output, input, source)
+        source = mk_ir(simulation_file)
+        do_prepare(gen_code_dir, simulation_file, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @codegen_cpu.command()
-@click.option(
-    "-o",
-    "--output",
-    type=Directory,
-    help="Output directory.",
-)
-@click.argument("input", type=ExistingFile)
-def compile(output: Path | None, input: Path):
+@existing_gen_code_dir_option
+@simulation_file_option
+def compile(gen_code_dir: Path, simulation_file: Path):
     """Compile simulator code."""
-    if output is None:
-        output = input.parent
-
     try:
-        source = mk_ir(input)
-        do_compile(output, source)
+        source = mk_ir(simulation_file)
+        do_compile(gen_code_dir, source)
     except (ParseTreeConstructionError, ASTConstructionError) as e:
         e.rich_print()
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @codegen_cpu.command()
@@ -1178,28 +1166,14 @@ def compile(output: Path | None, input: Path):
     show_default=True,
     help="Number of ticks.",
 )
-@click.option(
-    "-o",
-    "--output",
-    type=NewFile,
-    default="output.h5",
-    show_default=True,
-    help="Output file.",
-)
-@click.option(
-    "-i",
-    "--input",
-    type=ExistingFile,
-    default="input.h5",
-    show_default=True,
-    help="Output file.",
-)
-@click.argument("simulation_file", type=ExistingFile)
-def run(num_ticks: int, output: Path, input: Path, simulation_file: Path):
+@existing_input_file_option
+@output_file_option
+@simulation_file_option
+def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Path):
     """Build and run simulator."""
     try:
         with TemporaryDirectory(
-            prefix=f"{input.stem}-", suffix="-episim37"
+            prefix=f"{simulation_file.stem}-", suffix="-episim37"
         ) as temp_output_dir:
             gen_src_dir = Path(temp_output_dir).absolute()
             rich.print(f"[cyan]Temp output dir:[/cyan] {gen_src_dir!s}")
@@ -1215,11 +1189,11 @@ def run(num_ticks: int, output: Path, input: Path, simulation_file: Path):
             rich.print("[cyan]Simulating ...[/cyan]")
             do_simulate(
                 gen_src_dir,
-                input_file=input,
-                output_file=output,
+                input_file=input_file,
+                output_file=output_file,
                 num_ticks=num_ticks,
                 configs={},
             )
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
-        sys.exit(1)
+        raise SystemExit(1)

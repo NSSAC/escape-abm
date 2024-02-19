@@ -14,6 +14,7 @@ from rich.tree import Tree
 from rich.pretty import Pretty
 
 from .tree_sitter_bindings import get_parser
+from .click_helpers import simulation_file_option
 
 
 @attrs.define
@@ -162,7 +163,7 @@ def check_parse_errors(
         errors.append(
             Error(
                 "Parse error",
-                node.sexp(),
+                "Failed to parse",
                 True,
                 SourcePosition.from_tsnode(source, source_bytes, node),
             )
@@ -171,7 +172,7 @@ def check_parse_errors(
         errors.append(
             Error(
                 "Missing token",
-                node.type,
+                f"Expected token of type {node.type}",
                 True,
                 SourcePosition.from_tsnode(source, source_bytes, node),
             )
@@ -210,15 +211,13 @@ def mk_pt(source: str, source_bytes: bytes) -> PTNode:
 
 
 @click.command()
-@click.argument(
-    "filename",
-    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-)
-def print_parse_tree(filename: Path):
+@simulation_file_option
+def print_parse_tree(simulation_file: Path):
     """Print the parse tree."""
-    file_bytes = filename.read_bytes()
+    file_bytes = simulation_file.read_bytes()
     try:
-        pt = mk_pt(str(filename), file_bytes)
+        pt = mk_pt(str(simulation_file), file_bytes)
         rich.print(pt.rich_tree())
     except ParseTreeConstructionError as e:
         e.rich_print()
+        raise SystemExit(1)

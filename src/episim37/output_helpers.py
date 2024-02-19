@@ -11,6 +11,15 @@ import rich
 
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
+from .click_helpers import (
+    simulation_file_option,
+    existing_output_file_option,
+    summary_file_option,
+    transitions_file_option,
+    transmissions_file_option,
+    interventions_file_option,
+    contagion_name_option,
+)
 
 
 def find_contagion(name: str, source: Source) -> Contagion:
@@ -188,151 +197,79 @@ def read_transmissions_df(
     return df
 
 
-ExistingFile = click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path)
-NewFile = click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path)
-
-
 @click.group
 def process_output():
     """Process output file."""
 
 
-simulation_file_option = click.option(
-    "-s",
-    "--simulation",
-    "simulation_file",
-    type=ExistingFile,
-    required=True,
-    help="Path to simulation file.",
-)
-
-contagion_name_option = click.option(
-    "-c",
-    "--contagion",
-    "contagion_name",
-    default="",
-    help="Contagion to extract. (default: first defined contagion)",
-)
-
-simulation_output_option = click.option(
-    "-o",
-    "--simulation-output",
-    "sim_output_file",
-    type=ExistingFile,
-    required=True,
-    show_default=True,
-    help="Path to simulation output file.",
-)
-
-summary_file_option = click.option(
-    "-so",
-    "--summary-output",
-    "summary_file",
-    type=NewFile,
-    default="summary.csv",
-    show_default=True,
-    help="Path to summary file.",
-)
-
-interventions_file_option = click.option(
-    "-io",
-    "--interventions-output",
-    "interventions_file",
-    type=NewFile,
-    default="interventions.csv",
-    show_default=True,
-    help="Path to interventions file.",
-)
-
-transitions_file_option = click.option(
-    "-tio",
-    "--transitions-output",
-    "transitions_file",
-    type=NewFile,
-    default="transitions.csv",
-    show_default=True,
-    help="Path to transitions file.",
-)
-
-transmissions_file_option = click.option(
-    "-tmo",
-    "--transmissions-output",
-    "transmissions_file",
-    type=NewFile,
-    default="transmissions.csv",
-    show_default=True,
-    help="Path to transmissions file.",
-)
-
-
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_output_option
+@existing_output_file_option
 @summary_file_option
 def extract_summary(
     simulation_file: Path,
     contagion_name: str,
-    sim_output_file: Path,
+    output_file: Path,
     summary_file: Path,
 ):
     """Extract summary from simulation output."""
-    df = read_summary_df(simulation_file, sim_output_file, contagion_name)
+    df = read_summary_df(simulation_file, output_file, contagion_name)
     save_df(df, summary_file)
 
 
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_output_option
+@existing_output_file_option
 @interventions_file_option
 def extract_interventions(
     simulation_file: Path,
     contagion_name: str,
-    sim_output_file: Path,
+    output_file: Path,
     interventions_file: Path,
 ):
     """Extract interventions from simulation output."""
-    df = read_interventions_df(simulation_file, sim_output_file, contagion_name)
+    df = read_interventions_df(simulation_file, output_file, contagion_name)
     save_df(df, interventions_file)
 
 
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_output_option
+@existing_output_file_option
 @transitions_file_option
 def extract_transitions(
     simulation_file: Path,
     contagion_name: str,
-    sim_output_file: Path,
+    output_file: Path,
     transitions_file: Path,
 ):
     """Extract transitions from simulation output."""
-    df = read_transitions_df(simulation_file, sim_output_file, contagion_name)
+    df = read_transitions_df(simulation_file, output_file, contagion_name)
     save_df(df, transitions_file)
 
 
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_output_option
+@existing_output_file_option
 @transmissions_file_option
 def extract_transmissions(
     simulation_file: Path,
     contagion_name: str,
-    sim_output_file: Path,
+    output_file: Path,
     transmissions_file: Path,
 ):
     """Extract transmissions from simulation output."""
-    df = read_transmissions_df(simulation_file, sim_output_file, contagion_name)
+    df = read_transmissions_df(simulation_file, output_file, contagion_name)
     save_df(df, transmissions_file)
 
 
 @process_output.command()
 @simulation_file_option
 @contagion_name_option
-@simulation_output_option
+@existing_output_file_option
 @summary_file_option
 @interventions_file_option
 @transitions_file_option
@@ -340,7 +277,7 @@ def extract_transmissions(
 def extract_all(
     simulation_file: Path,
     contagion_name: str,
-    sim_output_file: Path,
+    output_file: Path,
     summary_file: Path,
     interventions_file: Path,
     transitions_file: Path,
@@ -350,7 +287,7 @@ def extract_all(
     ast1 = make_source(simulation_file)
     contagion = find_contagion(contagion_name, ast1)
 
-    with h5.File(sim_output_file, "r") as sim_output:
+    with h5.File(output_file, "r") as sim_output:
         rich.print("[yellow]Extracting summary.[/yellow]")
         df = do_extract_summary(sim_output, contagion)
         save_df(df, summary_file)
