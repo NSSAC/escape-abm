@@ -74,15 +74,18 @@ class CPUSimulator:
     def build(self) -> None:
         do_build_cpu(self.gen_code_dir)
 
-    def simulate(self, num_ticks: int = 0, configs: dict[str, Any] = {}) -> Path:
+    def simulate(
+        self, num_ticks: int = 0, configs: dict[str, Any] = {}, verbose: bool = False
+    ) -> Path:
         i = len(self.output_files)
-        output_file = self.gen_code_dir / f"output-{i}.h5"
+        output_file = self.work_dir / f"output-{i}.h5"
         do_simulate_cpu(
             self.gen_code_dir,
             input_file=self.input_file,
             output_file=output_file,
             num_ticks=num_ticks,
             configs=configs,
+            verbose=verbose,
         )
         self.output_files.append(output_file)
         return output_file

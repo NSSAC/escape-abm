@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
 from pathlib import Path
+from itertools import chain
 from typing import assert_never, Any
-from subprocess import run as do_run
 from tempfile import TemporaryDirectory
 from collections import defaultdict
-from itertools import chain
 from importlib.resources import files
 
 import attrs
@@ -1066,7 +1066,7 @@ def do_prepare(gen_src_dir: Path, input: Path, source: Source) -> None:
 
     cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
-    do_run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 def do_compile(build_dir: Path, source: Source) -> None:
@@ -1081,7 +1081,7 @@ def do_compile(build_dir: Path, source: Source) -> None:
 def do_build(gen_src_dir: Path) -> None:
     cmd = f"make -C '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
-    do_run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 def do_simulate(
@@ -1090,6 +1090,7 @@ def do_simulate(
     output_file: Path,
     num_ticks: int,
     configs: dict[str, Any],
+    verbose: bool = False,
 ) -> None:
     assert (gen_src_dir / "build/simulator").exists(), "Simulator doesn't exist"
     assert input_file.exists(), "Input file doesn't exist"
@@ -1109,7 +1110,16 @@ def do_simulate(
 
     cmd = f"'{gen_src_dir!s}/build/simulator'"
     cmd = shlex.split(cmd)
-    do_run(cmd, env=env, check=True)
+    if verbose:
+        subprocess.run(cmd, env=env, check=True)
+    else:
+        subprocess.run(
+            cmd,
+            env=env,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
 
 
 @click.command()
