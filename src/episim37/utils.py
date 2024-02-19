@@ -6,17 +6,6 @@ from typing import Any
 import h5py as h5
 import polars as pl
 
-from .input_helpers import (
-    do_read_edges_df,
-    do_read_nodes_df,
-)
-from .output_helpers import (
-    do_extract_summary,
-    do_extract_transitions,
-    do_extract_interventions,
-    do_extract_transmissions,
-    find_contagion,
-)
 from .parse_tree import mk_pt
 from .ast1 import mk_ast1
 from .codegen_cpu import (
@@ -28,10 +17,16 @@ from .codegen_cpu import (
 from .input_helpers import (
     NodeTableMeta,
     EdgeTableMeta,
-    make_node_table,
-    make_edge_table,
-    make_in_inc_csr_indptr,
-    make_input_file_cpu,
+    do_prepare_input,
+    do_read_edges_df,
+    do_read_nodes_df,
+)
+from .output_helpers import (
+    do_extract_summary,
+    do_extract_transitions,
+    do_extract_interventions,
+    do_extract_transmissions,
+    find_contagion,
 )
 
 
@@ -69,46 +64,9 @@ class CPUSimulator:
         self.output_files: list[Path] = []
 
     def prepare_input(self) -> None:
-        ntm = NodeTableMeta.from_source_cpu(self.ir)
-        etm = EdgeTableMeta.from_source_cpu(self.ir)
-
-        # Step 1: Preprocess the node table files
-        print("Reading node table.")
-        node_table = make_node_table(self.node_file, ntm)
-
-        # Step 2: Sort the node table dataset
-        print("Sorting node table")
-        node_table = node_table.sort(ntm.key)
-
-        # Step 3: Create a node index
-        print("Making node index.")
-        key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
-
-        Vn = len(node_table)
-        print("### num_nodes: ", Vn)
-
-        # Step 4: Preprocess the edge table files
-        print("Reading edge table.")
-        edge_table = make_edge_table(self.edge_file, etm, key_idx)
-
-        # Step 5: Sort the edge table dataset
-        print("Sorting edge table.")
-        edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
-
-        # Step 6: Make incoming incidence CSR graph's indptr
-        print("Computing incoming incidence CSR graph's indptr.")
-        in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
-
-        En = len(edge_table)
-        print("### num_edges: ", En)
-
-        # Step 7: Create the data file.
-        print("Creating input file.")
-        make_input_file_cpu(
-            self.input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr
+        do_prepare_input(
+            self.ntm, self.etm, self.node_file, self.edge_file, self.input_file
         )
-
-        print("Input file created successfully.")
 
     def prepare_build(self) -> None:
         do_prepare_cpu(self.gen_code_dir, self.simulation_file, self.ir)

@@ -273,6 +273,50 @@ def read_edges_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
     return do_read_edges_df(input_file, etm)
 
 
+def do_prepare_input(
+    ntm: NodeTableMeta,
+    etm: EdgeTableMeta,
+    node_file: Path,
+    edge_file: Path,
+    input_file: Path,
+) -> None:
+    # Step 1: Preprocess the node table files
+    rich.print("[cyan]Reading node table.[/cyan]")
+    node_table = make_node_table(node_file, ntm)
+
+    # Step 2: Sort the node table dataset
+    rich.print("[cyan]Sorting node table.[/cyan]")
+    node_table = node_table.sort(ntm.key)
+
+    # Step 3: Create a node index
+    rich.print("[cyan]Making node index.[/cyan]")
+    key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
+
+    Vn = len(node_table)
+    print("### num_nodes: ", Vn)
+
+    # Step 4: Preprocess the edge table files
+    rich.print("[cyan]Reading edge table.[/cyan]")
+    edge_table = make_edge_table(edge_file, etm, key_idx)
+
+    # Step 5: Sort the edge table dataset
+    rich.print("[cyan]Sorting edge table.[/cyan]")
+    edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
+
+    # Step 6: Make incoming incidence CSR graph's indptr
+    rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
+    in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
+
+    En = len(edge_table)
+    print("### num_edges: ", En)
+
+    # Step 7: Create the data file.
+    rich.print("[cyan]Creating input file.[/cyan]")
+    make_input_file_cpu(input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
+
+    rich.print("[green]Input file created successfully.[/green]")
+
+
 @click.command()
 @simulation_file_option
 @existing_node_file_option
@@ -288,43 +332,7 @@ def prepare_input(
         ntm = NodeTableMeta.from_source_cpu(source)
         etm = EdgeTableMeta.from_source_cpu(source)
 
-        # Step 1: Preprocess the node table files
-        rich.print("[cyan]Reading node table.[/cyan]")
-        node_table = make_node_table(node_file, ntm)
-
-        # Step 2: Sort the node table dataset
-        rich.print("[cyan]Sorting node table.[/cyan]")
-        node_table = node_table.sort(ntm.key)
-
-        # Step 3: Create a node index
-        rich.print("[cyan]Making node index.[/cyan]")
-        key_idx = {k: idx for idx, k in enumerate(node_table[ntm.key])}
-
-        Vn = len(node_table)
-        print("### num_nodes: ", Vn)
-
-        # Step 4: Preprocess the edge table files
-        rich.print("[cyan]Reading edge table.[/cyan]")
-        edge_table = make_edge_table(edge_file, etm, key_idx)
-
-        # Step 5: Sort the edge table dataset
-        rich.print("[cyan]Sorting edge table.[/cyan]")
-        edge_table = edge_table.sort(["_target_node_index", "_source_node_index"])
-
-        # Step 6: Make incoming incidence CSR graph's indptr
-        rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
-        in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
-
-        En = len(edge_table)
-        print("### num_edges: ", En)
-
-        # Step 7: Create the data file.
-        rich.print("[cyan]Creating input file.[/cyan]")
-        make_input_file_cpu(
-            input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr
-        )
-
-        rich.print("[green]Input file created successfully.[/green]")
+        do_prepare_input(ntm, etm, node_file, edge_file, input_file)
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
         raise SystemExit(1)
