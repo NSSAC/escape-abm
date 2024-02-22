@@ -8,6 +8,10 @@ Base features
 * Add builtin function to get nodeset/edgeset size
 * Make non-discrete distributions parameterizeable
 
+* Support grouped reductions
+* Support codegen for CUDA / Sycl
+* Support distributed memory implementation using MPI / UPCXX
+
 Performance improvement
 .......................
 
@@ -25,5 +29,5 @@ Pipeline
 
 * Add distributed memory (MPI) support
 * Change parser from tree-sitter to lark
-* Rewrite codegen 
+* Rewrite codegen
 
