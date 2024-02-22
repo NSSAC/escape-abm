@@ -1212,6 +1212,7 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
                 output_file=output_file,
                 num_ticks=num_ticks,
                 configs={},
+                verbose=True
             )
     except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
         e.rich_print()
