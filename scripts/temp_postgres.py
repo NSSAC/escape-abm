@@ -3,6 +3,7 @@
 import time
 import shlex
 import shutil
+import atexit
 import subprocess
 from random import choice
 from pathlib import Path
@@ -278,6 +279,8 @@ class PostgresDB:
                     stdout=fobj,
                     stderr=subprocess.STDOUT,
                 )
+
+        atexit.register(self.close)
 
     def close(self):
         if self._proc is not None:

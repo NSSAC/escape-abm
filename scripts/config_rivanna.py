@@ -13,12 +13,16 @@ from parsl.addresses import address_by_interface
 
 from parsl_helpers import make_fresh_dir
 
-MAX_NODES = 60
+MAX_NODES = 20
 PARITION = "bii"
 ACCOUNT = "bii_nssac"
 QOS = "bii-half"
 WALLTIME = "24:00:00"
 CPUS_PER_NODE = 37
+
+POSTGRES_EXE = "/scratch/pb5gj/conda-envs/pg_env/bin/postgres"
+OPTUNA_DASH_EXE = "/scratch/pb5gj/conda-envs/episim37/bin/optuna-dashboard"
+PARSL_DASH_EXE = "/scratch/pb5gj/conda-envs/episim37/bin/parsl-visualize"
 
 WORKER_CONDA_ENV = "episim37"
 CONDA_INSTALL_DIR = "/home/pb5gj/miniconda3"
@@ -78,8 +82,8 @@ def make_executor(parsl_work_dir: Path) -> HighThroughputExecutor:
     return htex
 
 
-def setup_parsl(output_root: Path):
-    parsl_work_dir = output_root / "parsl_root"
+def setup_parsl(parsl_work_dir: str | Path):
+    parsl_work_dir = Path(parsl_work_dir)
     make_fresh_dir(parsl_work_dir)
 
     default_htex = make_executor(parsl_work_dir=parsl_work_dir)

@@ -13,10 +13,11 @@ from parsl.addresses import address_by_interface
 from parsl_helpers import make_fresh_dir
 
 CPU_CORES = 6
+NUM_NODES = 1
 
 POSTGRES_EXE = "/usr/bin/postgres"
-DASHBOARD_EXE = "/home/parantapa/miniconda3/envs/episim37/bin/optuna-dashboard"
-NUM_NODES = 1
+OPTUNA_DASH_EXE = "/home/parantapa/miniconda3/envs/episim37/bin/optuna-dashboard"
+PARSL_DASH_EXE = "/home/parantapa/miniconda3/envs/episim37/bin/parsl-visualize"
 
 WORKER_CONDA_ENV = "episim37"
 CONDA_INSTALL_DIR = "/home/parantapa/miniconda3"
@@ -55,10 +56,8 @@ def make_executor(parsl_work_dir: Path) -> HighThroughputExecutor:
     return htex
 
 
-def setup_parsl(output_root: str | Path):
-    output_root = Path(output_root)
-
-    parsl_work_dir = output_root / "parsl_root"
+def setup_parsl(parsl_work_dir: str | Path):
+    parsl_work_dir = Path(parsl_work_dir)
     make_fresh_dir(parsl_work_dir)
 
     run_dir = str(parsl_work_dir / "runinfo")

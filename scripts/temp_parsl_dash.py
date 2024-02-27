@@ -1,51 +1,47 @@
-"""Run optuna dashboard locally."""
+"""Run parsl dashboard locally."""
 
 import shlex
 import shutil
-import socket
 import atexit
+import socket
 import subprocess
 from textwrap import dedent
 from pathlib import Path
 
 
-class OptunaDasboard:
+class ParslDasboard:
     def __init__(
         self,
-        storage: str,
-        artifact_dir: Path | str,
+        parsl_work_dir: Path | str,
         dashboard_exe: Path | str | None = None,
-        port: int = 8080,
-        delete_if_exists: bool = False,
+        port: int = 8081,
         verbose: bool = False,
     ):
-        artifact_dir = Path(artifact_dir)
+        parsl_work_dir = Path(parsl_work_dir)
+        log_path = parsl_work_dir / "parsl-visualize.log"
 
         if dashboard_exe is None:
-            dashboard_exe = shutil.which("optuna-dashboard")
+            dashboard_exe = shutil.which("parsl-visualize")
             if dashboard_exe is None:
-                raise RuntimeError("Unable to find optuna-dashboard executable.")
+                raise RuntimeError("Unable to find parsl-visualize executable.")
         dashboard_exe = Path(dashboard_exe)
 
-        if delete_if_exists and artifact_dir.exists():
-            shutil.rmtree(artifact_dir)
-        artifact_dir.mkdir(parents=True, exist_ok=True)
+        log_endpoint = "sqlite:///" + str(parsl_work_dir / "monitoring.db")
 
         # Start dashboard in the background
         print("Starting dashboard ...")
         cmd = f"""
         '{dashboard_exe!s}'
-            --host 0.0.0.0
+            --l 0.0.0.0
             --port {port}
-            --artifact-dir '{artifact_dir!s}'
-            '{storage}'
+            '{log_endpoint!s}'
         """
         if verbose:
             cmd_str = dedent(cmd.strip())
             print(f"executing: {cmd_str}")
         cmd = shlex.split(cmd)
 
-        with open(artifact_dir / "optuna-dashboard.log", "at") as fobj:
+        with open(log_path, "at") as fobj:
             self._proc: subprocess.Popen | None = subprocess.Popen(
                 cmd,
                 stdout=fobj,
@@ -55,7 +51,7 @@ class OptunaDasboard:
 
         hostname = socket.gethostname()
         self.dashboard_url = f"http://{hostname}:{port}"
-        print(f"Optuna dashboard url: {self.dashboard_url}")
+        print(f"Parsl dashboard url: {self.dashboard_url}")
 
         atexit.register(self.close)
 
