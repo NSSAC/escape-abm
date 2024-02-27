@@ -9,7 +9,7 @@ from textwrap import dedent
 from pathlib import Path
 
 
-class ParslDasboard:
+class ParslDashboard:
     def __init__(
         self,
         parsl_work_dir: Path | str,

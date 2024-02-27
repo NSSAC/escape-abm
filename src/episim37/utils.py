@@ -135,32 +135,36 @@ class Simulation:
             return fobj.attrs["num_edges"].item()  # type: ignore
 
     def extract_summary(
-        self, output_file: Path, contagion_name: str = ""
+        self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
+        output_file = Path(output_file)
         contagion = find_contagion(contagion_name, self.simulator.ast1)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_summary(sim_output, contagion)
         return df
 
     def extract_transitions(
-        self, output_file: Path, contagion_name: str = ""
+        self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
+        output_file = Path(output_file)
         contagion = find_contagion(contagion_name, self.simulator.ast1)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_transitions(sim_output, contagion)
         return df
 
     def extract_interventions(
-        self, output_file: Path, contagion_name: str = ""
+        self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
+        output_file = Path(output_file)
         contagion = find_contagion(contagion_name, self.simulator.ast1)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_interventions(sim_output, contagion)
         return df
 
     def extract_transmissions(
-        self, output_file: Path, contagion_name: str = ""
+        self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
+        output_file = Path(output_file)
         contagion = find_contagion(contagion_name, self.simulator.ast1)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_transmissions(sim_output, contagion)

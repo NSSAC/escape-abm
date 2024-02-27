@@ -9,7 +9,7 @@ from textwrap import dedent
 from pathlib import Path
 
 
-class OptunaDasboard:
+class OptunaDashboard:
     def __init__(
         self,
         storage: str,
