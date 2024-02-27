@@ -1,11 +1,12 @@
 """Run postgres database locally."""
 
-import shlex
 import time
+import shlex
 import shutil
 import subprocess
-from textwrap import dedent
+from random import choice
 from pathlib import Path
+from textwrap import dedent
 
 import psycopg2
 import netifaces
@@ -101,6 +102,14 @@ default_text_search_config = 'pg_catalog.english'
 """
 
 
+def random_str32() -> str:
+    lower = "abcdefghijklmnopqrstuvwxyz"
+    digits = "0123456789"
+    n = 32
+
+    return "".join(choice(lower + digits) for _ in range(n))
+
+
 def wait_for_db_start(dsn: dict, server: subprocess.Popen) -> None:
     print("Waiting for database to start .", end="", flush=True)
     while True:
@@ -162,21 +171,22 @@ def create_pg_database(
 
 
 class PostgresDB:
-
     def __init__(
         self,
         db_dir: Path | str,
         postgres_exe: Path | str | None = None,
         interface: str = "lo",
-        port: int = 5432,
+        port: int = 15432,
         username: str = "postgres",
-        password: str = "postgres",
+        password: str | None = None,
         dbname: str = "default",
         delete_if_exists: bool = False,
         connect_timeout: int = 10,
         verbose: bool = False,
     ):
         db_dir = Path(db_dir)
+        if password is None:
+            password = random_str32()
 
         if postgres_exe is None:
             postgres_exe = shutil.which("postgres")

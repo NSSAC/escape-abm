@@ -76,7 +76,7 @@ class CPUSimulator:
         do_build_cpu(self.gen_code_dir)
 
 
-class NetworkSimulation:
+class Simulation:
     def __init__(
         self,
         simulator: CPUSimulator,
