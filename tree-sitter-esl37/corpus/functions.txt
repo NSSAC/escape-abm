@@ -1,4 +1,57 @@
 ==========
+Function 1
+==========
+
+def func() -> int:
+    return 1
+end
+
+def func():
+    pass
+end
+
+def func(a: int, b: float) -> float:
+    return 1.0
+end
+
+---
+
+(source_file
+    (function
+        name: (identifier)
+        params: (function_params)
+        rtype: (reference (identifier))
+        body: (function_body
+            (return_statement (integer))
+        )
+    )
+    (function
+        name: (identifier)
+        params: (function_params)
+        body: (function_body
+            (pass_statement)
+        )
+    )
+    (function
+        name: (identifier)
+        params: (function_params
+            (function_param
+                name: (identifier)
+                type: (reference (identifier))
+            )
+            (function_param
+                name: (identifier)
+                type: (reference (identifier))
+            )
+        )
+        rtype: (reference (identifier))
+        body: (function_body
+            (return_statement (float))
+        )
+    )
+)
+
+==========
 Function 2
 ==========
 
@@ -20,10 +73,10 @@ end
         params: (function_params
             (function_param
                 name: (identifier)
-                type: (identifier)
+                type: (reference (identifier))
             )
         )
-        return: (identifier)
+        rtype: (reference (identifier))
         body: (function_body
             (update_statement
                 left: (reference (identifier))

@@ -1,0 +1,80 @@
+=========
+Foreach 1
+=========
+
+__test statement:
+    foreach node in vset1 run some_function
+    foreach node in vset1 run [v: node]{ v.c1.state = E ; }
+end
+
+---
+
+(source_file
+    (test_statement
+        (foreach_statement
+            set: (reference (identifier))
+            function: (reference (identifier))
+        )
+        (foreach_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+    )
+)
+
+=========
+Foreach 2
+=========
+
+__test statement:
+    foreach node in vset1 run [v: node]{
+        v.c1.state = E
+        v.c2.state = E1
+    }
+
+    foreach node in vset1 run [v: node]{ v.c1.state = E ; v.c2.state = E1 ; }
+end
+
+---
+
+(source_file
+    (test_statement
+        (foreach_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+        (foreach_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+    )
+)

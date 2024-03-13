@@ -20,46 +20,47 @@ node pid: int node key ; age: int ; gender: gender_t ; end
     (node
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
             annotation: (node_annotation)
             annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
             annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
             annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
         )
     )
+
     (node
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
             annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
         )
         field: (node_field
             name: (identifier)
-            type: (identifier)
+            type: (reference (identifier))
         )
     )
 )

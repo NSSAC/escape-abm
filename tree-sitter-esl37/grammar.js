@@ -1,4 +1,4 @@
-// Tree sitter grammar file for esl
+// Tree sitter grammar file for ESL37
 
 const PREC = {
     LOGICAL_OR: 1,
@@ -19,7 +19,6 @@ module.exports = grammar({
     rules: {
         source_file: $ => repeat(choice(
             $.enum,
-            $.config,
             $.global,
             $.node,
             $.edge,
@@ -41,23 +40,13 @@ module.exports = grammar({
             'end'
         ),
 
-        config: $ => seq(
-            'config',
-            field('name', $.identifier),
-            ':',
-            field('type', $.identifier),
-            '=',
-            field('default', choice($.integer, $.float, $.boolean)),
-            $._terminator
-        ),
-
         global: $ => seq(
-            'global',
+            field('category', choice('global', 'config')),
             field('name', $.identifier),
             ':',
-            field('type', $.identifier),
+            field('type', $.reference),
             '=',
-            field('default', choice($.integer, $.float, $.boolean)),
+            field('default', choice($.boolean, $.integer, $.float)),
             $._terminator,
         ),
 
@@ -70,7 +59,7 @@ module.exports = grammar({
         node_field: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.identifier),
+            field('type', $.reference),
             field('annotation', repeat($.node_annotation)),
             $._terminator
         ),
@@ -89,7 +78,7 @@ module.exports = grammar({
         edge_field: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.identifier),
+            field('type', $.reference),
             field('annotation', repeat($.edge_annotation)),
             $._terminator
         ),
@@ -107,18 +96,9 @@ module.exports = grammar({
         ),
 
         _distribution: $ => choice(
-            $.constant_dist,
             $.discrete_dist,
             $.normal_dist,
             $.uniform_dist
-        ),
-
-        constant_dist: $ => seq(
-            'constant',
-            field('name', $.identifier),
-            'v', '=', field('v', $._number),
-            $._terminator,
-            'end'
         ),
 
         discrete_dist: $ => seq(
@@ -130,17 +110,17 @@ module.exports = grammar({
 
         discrete_pv: $ => seq(
             'p', '=', field('p', $._number), ',',
-            'v', '=', field('v', $._number),
+            'v', '=', field('v', $._expression),
             $._terminator
         ),
 
         normal_dist: $ => seq(
             'normal',
             field('name', $.identifier),
-            'mean', '=', field('mean', $._number), ',',
-            'std', '=', field('std', $._number),
-            optional(seq(',', 'min', '=', field('min', $._number))),
-            optional(seq(',', 'max', '=', field('max', $._number))),
+            'mean', '=', field('mean', $._expression), ',',
+            'std', '=', field('std', $._expression),
+            optional(seq(',', 'min', '=', field('min', $._expression))),
+            optional(seq(',', 'max', '=', field('max', $._expression))),
             $._terminator,
             'end'
         ),
@@ -148,8 +128,8 @@ module.exports = grammar({
         uniform_dist: $ => seq(
             'uniform',
             field('name', $.identifier),
-            'low', '=', field('low', $._number), ',',
-            'high', '=', field('high', $._number),
+            'low', '=', field('low', $._expression), ',',
+            'high', '=', field('high', $._expression),
             $._terminator,
             'end'
         ),
@@ -168,14 +148,13 @@ module.exports = grammar({
 
         contagion_state_type: $ => seq(
             alias(/state\s+type/, 'state type'),
-            field('type', $.identifier),
+            field('type', $.reference),
             $._terminator
         ),
 
         contagion_function: $ => seq(
             field('type', choice('susceptibility', 'infectivity', 'transmissibility', 'enabled')),
-            'fn',
-            field('function', $.identifier),
+            field('function', choice($._expression, $.inline_expression_function)),
             $._terminator
         ),
 
@@ -186,10 +165,10 @@ module.exports = grammar({
         ),
 
         transition: $ => seq(
-            field('entry', $.identifier), '->',
-            field('exit', $.identifier), ',',
-            optional(seq('p', '=', field('p_function', $.identifier), ',')),
-            'dwell', '=', field('dwell', $.identifier),
+            field('entry', $.reference), '->',
+            field('exit', $.reference), ',',
+            optional(seq('p', '=', field('p', choice($._expression, $.inline_expression_function)), ',')),
+            'dwell', '=', field('dwell', choice($._expression, $.inline_expression_function)),
             $._terminator
         ),
 
@@ -200,9 +179,9 @@ module.exports = grammar({
         ),
 
         transmission: $ => seq(
-            field('contact', $.identifier), '=>',
-            field('entry', $.identifier), '->',
-            field('exit', $.identifier),
+            field('contact', $.reference), '=>',
+            field('entry', $.reference), '->',
+            field('exit', $.reference),
             $._terminator
         ),
 
@@ -216,12 +195,11 @@ module.exports = grammar({
             field('name', commaSep1($.identifier)),
         ),
 
-
         function: $ => seq(
             'def',
             field('name', $.identifier),
             field('params', $.function_params),
-            optional(seq('->', field('return', $.identifier))),
+            optional(seq('->', field('rtype', $.reference))),
             ':',
             field('body', $.function_body),
             'end'
@@ -234,10 +212,34 @@ module.exports = grammar({
         function_param: $ => seq(
             field('name', $.identifier),
             ':',
-            field('type', $.identifier),
+            field('type', $.reference),
         ),
 
         function_body: $ => repeat1($._statement),
+
+        inline_expression_function: $ => seq(
+            '[',
+            field('name', $.identifier),
+            ':',
+            field('type', $.reference),
+            '->',
+            field('rtype', $.reference),
+            ']',
+            '(',
+            field('expression', $._expression),
+            ')'
+        ),
+
+        inline_update_function: $ => seq(
+            '[',
+            field('name', $.identifier),
+            ':',
+            field('type', $.reference),
+            ']',
+            '{',
+            field('stmt', repeat1($.update_statement)),
+            '}'
+        ),
 
         test_statement: $ => seq(
             '__test', 'statement', ':',
@@ -250,15 +252,14 @@ module.exports = grammar({
             $.pass_statement,
             $.return_statement,
             $.if_statement,
-            // $.switch_statement,
+            $.switch_statement,
             $.while_loop,
             // $.for_loop,
             $.call_statement,
             $.update_statement,
             $.print_statement,
             $.select_using,
-            $.select_approx,
-            $.select_relative,
+            $.select_sample,
             $.foreach_statement,
         ),
 
@@ -266,7 +267,7 @@ module.exports = grammar({
             'var',
             field('name', $.identifier),
             ':',
-            field('type', $.identifier),
+            field('type', $.reference),
             '=',
             field('init', $._expression),
             $._terminator,
@@ -305,26 +306,26 @@ module.exports = grammar({
             field('body', repeat1($._statement))
         ),
 
-        // switch_statement: $ => seq(
-        //     'switch',
-        //     field('condition', $._expression),
-        //     ':',
-        //     field('case', repeat1($.case_section)),
-        //     field('default', optional($.default_section)),
-        //     'end'
-        // ),
+        switch_statement: $ => seq(
+            'switch',
+            field('condition', $._expression),
+            ':',
+            field('case', repeat1($.case_section)),
+            field('default', optional($.default_section)),
+            'end'
+        ),
 
-        // case_section: $ => seq(
-        //     'case',
-        //     field('match', $._expression),
-        //     ':',
-        //     field('body', repeat1($._statement))
-        // ),
+        case_section: $ => seq(
+            'case',
+            field('match', $._expression),
+            ':',
+            field('body', repeat1($._statement))
+        ),
 
-        // default_section: $ => seq(
-        //     'default', ':',
-        //     field('body', repeat1($._statement))
-        // ),
+        default_section: $ => seq(
+            'default', ':',
+            field('body', repeat1($._statement))
+        ),
 
         while_loop: $ => seq(
             'while',
@@ -373,29 +374,20 @@ module.exports = grammar({
 
         select_using: $ => seq(
             'select',
-            field('set', $.identifier),
+            field('set', $.reference),
             'using',
-            field('function', $.identifier),
+            field('function', choice($.reference, $.inline_expression_function)),
             $._terminator,
         ),
 
-        select_approx: $ => seq(
+        select_sample: $ => seq(
             'select',
-            field('set', $.identifier),
-            'sample', 'approx',
-            field('amount', $._number),
+            field('set', $.reference),
+            'sample',
+            field('type', choice('approx', 'relative')),
+            field('amount', $._expression),
             'from',
-            field('parent', $.identifier),
-            $._terminator,
-        ),
-
-        select_relative: $ => seq(
-            'select',
-            field('set', $.identifier),
-            'sample', 'relative',
-            field('amount', $._number),
-            'from',
-            field('parent', $.identifier),
+            field('parent', $.reference),
             $._terminator,
         ),
 
@@ -403,9 +395,9 @@ module.exports = grammar({
             'foreach',
             field('type', choice('node', 'edge')),
             'in',
-            field('set', $.identifier),
+            field('set', $.reference),
             'run',
-            field('function', $.identifier),
+            field('function', choice($.reference, $.inline_update_function)),
             $._terminator,
         ),
 

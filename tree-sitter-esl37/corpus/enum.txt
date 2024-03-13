@@ -16,6 +16,7 @@ enum gender_t M, F end
         const: (identifier)
         const: (identifier)
     )
+
     (enum
         name: (identifier)
         const: (identifier)

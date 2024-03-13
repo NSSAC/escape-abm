@@ -1,0 +1,135 @@
+===========
+Contagion 1
+===========
+
+contagion c1
+    state type c1_state_t
+
+    transition
+        E -> I, p = p_E_I , dwell = fixed1
+        I -> R, dwell = normal1
+    end
+
+    transmission
+        E => S -> E
+        E => V -> E
+        I => S -> E
+        I => V -> E
+    end
+
+    susceptibility c1_susceptibility
+    infectivity c1_infectivity
+    transmissibility c1_transmissibility
+    enabled c1_enabled
+end
+
+---
+
+(source_file
+    (contagion
+        name: (identifier)
+        body: (contagion_state_type
+            type: (reference (identifier))
+        )
+        body: (transitions
+            body: (transition
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+                p: (reference (identifier))
+                dwell: (reference (identifier))
+            )
+            body: (transition
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+                dwell: (reference (identifier))
+            )
+        )
+        body: (transmissions
+            body: (transmission
+                contact: (reference (identifier))
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+            )
+            body: (transmission
+                contact: (reference (identifier))
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+            )
+            body: (transmission
+                contact: (reference (identifier))
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+            )
+            body: (transmission
+                contact: (reference (identifier))
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+            )
+        )
+        body: (contagion_function function: (reference (identifier)))
+        body: (contagion_function function: (reference (identifier)))
+        body: (contagion_function function: (reference (identifier)))
+        body: (contagion_function function: (reference (identifier)))
+    )
+)
+
+===========
+Contagion 2
+===========
+
+contagion c1
+    transition
+        E -> I, p = [v : node -> float]( v.E_I_p ) , dwell = fixed1
+        I -> R, dwell = [v : node -> float]( normal1() )
+    end
+
+    susceptibility [v: node -> float]( v.susceptibility )
+    infectivity 1.0
+    transmissibility c1_transmissibility
+    enabled c1_enabled
+end
+
+---
+
+(source_file
+    (contagion
+        name: (identifier)
+        body: (transitions
+            body: (transition
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+                p: (inline_expression_function
+                    name: (identifier)
+                    type: (reference (identifier))
+                    rtype: (reference (identifier))
+                    expression: (reference (identifier) (identifier))
+                )
+                dwell: (reference (identifier))
+            )
+            body: (transition
+                entry: (reference (identifier))
+                exit: (reference (identifier))
+                dwell: (inline_expression_function
+                    name: (identifier)
+                    type: (reference (identifier))
+                    rtype: (reference (identifier))
+                    expression: (function_call
+                        function: (reference (identifier))
+                    )
+
+                )
+            )
+        )
+        body: (contagion_function
+            function: (inline_expression_function
+                name: (identifier)
+                type: (reference (identifier))
+                rtype: (reference (identifier))
+                expression: (reference (identifier) (identifier))
+            )
+        )
+        body: (contagion_function function: (float))
+        body: (contagion_function function: (reference (identifier)))
+        body: (contagion_function function: (reference (identifier)))
+    )
+)

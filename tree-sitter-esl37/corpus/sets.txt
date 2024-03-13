@@ -1,0 +1,29 @@
+=========
+Nodeset 1
+=========
+
+nodeset vset1
+nodeset vset2, vset3
+
+---
+
+(source_file
+    (nodeset name: (identifier))
+    (nodeset
+        name: (identifier)
+        name: (identifier)
+    )
+)
+
+=========
+Edgeset 1
+=========
+
+edgeset seed_edges
+
+---
+
+(source_file
+    (edgeset (identifier))
+)
+

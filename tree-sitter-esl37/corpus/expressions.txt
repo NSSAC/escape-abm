@@ -1,0 +1,282 @@
+==================
+Unary Expression 1
+==================
+
+__test expression:
+    not a
+end
+
+__test expression:
+    +1
+end
+
+__test expression:
+    -1.0
+end
+
+__test expression:
+    +1.0e-5
+end
+
+__test expression:
+    not True
+end
+
+__test expression:
+    not False
+end
+
+---
+
+(source_file
+    (test_expression
+        (unary_expression
+            (reference (identifier))
+        )
+    )
+    (test_expression
+        (unary_expression (integer))
+    )
+    (test_expression
+        (unary_expression (float))
+    )
+    (test_expression
+        (unary_expression (float))
+    )
+    (test_expression
+        (unary_expression (boolean))
+    )
+    (test_expression
+        (unary_expression (boolean))
+    )
+)
+
+==========================
+Parenthesized Expression 1
+==========================
+
+__test expression:
+    (a + b)
+end
+
+__test expression:
+    a * (b)
+end
+
+__test expression:
+    a * (-b)
+end
+
+__test expression:
+    (-a) * (-b)
+end
+
+---
+
+(source_file
+    (test_expression
+        (parenthesized_expression
+            (binary_expression
+                (reference (identifier))
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (parenthesized_expression
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+            (parenthesized_expression
+                (unary_expression
+                    (reference (identifier))
+                )
+            )
+        )
+    )
+)
+
+===================
+Binary Expression 1
+===================
+
+__test expression:
+    a and b
+end
+
+__test expression:
+    a or b
+end
+
+__test expression:
+    a or not b
+end
+
+__test expression:
+    not a or not b
+end
+
+---
+
+(source_file
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (reference (identifier))
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (reference (identifier))
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (unary_expression
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (unary_expression
+                (reference (identifier))
+            )
+            (unary_expression
+                (reference (identifier))
+            )
+        )
+    )
+)
+
+===================
+Binary Expression 2
+===================
+
+__test expression:
+    a + b
+end
+
+__test expression:
+    a * b
+end
+
+__test expression:
+    a * -b
+end
+
+__test expression:
+    -a * -b
+end
+
+---
+
+(source_file
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (reference (identifier))
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (reference (identifier))
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (unary_expression
+                (reference (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (unary_expression
+                (reference (identifier))
+            )
+            (unary_expression
+                (reference (identifier))
+            )
+        )
+    )
+)
+
+===========
+Reference 1
+===========
+
+__test expression:
+    (a + b.value)
+end
+
+__test expression:
+    a * (b.c1.dwell)
+end
+
+---
+
+(source_file
+    (test_expression
+        (parenthesized_expression
+            (binary_expression
+                (reference (identifier))
+                (reference (identifier) (identifier))
+            )
+        )
+    )
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (parenthesized_expression
+                (reference (identifier) (identifier) (identifier))
+            )
+        )
+    )
+)
+
+===============
+Function Call 1
+===============
+
+__test expression:
+    a + b.susceptibility()
+end
+
+---
+
+(source_file
+    (test_expression
+        (binary_expression
+            (reference (identifier))
+            (function_call
+                (reference (identifier) (identifier))
+            )
+        )
+    )
+)
+

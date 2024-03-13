@@ -1,0 +1,37 @@
+========
+Global 1
+========
+
+config num_ticks: int = 0
+
+config transmissibility: float = 1.0
+
+global some_flag: bool = True
+
+global other_flag: bool = False
+
+---
+
+(source_file
+    (global
+        name: (identifier)
+        type: (reference (identifier))
+        default: (integer)
+    )
+    (global
+        name: (identifier)
+        type: (reference (identifier))
+        default: (float)
+    )
+    (global
+        name: (identifier)
+        type: (reference (identifier))
+        default: (boolean)
+    )
+    (global
+        name: (identifier)
+        type: (reference (identifier))
+        default: (boolean)
+    )
+)
+
