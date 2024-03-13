@@ -8,6 +8,7 @@ edge
     activity1: activity_t static
     activity2: activity_t static
     duration: float
+    dynamic_edge_attr: float save
 end
 
 ---
@@ -39,6 +40,11 @@ end
         field: (edge_field
             name: (identifier)
             type: (reference (identifier))
+        )
+        field: (edge_field
+            name: (identifier)
+            type: (reference (identifier))
+            annotation: (edge_annotation)
         )
     )
 )

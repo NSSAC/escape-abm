@@ -7,8 +7,8 @@ node
     age: int static
     gender: gender_t static
 
-    will_vax: bool
-    will_mask: bool
+    will_vax: bool save
+    will_mask: bool save
     is_masking: bool
 end
 
@@ -37,10 +37,12 @@ node pid: int node key ; age: int ; gender: gender_t ; end
         field: (node_field
             name: (identifier)
             type: (reference (identifier))
+            annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)
             type: (reference (identifier))
+            annotation: (node_annotation)
         )
         field: (node_field
             name: (identifier)

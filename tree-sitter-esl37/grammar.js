@@ -66,7 +66,8 @@ module.exports = grammar({
 
         node_annotation: _ => token(choice(
             alias(/node\s+key/, 'node key'),
-            'static'
+            'static',
+            'save'
         )),
 
         edge: $ => seq(
@@ -86,7 +87,8 @@ module.exports = grammar({
         edge_annotation: _ => token(choice(
             alias(/target\s+node\s+key/, 'target node key'),
             alias(/source\s+node\s+key/, 'source node key'),
-            'static'
+            'static',
+            'save'
         )),
 
         distributions: $ => seq(

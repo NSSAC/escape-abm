@@ -281,6 +281,10 @@
           {
             "type": "STRING",
             "value": "static"
+          },
+          {
+            "type": "STRING",
+            "value": "save"
           }
         ]
       }
@@ -375,6 +379,10 @@
           {
             "type": "STRING",
             "value": "static"
+          },
+          {
+            "type": "STRING",
+            "value": "save"
           }
         ]
       }
