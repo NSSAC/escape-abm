@@ -263,6 +263,7 @@ module.exports = grammar({
             $.select_using,
             $.select_sample,
             $.foreach_statement,
+            $.reduce_statement
         ),
 
         variable: $ => seq(
@@ -395,12 +396,21 @@ module.exports = grammar({
 
         foreach_statement: $ => seq(
             'foreach',
-            field('type', choice('node', 'edge')),
             'in',
             field('set', $.reference),
             'run',
             field('function', choice($.reference, $.inline_update_function)),
             $._terminator,
+        ),
+
+        reduce_statement: $ => seq(
+            field('outvar', $.reference),
+            ':=',
+            field('operator', choice('+', '*',)),
+            'reduce',
+            field('set', $.reference),
+            'using',
+            field('function', choice($.reference, $.inline_expression_function)),
         ),
 
         print_statement: $ => seq(

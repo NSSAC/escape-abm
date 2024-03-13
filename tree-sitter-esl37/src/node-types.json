@@ -188,6 +188,10 @@
             "named": true
           },
           {
+            "type": "reduce_statement",
+            "named": true
+          },
+          {
             "type": "return_statement",
             "named": true
           },
@@ -407,6 +411,10 @@
           },
           {
             "type": "print_statement",
+            "named": true
+          },
+          {
+            "type": "reduce_statement",
             "named": true
           },
           {
@@ -649,6 +657,10 @@
             "named": true
           },
           {
+            "type": "reduce_statement",
+            "named": true
+          },
+          {
             "type": "return_statement",
             "named": true
           },
@@ -747,6 +759,10 @@
             "named": true
           },
           {
+            "type": "reduce_statement",
+            "named": true
+          },
+          {
             "type": "return_statement",
             "named": true
           },
@@ -835,20 +851,6 @@
             "named": true
           }
         ]
-      },
-      "type": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "edge",
-            "named": false
-          },
-          {
-            "type": "node",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -924,6 +926,10 @@
         },
         {
           "type": "print_statement",
+          "named": true
+        },
+        {
+          "type": "reduce_statement",
           "named": true
         },
         {
@@ -1140,6 +1146,10 @@
           },
           {
             "type": "print_statement",
+            "named": true
+          },
+          {
+            "type": "reduce_statement",
             "named": true
           },
           {
@@ -1684,6 +1694,60 @@
     }
   },
   {
+    "type": "reduce_statement",
+    "named": true,
+    "fields": {
+      "function": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "inline_expression_function",
+            "named": true
+          },
+          {
+            "type": "reference",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "*",
+            "named": false
+          },
+          {
+            "type": "+",
+            "named": false
+          }
+        ]
+      },
+      "outvar": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "reference",
+            "named": true
+          }
+        ]
+      },
+      "set": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "reference",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "reference",
     "named": true,
     "fields": {},
@@ -2038,6 +2102,10 @@
         },
         {
           "type": "print_statement",
+          "named": true
+        },
+        {
+          "type": "reduce_statement",
           "named": true
         },
         {
@@ -2580,6 +2648,10 @@
             "named": true
           },
           {
+            "type": "reduce_statement",
+            "named": true
+          },
+          {
             "type": "return_statement",
             "named": true
           },
@@ -2719,6 +2791,10 @@
   },
   {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": ":=",
     "named": false
   },
   {
@@ -2943,6 +3019,10 @@
   },
   {
     "type": "print",
+    "named": false
+  },
+  {
+    "type": "reduce",
     "named": false
   },
   {

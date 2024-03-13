@@ -3,8 +3,8 @@ Foreach 1
 =========
 
 __test statement:
-    foreach node in vset1 run some_function
-    foreach node in vset1 run [v: node]{ v.c1.state = E ; }
+    foreach in vset1 run some_function
+    foreach in vset1 run [v: node]{ v.c1.state = E ; }
 end
 
 ---
@@ -34,12 +34,12 @@ Foreach 2
 =========
 
 __test statement:
-    foreach node in vset1 run [v: node]{
+    foreach in vset1 run [v: node]{
         v.c1.state = E
         v.c2.state = E1
     }
 
-    foreach node in vset1 run [v: node]{ v.c1.state = E ; v.c2.state = E1 ; }
+    foreach in vset1 run [v: node]{ v.c1.state = E ; v.c2.state = E1 ; }
 end
 
 ---

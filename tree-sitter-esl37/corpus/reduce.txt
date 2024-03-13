@@ -1,0 +1,31 @@
+========
+Reduce 1
+========
+
+__test statement:
+    var1 := + reduce vset1 using some_function
+    var2 := * reduce vset2 using [v: node -> float]( v.some_attr )
+end
+
+---
+
+(source_file
+    (test_statement
+        (reduce_statement
+            outvar: (reference (identifier))
+            set: (reference (identifier))
+            function: (reference (identifier))
+        )
+        (reduce_statement
+            outvar: (reference (identifier))
+            set: (reference (identifier))
+            function: (inline_expression_function
+                name: (identifier)
+                type: (reference (identifier))
+                rtype: (reference (identifier))
+                expression: (reference (identifier) (identifier))
+            )
+        )
+    )
+)
+
