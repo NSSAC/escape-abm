@@ -13,44 +13,16 @@ import rich.markup
 from rich.tree import Tree
 from rich.pretty import Pretty
 
+from .misc import SourcePosition, EslError
 from .tree_sitter_bindings import get_parser
 from .click_helpers import simulation_file_option
 
 
-@attrs.define
-class SourcePosition:
-    """Position in source."""
-
-    source: str
-    source_bytes: bytes
-    start: tuple[int, int]  # line, col: zero indexed
-    end: tuple[int, int]  # line, col: zero indexed
-    byte_range: tuple[int, int]  # zero indexed
-
-    @property
-    def line(self):
-        return self.start[0] + 1
-
-    @property
-    def col(self):
-        return self.start[1] + 1
-
-    @property
-    def bytes(self) -> bytes:
-        return self.source_bytes[self.byte_range[0] : self.byte_range[1]]
-
-    @property
-    def text(self) -> str:
-        return self.bytes.decode()
-
-    @classmethod
-    def from_tsnode(
-        cls, source: str, source_bytes: bytes, node: TSNode
-    ) -> SourcePosition:
-        start = (node.start_point[0], node.start_point[1])
-        end = (node.end_point[0], node.end_point[1])
-        byte_range = (node.start_byte, node.end_byte)
-        return cls(source, source_bytes, start, end, byte_range)
+def tsnode_to_pos(node: TSNode, source: str, source_bytes: bytes) -> SourcePosition:
+    start = (node.start_point[0], node.start_point[1])
+    end = (node.end_point[0], node.end_point[1])
+    byte_range = (node.start_byte, node.end_byte)
+    return SourcePosition(source, source_bytes, start, end, byte_range)
 
 
 FILTERED_NODES = ["comment"]
@@ -73,7 +45,7 @@ class PTNode:
 
     @property
     def pos(self) -> SourcePosition:
-        return SourcePosition.from_tsnode(self.source, self.source_bytes, self.node)
+        return tsnode_to_pos(self.node, self.source, self.source_bytes)
 
     def field(self, name: str) -> PTNode:
         child = self.node.child_by_field_name(name)
@@ -134,47 +106,26 @@ class PTNode:
         return tree
 
 
-@attrs.define
-class Error:
-    type: str
-    explanation: str
-    show_source: bool
-    pos: SourcePosition
-
-    def rich_print(self):
-        etype = f"[red]{self.type}[/red]"
-        fpath = f"[yellow]{self.pos.source}[/yellow]"
-        line = self.pos.line
-        col = self.pos.col
-        expl = rich.markup.escape(self.explanation)
-
-        rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
-        if self.show_source:
-            print(self.pos.text)
-
-
 def check_parse_errors(
-    source: str, source_bytes: bytes, node: TSNode, errors: list[Error] | None = None
-) -> list[Error]:
+    source: str, source_bytes: bytes, node: TSNode, errors: list[EslError] | None = None
+) -> list[EslError]:
     if errors is None:
         errors = []
 
     if node.type == "ERROR":
         errors.append(
-            Error(
+            EslError(
                 "Parse error",
                 "Failed to parse",
-                True,
-                SourcePosition.from_tsnode(source, source_bytes, node),
+                tsnode_to_pos(node, source, source_bytes),
             )
         )
     elif node.is_missing:
         errors.append(
-            Error(
+            EslError(
                 "Missing token",
                 f"Expected token of type {node.type}",
-                True,
-                SourcePosition.from_tsnode(source, source_bytes, node),
+                tsnode_to_pos(node, source, source_bytes),
             )
         )
     elif node.has_error:
@@ -185,7 +136,7 @@ def check_parse_errors(
 
 
 class ParseTreeConstructionError(Exception):
-    def __init__(self, errors: list[Error]):
+    def __init__(self, errors: list[EslError]):
         super().__init__()
         self.errors = errors
 
