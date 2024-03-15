@@ -1,0 +1,174 @@
+========
+Select 1
+========
+
+__test statement:
+    select(vset1, uniform01)
+    select(vset1, [v: node -> bool]( v.is_seed ))
+end
+
+---
+
+(source_file
+    (test_statement
+        (select_statement
+            set: (reference (identifier))
+            function: (reference (identifier))
+        )
+        (select_statement
+            set: (reference (identifier))
+            function: (inline_expression_function
+                name: (identifier)
+                type: (reference (identifier))
+                rtype: (reference (identifier))
+                expression: (reference (identifier) (identifier))
+            )
+        )
+    )
+)
+
+========
+Sample 1
+========
+
+__test statement:
+    sample(vset2, vset1, 5, ABSOLUTE)
+    sample(vset2, vset1, nsamples / max_samples(), RELATIVE)
+end
+
+---
+
+(source_file
+    (test_statement
+        (sample_statement
+            set: (reference (identifier))
+            parent: (reference (identifier))
+            amount: (integer)
+        )
+        (sample_statement
+            set: (reference (identifier))
+            parent: (reference (identifier))
+            amount: (binary_expression
+                left: (reference (identifier))
+                right: (function_call
+                    function: (reference (identifier))
+                )
+            )
+        )
+    )
+)
+
+=======
+Apply 1
+=======
+
+__test statement:
+    apply(vset1, some_function)
+    apply(vset1, [v: node]{ v.c1.state = E ; })
+end
+
+---
+
+(source_file
+    (test_statement
+        (apply_statement
+            set: (reference (identifier))
+            function: (reference (identifier))
+        )
+        (apply_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+    )
+)
+
+
+=========
+Foreach 2
+=========
+
+__test statement:
+    apply(vset1, [v: node]{
+        v.c1.state = E
+        v.c2.state = E1
+    })
+
+    apply(vset1, [v: node]{ v.c1.state = E ; v.c2.state = E1 ; })
+end
+
+---
+
+(source_file
+    (test_statement
+        (apply_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+        (apply_statement
+            set: (reference (identifier))
+            function: (inline_update_function
+                name: (identifier)
+                type: (reference (identifier))
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+                stmt: (update_statement
+                    left: (reference (identifier) (identifier) (identifier))
+                    right: (reference (identifier))
+                )
+            )
+        )
+    )
+)
+
+
+========
+Reduce 1
+========
+
+__test statement:
+    var1 <- reduce(vset1, some_function, +)
+    var2 <- reduce(vset2, [v: node -> float]( v.some_attr ), *)
+end
+
+---
+
+(source_file
+    (test_statement
+        (reduce_statement
+            outvar: (reference (identifier))
+            set: (reference (identifier))
+            function: (reference (identifier))
+        )
+        (reduce_statement
+            outvar: (reference (identifier))
+            set: (reference (identifier))
+            function: (inline_expression_function
+                name: (identifier)
+                type: (reference (identifier))
+                rtype: (reference (identifier))
+                expression: (reference (identifier) (identifier))
+            )
+        )
+    )
+)
+

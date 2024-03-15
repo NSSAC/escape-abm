@@ -260,9 +260,9 @@ module.exports = grammar({
             $.call_statement,
             $.update_statement,
             $.print_statement,
-            $.select_using,
-            $.select_sample,
-            $.foreach_statement,
+            $.select_statement,
+            $.sample_statement,
+            $.apply_statement,
             $.reduce_statement
         ),
 
@@ -375,42 +375,52 @@ module.exports = grammar({
             $._terminator,
         ),
 
-        select_using: $ => seq(
+        select_statement: $ => seq(
             'select',
+            '(',
             field('set', $.reference),
-            'using',
+            ',',
             field('function', choice($.reference, $.inline_expression_function)),
+            ')',
             $._terminator,
         ),
 
-        select_sample: $ => seq(
-            'select',
-            field('set', $.reference),
+        sample_statement: $ => seq(
             'sample',
-            field('type', choice('approx', 'relative')),
-            field('amount', $._expression),
-            'from',
+            '(',
+            field('set', $.reference),
+            ',',
             field('parent', $.reference),
+            ',',
+            field('amount', $._expression),
+            ',',
+            field('type', choice('ABSOLUTE', 'RELATIVE')),
+            ')',
             $._terminator,
         ),
 
-        foreach_statement: $ => seq(
-            'foreach',
-            'in',
+        apply_statement: $ => seq(
+            'apply',
+            '(',
             field('set', $.reference),
-            'run',
+            ',',
             field('function', choice($.reference, $.inline_update_function)),
+            ')',
             $._terminator,
         ),
 
         reduce_statement: $ => seq(
             field('outvar', $.reference),
-            ':=',
-            field('operator', choice('+', '*',)),
+            '<-',
             'reduce',
+            '(',
             field('set', $.reference),
-            'using',
+            ',',
             field('function', choice($.reference, $.inline_expression_function)),
+            ',',
+            field('operator', choice('+', '*',)),
+            ')',
+            $._terminator,
         ),
 
         print_statement: $ => seq(

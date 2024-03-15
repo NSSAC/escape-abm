@@ -81,6 +81,7 @@
  "%="
  "+="
  "-="
+ "<-"
 ] @operator
 
 [
@@ -111,7 +112,6 @@
  "switch" "case" "default"
  "while"
  "var"
- "select" "using" "sample" "from"
- "foreach" "in" "run"
  "print"
+ "select" "sample" "apply" "reduce"
 ] @keyword
