@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import attrs
+from pydantic import BaseModel, ValidationError
 import rich
 import rich.markup
 
 
-@attrs.define
-class SourcePosition:
+class SourcePosition(BaseModel):
     """Position in source."""
 
     source: str
@@ -25,19 +24,18 @@ class SourcePosition:
     def col(self):
         return self.start[1] + 1
 
-    @property
-    def bytes(self) -> bytes:
+    def get_bytes(self) -> bytes:
         return self.source_bytes[self.byte_range[0] : self.byte_range[1]]
 
     @property
     def text(self) -> str:
-        return self.bytes.decode()
+        return self.get_bytes().decode()
 
 
 class EslError(Exception):
     """Error attributable to a section of the code."""
 
-    def __init__(self, short: str, long: str, pos: SourcePosition):
+    def __init__(self, short: str, long: str, pos: SourcePosition | None):
         """
         Initialize.
 
@@ -55,11 +53,23 @@ class EslError(Exception):
         return self.short
 
     def rich_print(self):
-        etype = f"[red]{self.short}[/red]"
-        fpath = f"[yellow]{self.pos.source}[/yellow]"
-        line = self.pos.line
-        col = self.pos.col
-        expl = rich.markup.escape(self.long)
+        if self.pos is not None:
+            etype = f"[red]{self.short}[/red]"
+            fpath = f"[yellow]{self.pos.source}[/yellow]"
+            line = self.pos.line
+            col = self.pos.col
+            expl = rich.markup.escape(self.long)
 
-        rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
-        print(self.pos.text)
+            rich.print(f"{etype}:{fpath}:{line}:{col}: {expl}")
+            print(self.pos.text)
+        else:
+            etype = f"[red]{self.short}[/red]"
+            expl = rich.markup.escape(self.long)
+            rich.print(f"{etype}: {expl}")
+
+
+def validation_error_str(e: ValidationError) -> str:
+    out = []
+    for error in e.errors():
+        out.append(str(e))
+    return "\n".join(out)

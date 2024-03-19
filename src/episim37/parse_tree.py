@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
-import attrs
 from tree_sitter import Node as TSNode
 
 import rich
@@ -22,7 +21,13 @@ def tsnode_to_pos(node: TSNode, source: str, source_bytes: bytes) -> SourcePosit
     start = (node.start_point[0], node.start_point[1])
     end = (node.end_point[0], node.end_point[1])
     byte_range = (node.start_byte, node.end_byte)
-    return SourcePosition(source, source_bytes, start, end, byte_range)
+    return SourcePosition(
+        source=source,
+        source_bytes=source_bytes,
+        start=start,
+        end=end,
+        byte_range=byte_range,
+    )
 
 
 FILTERED_NODES = ["comment"]

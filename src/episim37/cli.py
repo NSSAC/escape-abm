@@ -3,11 +3,12 @@
 import click
 
 from .parse_tree import print_parse_tree
-from .ast1 import print_ast1
-from .codegen_cpu import codegen_cpu, print_cpu_ir
-from .language_server import language_server
-from .input_helpers import prepare_input, process_input
-from .output_helpers import process_output
+from .ast import print_ast
+
+# from .codegen_cpu import codegen_cpu, print_cpu_ir
+# from .language_server import language_server
+# from .input_helpers import prepare_input, process_input
+# from .output_helpers import process_output
 
 
 @click.group()
@@ -21,12 +22,12 @@ def debug():
 
 
 debug.add_command(print_parse_tree)
-debug.add_command(print_ast1)
-debug.add_command(print_cpu_ir)
+debug.add_command(print_ast)
+# debug.add_command(print_cpu_ir)
 
-cli.add_command(language_server)
+# cli.add_command(language_server)
 
-cli.add_command(codegen_cpu)
-cli.add_command(prepare_input)
-cli.add_command(process_input)
-cli.add_command(process_output)
+# cli.add_command(codegen_cpu)
+# cli.add_command(prepare_input)
+# cli.add_command(process_input)
+# cli.add_command(process_output)
