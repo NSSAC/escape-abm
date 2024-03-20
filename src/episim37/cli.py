@@ -7,7 +7,7 @@ from .ast import print_ast
 from .check_ast import print_checked_ast
 
 # from .codegen_cpu import codegen_cpu, print_cpu_ir
-# from .language_server import language_server
+from .language_server import language_server
 # from .input_helpers import prepare_input, process_input
 # from .output_helpers import process_output
 
@@ -27,7 +27,7 @@ debug.add_command(print_ast)
 debug.add_command(print_checked_ast)
 # debug.add_command(print_cpu_ir)
 
-# cli.add_command(language_server)
+cli.add_command(language_server)
 
 # cli.add_command(codegen_cpu)
 # cli.add_command(prepare_input)

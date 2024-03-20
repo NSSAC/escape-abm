@@ -17,9 +17,12 @@ from lsprotocol.types import (
 from pygls.server import LanguageServer
 from platformdirs import user_log_dir
 
-from .parse_tree import mk_pt, ParseTreeConstructionError, SourcePosition
-from .ast1 import mk_ast1, ASTConstructionError
-from .codegen_cpu import Source as SourceCPU, CodegenError
+from .misc import SourcePosition, EslError
+from .parse_tree import mk_pt, ParseTreeConstructionError
+from .ast import mk_ast
+from .check_ast import check_ast
+
+# from .codegen_cpu import Source as SourceCPU, CodegenError
 
 server = LanguageServer("esl37-server", "v0.1")
 
@@ -58,17 +61,25 @@ async def make_diagnostics(
 
     try:
         pt = mk_pt(str(file_path), file_bytes)
-        ast1 = mk_ast1(file_path, pt)
-        _ = SourceCPU.make(ast1)
-    except ParseTreeConstructionError as e:
+        ast = mk_ast(file_path, pt)
+        check_ast(ast)
+    except ParseTreeConstructionError as ptce:
         diagnostics = []
-        for error in e.errors:
-            diagnostic = error_to_diagnostic(error.type, error.explanation, error.pos)
+        for e in ptce.errors:
+            diagnostic = error_to_diagnostic(e.short, e.long, e.pos)
             diagnostics.append(diagnostic)
         ls.publish_diagnostics(params.text_document.uri, diagnostics)
         return
-    except (ASTConstructionError, CodegenError) as e:
-        diagnostic = error_to_diagnostic(e.type, e.explanation, e.pos)
+    except EslError as e:
+        diagnostic = error_to_diagnostic(e.short, e.long, e.pos)
+        ls.publish_diagnostics(params.text_document.uri, [diagnostic])
+        return
+    except Exception as e:
+        diagnostic = error_to_diagnostic(
+            "Language server error",
+            f"Unexpected exception: type={type(e)!s}: {e!s}",
+            None,
+        )
         ls.publish_diagnostics(params.text_document.uri, [diagnostic])
         return
 
