@@ -47,6 +47,14 @@
 (transition p: (reference (identifier)) @function)
 (transition dwell: (reference (identifier)) @function)
 
+; Builtin Reference
+
+((identifier) @constant.builtin
+  (#match? @constant.builtin "^(NUM_TICKS|CUR_TICK|NUM_NODES|NUM_EDGES|ALL_NODES|ALL_EDGES)$"))
+
+((identifier) @function.builtin
+  (#match? @function.builtin "^(len)$"))
+
 ; Literals
 [
   (boolean)
@@ -85,14 +93,22 @@
 ] @operator
 
 [
+ "ABSOLUTE" "RELATIVE"
+] @constant.builtin
+
+
+[
+ "(" ")"
+ "[" "]"
+ "{" "}"
+] @punctuation.bracket
+
+[
  "->"
  "=>"
  ":"
  ","
  ";"
- "(" ")"
- "[" "]"
- "{" "}"
 ] @punctuation.special
 
 [
