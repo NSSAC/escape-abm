@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from collections import defaultdict
-from typing import Any, ClassVar, Self, Callable as TypingCallable, Literal, cast
+from typing import Any, ClassVar, Self, Callable, Literal, cast
 
 import click
 import pydantic
@@ -71,7 +71,7 @@ class Scope(BaseModel):
         return tree
 
 
-NodeParser = TypingCallable[[PTNode, Scope], Any]
+NodeParser = Callable[[PTNode, Scope], Any]
 _NODE_PARSER: dict[str, NodeParser] = {}
 
 
@@ -609,8 +609,8 @@ class Contagion(BaseModel):
             raise ValueError("State type must defined once for each contagion")
         state_type = state_type[0]
 
-        transitions = children["transition"]
-        transmissions = children["transmission"]
+        transitions = [t for ts in children["transitions"] for t in ts]
+        transmissions = [t for ts in children["transmissions"] for t in ts]
 
         susceptibility = [
             f for k, f in children["contagion_function"] if k == "susceptibility"
@@ -864,6 +864,7 @@ class FunctionCall(BaseModel):
     function: Reference
     args: list[Expression]
     parent_scope: str
+    pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
         FunctionCall.instances.append(self)
@@ -872,7 +873,7 @@ class FunctionCall(BaseModel):
     def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
         function = parse(node.field("function"), scope)
         args = [parse(c, scope) for c in node.fields("arg")]
-        obj = cls(function=function, args=args, parent_scope=scope.name)
+        obj = cls(function=function, args=args, parent_scope=scope.name, pos=node.pos)
         return obj
 
 
@@ -1214,6 +1215,7 @@ class ReduceStatement(BaseModel):
     instances: ClassVar[list[ReduceStatement]] = []
 
     name: str
+    outvar: Reference
     set: Reference
     function: Reference | Function
     operator: ReduceOperatorType
@@ -1225,6 +1227,7 @@ class ReduceStatement(BaseModel):
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> ReduceStatement:
+        outvar = parse(node.field("outvar"), scope)
         set = parse(node.field("set"), scope)
         function: Reference | Function
         function = parse(node.field("function"), scope)
@@ -1233,6 +1236,7 @@ class ReduceStatement(BaseModel):
         name = f"reduce_{set.name}_{function.name}_{node.pos.line}_{node.pos.col}"
         obj = cls(
             name=name,
+            outvar=outvar,
             set=set,
             function=function,
             operator=operator,
@@ -1272,19 +1276,22 @@ DeviceStatement = SelectStatement | SampleStatement | ApplyStatement | ReduceSta
 
 Statement = HostStatement | DeviceStatement
 
+SIGNED_INT_TYPES = {"int", "i8", "i16", "i32", "i64"}
+UNSIGNED_INT_TYPES = {"uint", "u8", "u16", "u32", "u64"}
+
+FLOAT_TYPES = {"float", "f32", "f64"}
+
+INT_TYPES = SIGNED_INT_TYPES | UNSIGNED_INT_TYPES | {"size"}
+SCALAR_TYPES = INT_TYPES | FLOAT_TYPES | {"bool"}
+
+TABLE_TYPES = {"node", "edge"}
+SET_TYPES = {"nodeset", "edgeset"}
+
+BUILTIN_TYPES = SCALAR_TYPES | TABLE_TYPES | SET_TYPES
+
 
 def add_builtins(scope: Scope):
-    # fmt: off
-    builtin_types = [
-        "int", "uint", "float", "bool", "size",
-        "node", "edge",
-        "nodeset", "edgeset",
-        "u8", "u16", "u32", "u64",
-        "i8", "i16", "i32", "i64",
-        "f32", "f64",
-    ]
-    # fmt: on
-    for type in builtin_types:
+    for type in BUILTIN_TYPES:
         scope.define(type, BuiltinType(name=type))
 
     scope.define(
@@ -1330,6 +1337,7 @@ class Source(BaseModel):
     sample_statements: list[SampleStatement]
     apply_statements: list[ApplyStatement]
     reduce_statements: list[ReduceStatement]
+    intervene: Function
     scope: Scope | None = Field(default=None, repr=False)
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -1371,6 +1379,12 @@ class Source(BaseModel):
         edgesets = [s for ss in children["edgeset"] for s in ss]
 
         functions = list(Function.instances)
+
+        intervenes = [f for f in functions if f.name == "intervene"]
+        if len(intervenes) != 1:
+            raise ValueError("One and only one intervene function must be defined")
+        intervene = intervenes[0]
+
         function_calls = list(FunctionCall.instances)
         select_statements = list(SelectStatement.instances)
         sample_statements = list(SampleStatement.instances)
@@ -1407,6 +1421,7 @@ class Source(BaseModel):
             sample_statements=sample_statements,
             apply_statements=apply_statements,
             reduce_statements=reduce_statements,
+            intervene=intervene,
             scope=scope,
             pos=node.pos,
         )
