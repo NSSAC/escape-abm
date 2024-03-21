@@ -2812,7 +2812,7 @@
           },
           {
             "type": "PATTERN",
-            "value": ".*"
+            "value": "[^%]+"
           },
           {
             "type": "STRING",
@@ -2832,7 +2832,7 @@
           },
           {
             "type": "PATTERN",
-            "value": ".*"
+            "value": "[^}]+"
           },
           {
             "type": "STRING",

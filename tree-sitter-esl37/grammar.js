@@ -496,9 +496,9 @@ module.exports = grammar({
 
         comment: _ => token(seq('#', /.*/)),
 
-        template_block: _ => token(seq('{%', /.*/, '%}')),
+        template_block: _ => token(seq('{%', /[^%]+/, '%}')),
 
-        template_variable: _ => token(seq('{{', /.*/, '}}')),
+        template_variable: _ => token(seq('{{', /[^}]+/, '}}')),
 
         _number: $ => choice($.integer, $.float),
 
