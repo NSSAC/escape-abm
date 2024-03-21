@@ -158,6 +158,18 @@ class Reference(BaseModel):
 register_parser("reference", Reference.make)
 
 
+class TemplateVariable(BaseModel):
+    pos: SourcePosition | None = Field(default=None, repr=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> TemplateVariable:
+        scope = scope
+        return cls(pos=node.pos)
+
+
+register_parser("template_variable", TemplateVariable.make)
+
+
 class BuiltinType(BaseModel):
     name: str
 
@@ -1257,6 +1269,7 @@ Expression = (
     | BinaryExpression
     | ParenthesizedExpression
     | Reference
+    | TemplateVariable
     | FunctionCall
 )
 
@@ -1275,6 +1288,42 @@ HostStatement = (
 DeviceStatement = SelectStatement | SampleStatement | ApplyStatement | ReduceStatement
 
 Statement = HostStatement | DeviceStatement
+
+StatementParts = Statement | ElifSection | ElseSection | CaseSection | DefaultSection
+
+
+Referable = (
+    BuiltinType
+    | BuiltinFunction
+    | BuiltinGlobal
+    | BuiltinNodeset
+    | BuiltinEdgeset
+    | EnumConstant
+    | EnumType
+    | Global
+    | Param
+    | Variable
+    | Function
+    | Distribution
+    | NodeSet
+    | EdgeSet
+    | tuple[Param | Variable, NodeField | EdgeField]
+    | tuple[Param | Variable, Contagion, StateAccessor]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+)
+
+EslCallable = BuiltinFunction | Function | Distribution
+
+Updateable = (
+    Global
+    | Param
+    | Variable
+    | tuple[Param | Variable, NodeField | EdgeField]
+    | tuple[Param | Variable, Contagion, StateAccessor]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+)
+
 
 SIGNED_INT_TYPES = {"int", "i8", "i16", "i32", "i64"}
 UNSIGNED_INT_TYPES = {"uint", "u8", "u16", "u32", "u64"}

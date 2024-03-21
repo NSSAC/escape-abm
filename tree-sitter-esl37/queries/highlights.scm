@@ -65,7 +65,11 @@
   (float)
 ] @number
 
+(template_block) @preproc
+(template_variable) @preproc
+
 (comment) @comment
+
 (string) @string
 
 [

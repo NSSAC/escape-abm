@@ -444,6 +444,7 @@ module.exports = grammar({
             $.binary_expression,
             $.parenthesized_expression,
             $.reference,
+            $.template_variable,
             $.function_call,
         ),
 
@@ -494,6 +495,10 @@ module.exports = grammar({
         identifier: _ => /[a-zA-Z][_a-zA-Z0-9]*/,
 
         comment: _ => token(seq('#', /.*/)),
+
+        template_block: _ => token(seq('{%', /.*/, '%}')),
+
+        template_variable: _ => token(seq('{{', /.*/, '}}')),
 
         _number: $ => choice($.integer, $.float),
 
@@ -560,6 +565,7 @@ module.exports = grammar({
 
     extras: $ => [
         $.comment,
+        $.template_block,
         $._whitespace
     ]
 });

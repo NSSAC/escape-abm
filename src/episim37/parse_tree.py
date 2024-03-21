@@ -30,7 +30,7 @@ def tsnode_to_pos(node: TSNode, source: str, source_bytes: bytes) -> SourcePosit
     )
 
 
-FILTERED_NODES = ["comment"]
+FILTERED_NODES = ["comment", "template_block"]
 
 
 class PTNode:

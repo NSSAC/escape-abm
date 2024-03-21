@@ -1,0 +1,60 @@
+==========
+Template 1
+==========
+
+def func() -> int:
+    return {{ someconst }}
+end
+
+---
+
+(source_file
+    (function
+        name: (identifier)
+        params: (function_params)
+        rtype: (reference (identifier))
+        body: (function_body
+            (return_statement (template_variable))
+        )
+    )
+)
+
+==========
+Function 2
+==========
+
+def func(a: int) -> int:
+    switch CUR_TICK:
+        {% for tick, value in somedata %}
+        case {{ tick }}:
+            return {{ value }}
+        {% endfor %}
+    end
+end
+
+---
+
+(source_file
+    (function
+        name: (identifier)
+        params: (function_params
+            (function_param
+                name: (identifier)
+                type: (reference (identifier))
+            )
+        )
+        rtype: (reference (identifier))
+        body: (function_body
+            (switch_statement
+                condition: (reference (identifier))
+                (template_block)
+                case: (case_section 
+                    match: (template_variable)
+                    body: (return_statement (template_variable))
+                )
+                (template_block)
+            )
+        )
+    )
+)
+
