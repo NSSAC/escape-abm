@@ -33,6 +33,7 @@ dependencies = [
     "polars",
     "h5py",
     "typeguard",
+    "pydantic"
 ]
 
 [tool.setuptools.packages.find]
