@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from collections import defaultdict
-from typing import Any, ClassVar, Self, Callable, Literal, cast
+from typing import Any, ClassVar, Self, Callable, Literal, cast, overload, TypeVar
 
 import click
 import pydantic
@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field, model_validator
 from .misc import EslError, SourcePosition, validation_error_str
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError
 from .click_helpers import simulation_file_option
+
+Type = TypeVar("Type")
 
 
 class Scope(BaseModel):
@@ -183,7 +185,6 @@ class BuiltinFunction(BaseModel):
     name: str
     params: list[BuiltinParam]
     rtype: str | None
-    is_device: bool
 
 
 class BuiltinGlobal(BaseModel):
@@ -280,6 +281,10 @@ class NodeField(BaseModel):
             scope.define(name, obj)
         return obj
 
+    @property
+    def is_used(self):
+        return not self.is_node_key
+
     @model_validator(mode="after")
     def check_static_save_conflict(self) -> Self:
         if self.save_to_output and self.is_static:
@@ -358,6 +363,10 @@ class EdgeField(BaseModel):
         if not (is_target_node_key or is_source_node_key):
             scope.define(name, obj)
         return obj
+
+    @property
+    def is_used(self):
+        return not (self.is_target_node_key or self.is_source_node_key)
 
     @model_validator(mode="after")
     def check_static_save_conflict(self) -> Self:
@@ -519,22 +528,39 @@ def parse_distributions(node: PTNode, scope: Scope) -> list[Distribution]:
 register_parser("distributions", parse_distributions)
 
 
+@overload
+def if_fn_make_ref(x: Function, scope: Scope) -> Reference: ...
+
+
+@overload
+def if_fn_make_ref(x: Type, scope: Scope) -> Type: ...
+
+
+def if_fn_make_ref(x: Any, scope: Scope) -> Any:
+    if isinstance(x, Function):
+        return Reference(names=[x.name], scope=scope, pos=x.pos)
+    else:
+        return x
+
+
 class Transition(BaseModel):
     entry: Reference
     exit: Reference
-    pfunc: Expression | Function | None
-    dwell: Expression | Function
+    pexpr: Expression | None
+    dwell: Expression
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Transition:
         entry = parse(node.field("entry"), scope)
         exit = parse(node.field("exit"), scope)
-        pfunc = node.maybe_field("pfunc")
-        if pfunc is not None:
-            pfunc = parse(pfunc, scope)
+        pexpr = node.maybe_field("pexpr")
+        if pexpr is not None:
+            pexpr = parse(pexpr, scope)
+            pexpr = if_fn_make_ref(pexpr, scope)
         dwell = parse(node.field("dwell"), scope)
-        return cls(entry=entry, exit=exit, pfunc=pfunc, dwell=dwell, pos=node.pos)
+        dwell = if_fn_make_ref(dwell, scope)
+        return cls(entry=entry, exit=exit, pexpr=pexpr, dwell=dwell, pos=node.pos)
 
 
 register_parser("transition", Transition.make)
@@ -596,10 +622,10 @@ class Contagion(BaseModel):
     state_type: Reference
     transitions: list[Transition]
     transmissions: list[Transmission]
-    susceptibility: Expression | Function
-    infectivity: Expression | Function
-    transmissibility: Expression | Function
-    enabled: Expression | Function
+    susceptibility: Expression
+    infectivity: Expression
+    transmissibility: Expression
+    enabled: Expression
     state: StateAccessor
     scope: Scope | None = Field(default=None, repr=False)
     pos: SourcePosition | None = Field(default=None, repr=False)
@@ -630,6 +656,7 @@ class Contagion(BaseModel):
         if len(susceptibility) != 1:
             raise ValueError("Susceptibility must defined once for each contagion")
         susceptibility = susceptibility[0]
+        susceptibility = if_fn_make_ref(susceptibility, scope)
 
         infectivity = [
             f for k, f in children["contagion_function"] if k == "infectivity"
@@ -637,6 +664,7 @@ class Contagion(BaseModel):
         if len(infectivity) != 1:
             raise ValueError("Infectivity must defined once for each contagion")
         infectivity = infectivity[0]
+        infectivity = if_fn_make_ref(infectivity, scope)
 
         transmissibility = [
             f for k, f in children["contagion_function"] if k == "transmissibility"
@@ -644,11 +672,13 @@ class Contagion(BaseModel):
         if len(transmissibility) != 1:
             raise ValueError("Transmissibility must defined once for each contagion")
         transmissibility = transmissibility[0]
+        transmissibility = if_fn_make_ref(transmissibility, scope)
 
         enabled = [f for k, f in children["contagion_function"] if k == "enabled"]
         if len(enabled) != 1:
             raise ValueError("Enabled (edge) must defined once for each contagion")
         enabled = enabled[0]
+        enabled = if_fn_make_ref(enabled, scope)
 
         obj = cls(
             name=name,
@@ -821,6 +851,12 @@ class Function(BaseModel):
         )
         parent_scope.define(name, obj)
         return obj
+
+    def variables(self) -> list[Variable]:
+        assert self.scope is not None
+
+        vars = [v for v in self.scope.names.values() if isinstance(v, Variable)]
+        return vars
 
 
 register_parser("function", Function.make)
@@ -1136,7 +1172,7 @@ class SelectStatement(BaseModel):
 
     name: str
     set: Reference
-    function: Reference | Function
+    function: Reference
     parent_scope: str
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -1147,6 +1183,7 @@ class SelectStatement(BaseModel):
     def make(cls, node: PTNode, scope: Scope) -> SelectStatement:
         set = parse(node.field("set"), scope)
         function = parse(node.field("function"), scope)
+        function = if_fn_make_ref(function, scope)
         name = f"select_{set.name}_{function.name}_{node.pos.line}_{node.pos.col}"
         obj = cls(
             name=name, set=set, function=function, parent_scope=scope.name, pos=node.pos
@@ -1198,7 +1235,7 @@ class ApplyStatement(BaseModel):
 
     name: str
     set: Reference
-    function: Reference | Function
+    function: Reference
     parent_scope: str
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -1208,8 +1245,8 @@ class ApplyStatement(BaseModel):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> ApplyStatement:
         set = parse(node.field("set"), scope)
-        function: Reference | Function
         function = parse(node.field("function"), scope)
+        function = if_fn_make_ref(function, scope)
         name = f"apply_{set.name}_{function.name}_{node.pos.line}_{node.pos.col}"
         obj = cls(
             name=name, set=set, function=function, parent_scope=scope.name, pos=node.pos
@@ -1229,7 +1266,7 @@ class ReduceStatement(BaseModel):
     name: str
     outvar: Reference
     set: Reference
-    function: Reference | Function
+    function: Reference
     operator: ReduceOperatorType
     parent_scope: str
     pos: SourcePosition | None = Field(default=None, repr=False)
@@ -1241,8 +1278,8 @@ class ReduceStatement(BaseModel):
     def make(cls, node: PTNode, scope: Scope) -> ReduceStatement:
         outvar = parse(node.field("outvar"), scope)
         set = parse(node.field("set"), scope)
-        function: Reference | Function
         function = parse(node.field("function"), scope)
+        function = if_fn_make_ref(function, scope)
         operator = node.field("operator").text
         operator = cast(ReduceOperatorType, operator)
         name = f"reduce_{set.name}_{function.name}_{node.pos.line}_{node.pos.col}"
@@ -1273,7 +1310,7 @@ Expression = (
     | FunctionCall
 )
 
-HostStatement = (
+SerialStatement = (
     PassStatement
     | ReturnStatement
     | IfStatement
@@ -1285,12 +1322,9 @@ HostStatement = (
     | Variable
 )
 
-DeviceStatement = SelectStatement | SampleStatement | ApplyStatement | ReduceStatement
+ParallelStatement = SelectStatement | SampleStatement | ApplyStatement | ReduceStatement
 
-Statement = HostStatement | DeviceStatement
-
-StatementParts = Statement | ElifSection | ElseSection | CaseSection | DefaultSection
-
+Statement = SerialStatement | ParallelStatement
 
 Referable = (
     BuiltinType
@@ -1363,9 +1397,8 @@ def add_builtins(scope: Scope):
         "len",
         BuiltinFunction(
             name="len",
-            params=[BuiltinParam(name="x", type="nodeset_or_edgeset")],
+            params=[BuiltinParam(name="x", type="nodeset|edgeset")],
             rtype="size",
-            is_device=False,
         ),
     )
 
