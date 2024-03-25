@@ -1,7 +1,9 @@
 """Run correctness checks on AST."""
 
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
+
+from typeguard import TypeCheckError, check_type
 
 from .click_helpers import simulation_file_option
 from .misc import EslError, SourcePosition
@@ -20,6 +22,7 @@ from .ast import (
     EdgeSet,
     EnumConstant,
     EnumType,
+    Expression,
     Global,
     NodeSet,
     Param,
@@ -136,8 +139,8 @@ def ensure_node_or_edgeset(r: Reference, allow_builtin: bool = False):
                 return
 
     raise EslError(
-        "Invalid value",
-        f"Expected a node or edgeset; builtin allowed {allow_builtin}.",
+        "Incompatible value",
+        f"Expected a node or edgeset; builtin allowed={allow_builtin!s}.",
         r.pos,
     )
 
@@ -292,7 +295,7 @@ def check_sample_statement(stmt: SampleStatement):
     elif is_edge_set(stmt.set) and is_edge_set(stmt.parent):
         pass
     else:
-        raise EslError("Incompatible sets", "Sets must be of same type", stmt.pos)
+        raise EslError("Incompatible sets", "Sets must be of same type.", stmt.pos)
 
 
 def check_apply_statement(stmt: ApplyStatement):
@@ -315,8 +318,8 @@ def check_reduce_outvar(r: Reference):
                 return
 
     raise EslError(
-        "Incompatible var",
-        "Output of reduce statements can only be set to scalar variables",
+        "Incompatible variable",
+        "Output of reduce statements can only be set to scalar variables.",
         r.pos,
     )
 
@@ -347,34 +350,55 @@ def check_intervene(f: Function):
     )
 
 
-def check_susceptibility(r: Reference):
-    ensure_node_func(r)
-    ensure_float_func(r)
-    ensure_kernel_func(r)
+def check_susceptibility(o: Expression):
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_node_func(oref)
+        ensure_float_func(oref)
+        ensure_kernel_func(oref)
 
 
-def check_infectivity(r: Reference):
-    ensure_node_func(r)
-    ensure_float_func(r)
-    ensure_kernel_func(r)
+def check_infectivity(o: Expression):
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_node_func(oref)
+        ensure_float_func(oref)
+        ensure_kernel_func(oref)
 
 
-def check_transmissibility(r: Reference):
-    ensure_edge_func(r)
-    ensure_float_func(r)
-    ensure_kernel_func(r)
+def check_transmissibility(o: Expression):
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_edge_func(oref)
+        ensure_float_func(oref)
+        ensure_kernel_func(oref)
 
 
-def check_enabled(r: Reference):
-    ensure_edge_func(r)
-    ensure_bool_func(r)
-    ensure_kernel_func(r)
+def check_enabled(o: Expression):
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_edge_func(oref)
+        ensure_bool_func(oref)
+        ensure_kernel_func(oref)
 
 
-def check_pfunc_or_dwell(r: Reference):
-    ensure_node_func(r)
-    ensure_float_func(r)
-    ensure_kernel_func(r)
+def check_pexpr(o: Expression | None):
+    if o is None:
+        return
+
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_node_func(oref)
+        ensure_float_func(oref)
+        ensure_kernel_func(oref)
+
+
+def check_dwell_expr(o: Expression):
+    if is_fn_ref(o):
+        oref = cast(Reference, o)
+        ensure_node_func(oref)
+        ensure_float_func(oref)
+        ensure_kernel_func(oref)
 
 
 def check_function_call(fc: FunctionCall):
@@ -423,6 +447,18 @@ def is_fn_ref(o: Any) -> bool:
     return False
 
 
+def is_dist_ref(o: Any) -> bool:
+    match o:
+        case Reference() as r:
+            try:
+                check_type(r.value, Distribution)
+                return True
+            except TypeCheckError:
+                pass
+
+    return False
+
+
 def check_contagion(c: Contagion):
     state_type = c.state_type.value
     match state_type:
@@ -436,27 +472,18 @@ def check_contagion(c: Contagion):
     for transition in c.transitions:
         ensure_enum_compat(state_type, transition.entry)
         ensure_enum_compat(state_type, transition.exit)
-        if is_fn_ref(transition.pexpr):
-            check_pfunc_or_dwell(cast(Reference, transition.pexpr))
-        if is_fn_ref(transition.dwell):
-            check_pfunc_or_dwell(cast(Reference, transition.dwell))
+        check_pexpr(transition.pexpr)
+        check_dwell_expr(transition.dwell)
 
     for transmission in c.transmissions:
         ensure_enum_compat(state_type, transmission.contact)
         ensure_enum_compat(state_type, transmission.entry)
         ensure_enum_compat(state_type, transmission.exit)
 
-    if is_fn_ref(c.susceptibility):
-        check_susceptibility(cast(Reference, c.susceptibility))
-
-    if is_fn_ref(c.infectivity):
-        check_infectivity(cast(Reference, c.infectivity))
-
-    if is_fn_ref(c.transmissibility):
-        check_transmissibility(cast(Reference, c.transmissibility))
-
-    if is_fn_ref(c.enabled):
-        check_enabled(cast(Reference, c.enabled))
+    check_susceptibility(c.susceptibility)
+    check_infectivity(c.infectivity)
+    check_transmissibility(c.transmissibility)
+    check_enabled(c.enabled)
 
 
 def check_ast(source: Source):
