@@ -10,7 +10,6 @@ from typing import (
     Generator,
     Literal,
     TypeVar,
-    Self,
     cast,
     overload,
 )
@@ -18,12 +17,11 @@ from typing import (
 import rich
 import rich.markup
 import click
-import pydantic
 from rich.tree import Tree
 from rich.pretty import Pretty
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-from .misc import EslError, SourcePosition, validation_error_str
+from .misc import EslError, SourcePosition
 from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError
 from .click_helpers import simulation_file_option
 
@@ -100,9 +98,6 @@ def parse(node: PTNode, scope: Scope) -> Any:
         return node_parser(node, scope)
     except EslError:
         raise
-    except pydantic.ValidationError as e:
-        e_str = validation_error_str(e)
-        raise EslError("AST Error", f"Failed to parse '{node.type}'\n{e_str}", node.pos)
     except Exception as e:
         raise EslError("AST Error", f"Failed to parse '{node.type}': {e!s}", node.pos)
 
@@ -294,6 +289,11 @@ class NodeField(BaseModel):
         is_static = "static" in annotations or is_node_key
         save_to_output = "save" in annotations
 
+        if save_to_output and is_static:
+            raise EslError(
+                "Constraint error", "Static field can't be saved to output", node.pos
+            )
+
         obj = cls(
             name=name,
             type=type,
@@ -309,12 +309,6 @@ class NodeField(BaseModel):
     @property
     def is_used(self):
         return not self.is_node_key
-
-    @model_validator(mode="after")
-    def check_static_save_conflict(self) -> Self:
-        if self.save_to_output and self.is_static:
-            raise ValueError("Static field can't be saved to output")
-        return self
 
 
 register_parser("node_field", NodeField.make)
@@ -334,7 +328,11 @@ class NodeTable(BaseModel):
         fields = [parse(child, scope) for child in node.named_children]
         key = [f for f in fields if f.is_node_key]
         if len(key) != 1:
-            raise ValueError("One and only one node key field must be specified.")
+            raise EslError(
+                "Constraint error",
+                "One and only one node key field must be specified.",
+                node.pos,
+            )
         key = key[0]
 
         obj = cls(fields=fields, key=key, contagions=[], scope=scope, pos=node.pos)
@@ -373,7 +371,7 @@ class EdgeField(BaseModel):
 
         if save_to_output and is_static:
             raise EslError(
-                "Saving static field", "Static field can't be saved in output", node.pos
+                "Constraint error", "Static field can't be saved in output", node.pos
             )
 
         obj = cls(
@@ -392,12 +390,6 @@ class EdgeField(BaseModel):
     @property
     def is_used(self):
         return not (self.is_target_node_key or self.is_source_node_key)
-
-    @model_validator(mode="after")
-    def check_static_save_conflict(self) -> Self:
-        if self.save_to_output and self.is_static:
-            raise ValueError("Static field can't be saved to output")
-        return self
 
 
 register_parser("edge_field", EdgeField.make)
@@ -428,15 +420,19 @@ class EdgeTable(BaseModel):
         fields = [parse(child, scope) for child in node.named_children]
         target_key = [f for f in fields if f.is_target_node_key]
         if len(target_key) != 1:
-            raise ValueError(
-                "One and only one target node key field must be specified."
+            raise EslError(
+                "Constraint error",
+                "One and only one target node key field must be specified.",
+                node.pos,
             )
         target_key = target_key[0]
 
         source_key = [f for f in fields if f.is_source_node_key]
         if len(source_key) != 1:
-            raise ValueError(
-                "One and only one source node key field must be specified."
+            raise EslError(
+                "Constraint error",
+                "One and only one source node key field must be specified.",
+                node.pos,
             )
         source_key = source_key[0]
 
@@ -669,7 +665,11 @@ class Contagion(BaseModel):
 
         state_type = children["contagion_state_type"]
         if len(state_type) != 1:
-            raise ValueError("State type must defined once for each contagion")
+            raise EslError(
+                "Constraint error",
+                "State type must defined once for each contagion",
+                node.pos,
+            )
         state_type = state_type[0]
 
         transitions = [t for ts in children["transitions"] for t in ts]
@@ -679,7 +679,11 @@ class Contagion(BaseModel):
             f for k, f in children["contagion_function"] if k == "susceptibility"
         ]
         if len(susceptibility) != 1:
-            raise ValueError("Susceptibility must defined once for each contagion")
+            raise EslError(
+                "Constraint error",
+                "Susceptibility must defined once for each contagion",
+                node.pos,
+            )
         susceptibility = susceptibility[0]
         susceptibility = if_fn_make_ref(susceptibility, scope)
 
@@ -687,7 +691,11 @@ class Contagion(BaseModel):
             f for k, f in children["contagion_function"] if k == "infectivity"
         ]
         if len(infectivity) != 1:
-            raise ValueError("Infectivity must defined once for each contagion")
+            raise EslError(
+                "Constraint error",
+                "Infectivity must defined once for each contagion",
+                node.pos,
+            )
         infectivity = infectivity[0]
         infectivity = if_fn_make_ref(infectivity, scope)
 
@@ -695,13 +703,21 @@ class Contagion(BaseModel):
             f for k, f in children["contagion_function"] if k == "transmissibility"
         ]
         if len(transmissibility) != 1:
-            raise ValueError("Transmissibility must defined once for each contagion")
+            raise EslError(
+                "Constraint error",
+                "Transmissibility must defined once for each contagion",
+                node.pos,
+            )
         transmissibility = transmissibility[0]
         transmissibility = if_fn_make_ref(transmissibility, scope)
 
         enabled = [f for k, f in children["contagion_function"] if k == "enabled"]
         if len(enabled) != 1:
-            raise ValueError("Enabled (edge) must defined once for each contagion")
+            raise EslError(
+                "Constraint error",
+                "Enabled (edge) must defined once for each contagion",
+                node.pos,
+            )
         enabled = enabled[0]
         enabled = if_fn_make_ref(enabled, scope)
 
@@ -1355,7 +1371,9 @@ RValueRef = (
     | Param
     | Variable
     | NodeSet
+    | BuiltinNodeset
     | EdgeSet
+    | BuiltinEdgeset
     | tuple[Param | Variable, NodeField | EdgeField]
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor]
@@ -1366,7 +1384,7 @@ RValueRef = (
 TValueRef = BuiltinType | EnumType
 
 # Things that can be called
-EslCallable = BuiltinFunction | Function | Distribution
+CValueRef = BuiltinFunction | Function | Distribution
 
 
 SIGNED_INT_TYPES = {"int", "i8", "i16", "i32", "i64"}
@@ -1448,12 +1466,20 @@ class Source(BaseModel):
 
         node_tables = children["node"]
         if len(node_tables) != 1:
-            raise ValueError("One and only one node table must be defined")
+            raise EslError(
+                "Constraint error",
+                "One and only one node table must be defined",
+                node.pos,
+            )
         node_table = node_tables[0]
 
         edge_tables = children["edge"]
         if len(edge_tables) != 1:
-            raise ValueError("One and only one edge table must be defined")
+            raise EslError(
+                "Constraint error",
+                "One and only one edge table must be defined",
+                node.pos,
+            )
         edge_table = edge_tables[0]
 
         distributions = [d for ds in children["distributions"] for d in ds]
@@ -1466,7 +1492,11 @@ class Source(BaseModel):
 
         intervenes = [f for f in functions if f.name == "intervene"]
         if len(intervenes) != 1:
-            raise ValueError("One and only one intervene function must be defined")
+            raise EslError(
+                "Constraint error",
+                "One and only one intervene function must be defined",
+                node.pos,
+            )
         intervene = intervenes[0]
 
         function_calls: list[FunctionCall] = get_instances(FunctionCall)
@@ -1519,9 +1549,6 @@ def mk_ast(filename: Path, node: PTNode) -> Source:
         source = Source.make(module, node)
     except EslError:
         raise
-    except pydantic.ValidationError as e:
-        e_str = validation_error_str(e)
-        raise EslError("AST Error", f"Failed to parse '{node.type}'\n{e_str}", node.pos)
     except Exception as e:
         raise EslError("AST Error", f"Failed to parse '{node.type}'\n{e!s}", node.pos)
     return source
