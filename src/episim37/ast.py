@@ -4,12 +4,21 @@ from __future__ import annotations
 
 from pathlib import Path
 from collections import defaultdict
-from typing import Any, ClassVar, Self, Callable, Literal, cast, overload, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Generator,
+    Literal,
+    TypeVar,
+    Self,
+    cast,
+    overload,
+)
 
-import click
-import pydantic
 import rich
 import rich.markup
+import click
+import pydantic
 from rich.tree import Tree
 from rich.pretty import Pretty
 from pydantic import BaseModel, Field, model_validator
@@ -56,7 +65,7 @@ class Scope(BaseModel):
             ret = ret.parent
         return ret
 
-    def visit(self):
+    def visit(self) -> Generator[tuple[str, Any], None, None]:
         yield from self.names.items()
         for child in self.children:
             yield from child.visit()
@@ -110,16 +119,31 @@ register_parser("boolean", lambda node, _: node.text == "True")
 register_parser("string", lambda node, _: node.text)
 
 
-class Reference(BaseModel):
-    instances: ClassVar[list[Reference]] = []
+_INSTANCE_REGISTRY: dict[type, list[Any]] = defaultdict(list)
 
+
+def register_instance(o: Any) -> None:
+    k = type(o)
+    _INSTANCE_REGISTRY[k].append(o)
+
+
+def get_instances(k: type) -> list[Any]:
+    return _INSTANCE_REGISTRY[k]
+
+
+def clear_instances() -> None:
+    for v in _INSTANCE_REGISTRY.values():
+        v.clear()
+
+
+class Reference(BaseModel):
     names: list[str]
     scope: Scope = Field(repr=False)
     pos: SourcePosition | None = Field(default=None, repr=False)
-    value: Any | None = Field(default=None, repr=False)
+    value_: Any | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        Reference.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Reference:
@@ -131,9 +155,10 @@ class Reference(BaseModel):
     def name(self) -> str:
         return ".".join(self.names)
 
-    def resolve(self) -> Any:
-        if self.value is not None:
-            return self.value
+    @property
+    def value(self) -> Any:
+        if self.value_ is not None:
+            return self.value_
 
         head, tail = self.names[0], self.names[1:]
         refs = []
@@ -153,8 +178,8 @@ class Reference(BaseModel):
         else:
             value = tuple(refs)
 
-        self.value = value
-        return self.value
+        self.value_ = value
+        return self.value_
 
 
 register_parser("reference", Reference.make)
@@ -735,15 +760,13 @@ register_parser("edgeset", EdgeSet.make)
 
 
 class Param(BaseModel):
-    instances: ClassVar[list[Param]] = []
-
     name: str
     type: Reference
     scope: Scope | None = Field(default=None, repr=False)
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        Param.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Param:
@@ -755,8 +778,9 @@ class Param(BaseModel):
 
     @classmethod
     def link_tables(cls, node_table: NodeTable, edge_table: EdgeTable):
-        for obj in cls.instances:
-            match obj.type.resolve():
+        obj: Param
+        for obj in get_instances(cls):
+            match obj.type.value:
                 case BuiltinType(name="node"):
                     obj.scope = node_table.scope
                 case BuiltinType(name="edge"):
@@ -767,8 +791,6 @@ register_parser("function_param", Param.make)
 
 
 class Function(BaseModel):
-    instances: ClassVar[list[Function]] = []
-
     name: str
     params: list[Param]
     rtype: Reference | None
@@ -777,7 +799,7 @@ class Function(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        Function.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> Function:
@@ -907,15 +929,13 @@ register_parser("parenthesized_expression", ParenthesizedExpression.make)
 
 
 class FunctionCall(BaseModel):
-    instances: ClassVar[list[FunctionCall]] = []
-
     function: Reference
     args: list[Expression]
     parent_scope: str
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        FunctionCall.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> FunctionCall:
@@ -929,8 +949,6 @@ register_parser("function_call", FunctionCall.make)
 
 
 class Variable(BaseModel):
-    instances: ClassVar[list[Variable]] = []
-
     name: str
     type: Reference
     init: Expression
@@ -938,7 +956,7 @@ class Variable(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        Variable.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Variable:
@@ -951,8 +969,9 @@ class Variable(BaseModel):
 
     @classmethod
     def link_tables(cls, node_table: NodeTable, edge_table: EdgeTable):
-        for obj in cls.instances:
-            match obj.type.resolve():
+        obj: Variable
+        for obj in get_instances(cls):
+            match obj.type.value:
                 case BuiltinType(name="node"):
                     obj.scope = node_table.scope
                 case BuiltinType(name="edge"):
@@ -1168,8 +1187,6 @@ register_parser("print_statement", PrintStatement.make)
 
 
 class SelectStatement(BaseModel):
-    instances: ClassVar[list[SelectStatement]] = []
-
     name: str
     set: Reference
     function: Reference
@@ -1177,7 +1194,7 @@ class SelectStatement(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        SelectStatement.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> SelectStatement:
@@ -1195,8 +1212,6 @@ register_parser("select_statement", SelectStatement.make)
 
 
 class SampleStatement(BaseModel):
-    instances: ClassVar[list[SampleStatement]] = []
-
     name: str
     set: Reference
     parent: Reference
@@ -1206,7 +1221,7 @@ class SampleStatement(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        SampleStatement.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> SampleStatement:
@@ -1231,8 +1246,6 @@ register_parser("sample_statement", SampleStatement.make)
 
 
 class ApplyStatement(BaseModel):
-    instances: ClassVar[list[ApplyStatement]] = []
-
     name: str
     set: Reference
     function: Reference
@@ -1240,7 +1253,7 @@ class ApplyStatement(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        ApplyStatement.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> ApplyStatement:
@@ -1261,8 +1274,6 @@ ReduceOperatorType = Literal["+", "*"]
 
 
 class ReduceStatement(BaseModel):
-    instances: ClassVar[list[ReduceStatement]] = []
-
     name: str
     outvar: Reference
     set: Reference
@@ -1272,7 +1283,7 @@ class ReduceStatement(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
 
     def model_post_init(self, _: Any) -> None:
-        ReduceStatement.instances.append(self)
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> ReduceStatement:
@@ -1326,19 +1337,23 @@ ParallelStatement = SelectStatement | SampleStatement | ApplyStatement | ReduceS
 
 Statement = SerialStatement | ParallelStatement
 
-Referable = (
-    BuiltinType
-    | BuiltinFunction
-    | BuiltinGlobal
-    | BuiltinNodeset
-    | BuiltinEdgeset
+# References which can be assigned to
+LValueRef = (
+    Global
+    | Param
+    | Variable
+    | tuple[Param | Variable, NodeField | EdgeField]
+    | tuple[Param | Variable, Contagion, StateAccessor]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+)
+
+# References which can be evaluated to get a value
+RValueRef = (
+    BuiltinGlobal
     | EnumConstant
-    | EnumType
     | Global
     | Param
     | Variable
-    | Function
-    | Distribution
     | NodeSet
     | EdgeSet
     | tuple[Param | Variable, NodeField | EdgeField]
@@ -1347,16 +1362,11 @@ Referable = (
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
 )
 
-EslCallable = BuiltinFunction | Function | Distribution
+# References which are valid types
+TValueRef = BuiltinType | EnumType
 
-Updateable = (
-    Global
-    | Param
-    | Variable
-    | tuple[Param | Variable, NodeField | EdgeField]
-    | tuple[Param | Variable, Contagion, StateAccessor]
-    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
-)
+# Things that can be called
+EslCallable = BuiltinFunction | Function | Distribution
 
 
 SIGNED_INT_TYPES = {"int", "i8", "i16", "i32", "i64"}
@@ -1428,15 +1438,7 @@ class Source(BaseModel):
         scope = Scope(name="source")
 
         children = defaultdict(list)
-        Function.instances.clear()
-        FunctionCall.instances.clear()
-        SelectStatement.instances.clear()
-        SampleStatement.instances.clear()
-        ApplyStatement.instances.clear()
-        ReduceStatement.instances.clear()
-        Param.instances.clear()
-        Variable.instances.clear()
-        Reference.instances.clear()
+        clear_instances()
 
         for child in node.named_children:
             children[child.type].append(parse(child, scope))
@@ -1460,18 +1462,18 @@ class Source(BaseModel):
         nodesets = [s for ss in children["nodeset"] for s in ss]
         edgesets = [s for ss in children["edgeset"] for s in ss]
 
-        functions = list(Function.instances)
+        functions: list[Function] = get_instances(Function)
 
         intervenes = [f for f in functions if f.name == "intervene"]
         if len(intervenes) != 1:
             raise ValueError("One and only one intervene function must be defined")
         intervene = intervenes[0]
 
-        function_calls = list(FunctionCall.instances)
-        select_statements = list(SelectStatement.instances)
-        sample_statements = list(SampleStatement.instances)
-        apply_statements = list(ApplyStatement.instances)
-        reduce_statements = list(ReduceStatement.instances)
+        function_calls: list[FunctionCall] = get_instances(FunctionCall)
+        select_statements: list[SelectStatement] = get_instances(SelectStatement)
+        sample_statements: list[SampleStatement] = get_instances(SampleStatement)
+        apply_statements: list[ApplyStatement] = get_instances(ApplyStatement)
+        reduce_statements: list[ReduceStatement] = get_instances(ReduceStatement)
 
         add_builtins(scope)
 
@@ -1484,8 +1486,9 @@ class Source(BaseModel):
         # rich.print(scope.rich_tree())
 
         # At this point all references should be resolve without errors
-        for ref in Reference.instances:
-            ref.resolve()
+        ref: Reference
+        for ref in get_instances(Reference):
+            _ = ref.value
 
         return cls(
             module=module,
