@@ -1,0 +1,44 @@
+struct NodeTable {
+    {% for field in fields if field.is_used %}
+    StaticArray<{{ field.type | typename }}> {{ field.name | mangle }};
+    {% endfor %}
+    {% for contagion in contagions %}
+    StaticArray<{{ contagion.state_type | typename }}> {{ contagion.name | mangle }}_state;
+    StaticArray<{{ contagion.state_type | typename }}> {{ contagion.name | mangle }}_state_prev;
+    StaticArray<{{ contagion.state_type | typename }}> {{ contagion.name | mangle }}_next_state;
+    StaticArray<float_type> {{ contagion.name | mangle }}_dwell_time;
+    {% endfor %}
+
+    NodeTable(const H5::H5File &file)
+        :
+        {% set comma = joiner(", ") %}
+        {% for field in fields if field.is_used %}
+        {{ comma() }}{{ field.name | mangle }}{NUM_NODES}
+        {% endfor %}
+        {% for contagion in contagions %}
+        {{ comma() }}{{ contagion.name | mangle }}_state{NUM_NODES}
+        {{ comma() }}{{ contagion.name | mangle }}_state_prev{NUM_NODES}
+        {{ comma() }}{{ contagion.name | mangle }}_next_state{NUM_NODES}
+        {{ comma() }}{{ contagion.name | mangle }}_dwell_time{NUM_NODES}
+        {% endfor %}
+    {
+        // initialize
+        #pragma omp parallel
+        {
+            {% for field in fields if field.is_used %}
+            {{ field.name | mangle }}.range_init(TN_START, TN_END);
+            {% endfor %}
+            {% for contagion in contagions %}
+            {{ contagion.name | mangle }}_state.range_init(TN_START, TN_END);
+            {{ contagion.name | mangle }}_state_prev.range_init(TN_START, TN_END);
+            {{ contagion.name | mangle }}_next_state.range_init(TN_START, TN_END);
+            {{ contagion.name | mangle }}_dwell_time.range_init(TN_START, TN_END);
+            {% endfor %}
+        }
+
+        // load the static fields
+        {% for field in fields if field.is_used and field.is_static %}
+        {{ field.name | mangle }}.load(file, "/node/{{ field.name }}");
+        {% endfor %}
+    }
+} ;

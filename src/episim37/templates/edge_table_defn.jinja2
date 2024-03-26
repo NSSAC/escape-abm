@@ -1,0 +1,43 @@
+struct EdgeTable {
+    {% for field in fields if field.is_used %}
+    StaticArray<{{ field.type | typename }}> {{ field.name | mangle }};
+    {% endfor %}
+    {% for contagion in contagions %}
+    StaticArray<float_type> {{ contagion.name | mangle }}_transmission_prob;
+    {% endfor %}
+    StaticArray<node_index_type> target_node_index;
+    StaticArray<node_index_type> source_node_index;
+
+    EdgeTable(const H5::H5File &file)
+        :
+        {% set comma = joiner(", ") %}
+        {% for field in fields if field.is_used %}
+        {{ comma() }}{{ field.name | mangle }}{NUM_EDGES}
+        {% endfor %}
+        {% for contagion in contagions %}
+        {{ comma() }}{{ contagion.name | mangle }}_transmission_prob{NUM_EDGES}
+        {% endfor %}
+        , target_node_index{NUM_EDGES}
+        , source_node_index{NUM_EDGES}
+    {
+        // initialize
+        #pragma omp parallel
+        {
+            {% for field in fields if field.is_used %}
+            {{ field.name | mangle }}.range_init(TE_START, TE_END);
+            {% endfor %}
+            {% for contagion in contagions %}
+            {{ contagion.name | mangle }}_transmission_prob.range_init(TE_START, TE_END);
+            {% endfor %}
+            target_node_index.range_init(TE_START, TE_END);
+            source_node_index.range_init(TE_START, TE_END);
+        }
+
+        // load static fields
+        {% for field in fields if field.is_used and field.is_static %}
+        {{ field.name | mangle }}.load(file, "/edge/{{ field.name }}");
+        {% endfor %}
+        target_node_index.load(file, "/edge/_target_node_index");
+        source_node_index.load(file, "/edge/_source_node_index");
+    }
+} ;

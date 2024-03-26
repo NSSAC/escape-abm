@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 # from itertools import chain
-from typing import assert_never, Any
+from typing import assert_never, Any, TypeVar, Callable
 from tempfile import TemporaryDirectory
 
 # from collections import defaultdict
@@ -36,6 +36,8 @@ from .click_helpers import (
     output_file_option,
 )
 
+Type = TypeVar("Type")
+
 TEMPLATE_LOADER = jinja2.PackageLoader(
     package_name="episim37", package_path="templates"
 )
@@ -50,6 +52,17 @@ ENVIRONMENT = jinja2.Environment(
 
 def render(template: str, **kwargs) -> str:
     return ENVIRONMENT.get_template(f"{template}.jinja2").render(**kwargs)
+
+
+def register_filter(name: str):
+    if name in ENVIRONMENT.filters:
+        raise RuntimeError(f"Filter with name {name!r} has already been defined")
+
+    def wrapper(wrapped: Callable[[Type], str]) -> Callable[[Type], str]:
+        ENVIRONMENT.filters[name] = wrapped
+        return wrapped
+
+    return wrapper
 
 
 STATIC_DIR = files("episim37.static")
@@ -110,14 +123,12 @@ def ctype(t: str) -> str:
     return type_map[t]
 
 
+@register_filter("mangle")
 def mangle(*args: str) -> str:
     if len(args) == 1:
         return "_" + args[0]
 
     return "_" + "__".join(args)
-
-
-ENVIRONMENT.filters["mangle"] = mangle
 
 
 def cstr_to_ctype_fn(t: str) -> str:
@@ -168,6 +179,7 @@ def cref_str(x: ast.CValueRef) -> str:
             assert_never(unexpected)
 
 
+@register_filter("ref")
 def ref_str(x: ast.RValueRef) -> str:
     match x:
         case ast.BuiltinGlobal():
@@ -240,7 +252,6 @@ def ref_str(x: ast.RValueRef) -> str:
             f_ref = mangle(f.name)
             return f"NODE_TABLE->{f_ref}[EDGE_TABLE->target_node_index[{e_ref}]]"
 
-
         case [
             ast.Param() | ast.Variable() as e,
             ast.SourceNodeAccessor(),
@@ -265,9 +276,6 @@ def ref_str(x: ast.RValueRef) -> str:
             assert_never(unexpected)
 
 
-ENVIRONMENT.filters["ref"] = ref_str
-
-
 def cpp_operator(t: str) -> str:
     match t:
         case "or":
@@ -280,6 +288,7 @@ def cpp_operator(t: str) -> str:
             return t
 
 
+@register_filter("expression")
 def expression_str(e: ast.Expression) -> str:
     match e:
         case bool():
@@ -330,9 +339,6 @@ def expression_str(e: ast.Expression) -> str:
             assert_never(unexpected)
 
 
-ENVIRONMENT.filters["expression"] = expression_str
-
-
 def fn_expression_str(e: ast.Expression, fn_param: str) -> str:
     match e:
         case ast.Reference() as r:
@@ -345,7 +351,8 @@ def fn_expression_str(e: ast.Expression, fn_param: str) -> str:
     return expression_str(e)
 
 
-def typename(x: ast.Reference | None) -> str:
+@register_filter("typename")
+def typename_str(x: ast.Reference | None) -> str:
     match x:
         case ast.Reference() as r:
             return tref_str(r.value)
@@ -353,9 +360,7 @@ def typename(x: ast.Reference | None) -> str:
     return "void"
 
 
-ENVIRONMENT.filters["typename"] = typename
-
-
+@register_filter("line_pragma")
 def line_pragma(pos: SourcePosition | None) -> str:
     match pos:
         case SourcePosition():
@@ -364,13 +369,11 @@ def line_pragma(pos: SourcePosition | None) -> str:
     return ""
 
 
-ENVIRONMENT.filters["line_pragma"] = line_pragma
-
-
 def asdict(m: BaseModel) -> dict:
     return {k: getattr(m, k) for k in m.model_fields.keys()}
 
 
+@register_filter("statement")
 def statement_str(s: ast.Statement) -> str:
     match s:
         case ast.PassStatement():
@@ -417,36 +420,35 @@ def statement_str(s: ast.Statement) -> str:
             assert_never(unexpected)
 
 
-ENVIRONMENT.filters["statement"] = statement_str
-
-
+@register_filter("enum_defn")
 def enum_defn_str(x: ast.EnumType) -> str:
     base_type = enum_base_type(x)
     return render("enum_defn", base_type=base_type, **asdict(x))
 
 
-ENVIRONMENT.filters["enum_defn"] = enum_defn_str
-
-
+@register_filter("global_defn")
 def global_defn_str(x: ast.Global) -> str:
     return render("global_defn", **asdict(x))
 
 
-ENVIRONMENT.filters["global_defn"] = global_defn_str
-
-
+@register_filter("function_decl")
 def function_decl_str(x: ast.Function) -> str:
     return render("function_decl", **asdict(x))
 
 
-ENVIRONMENT.filters["function_decl"] = function_decl_str
-
-
+@register_filter("function_defn")
 def function_defn_str(x: ast.Function) -> str:
     return render("function_defn", variables=x.variables(), **asdict(x))
 
 
-ENVIRONMENT.filters["function_defn"] = function_defn_str
+@register_filter("node_table_defn")
+def node_table_defn_str(x: ast.NodeTable) -> str:
+    return render("node_table_defn", **asdict(x))
+
+
+@register_filter("edge_table_defn")
+def edge_table_defn_str(x: ast.EdgeTable) -> str:
+    return render("edge_table_defn", **asdict(x))
 
 
 def simulator_str(x: ast.Source) -> str:
