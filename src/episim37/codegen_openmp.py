@@ -26,7 +26,7 @@ from .misc import EslError, SourcePosition
 from .alias_table import AliasTable
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast import mk_ast
-from .check_ast import check_ast
+from .check_ast import check_ast, is_node_set
 from . import ast
 from .click_helpers import (
     simulation_file_option,
@@ -409,13 +409,13 @@ def statement_str(s: ast.Statement) -> str:
         case ast.Variable():
             return render("variable", **asdict(s))
         case ast.SelectStatement():
-            return render("select_statement_openmp", **asdict(s))
+            return render("select_statement_launch_openmp", **asdict(s))
         case ast.SampleStatement():
-            return render("sample_statement_openmp", **asdict(s))
+            return render("sample_statement_launch_openmp", **asdict(s))
         case ast.ApplyStatement():
-            return render("apply_statement_openmp", **asdict(s))
+            return render("apply_statement_launch_openmp", **asdict(s))
         case ast.ReduceStatement():
-            return render("reduce_statement_openmp", **asdict(s))
+            return render("reduce_statement_launch_openmp", **asdict(s))
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -467,6 +467,14 @@ def discrete_dist_defn_str(x: ast.DiscreteDist) -> str:
     probs = [str(p) for p in table.probs]
     alias = [str(p) for p in table.alias]
     return render("discrete_dist_defn", probs=probs, alias=alias, **asdict(x))
+
+
+@register_filter("select_statement_defn")
+def select_statemetn_defn_str(x: ast.SelectStatement) -> str:
+    is_node_select = is_node_set(x.set)
+    return render(
+        "select_statement_defn_openmp", is_node_select=is_node_select, **asdict(x)
+    )
 
 
 def simulator_str(x: ast.Source) -> str:

@@ -79,6 +79,27 @@ EdgeTable *EDGE_TABLE = nullptr;
 {% endfor %}
 
 // ----------------------------------------------------------------------------
+// Nodesets and Edgesets
+// ----------------------------------------------------------------------------
+
+{% for set in nodesets %}
+static NodeSet* {{ set.name | mangle }} = nullptr;
+{% endfor %}
+
+{% for set in edgesets %}
+static EdgeSet* {{ set.name | mangle }} = nullptr;
+{% endfor %}
+
+// ----------------------------------------------------------------------------
+// Select statement kernels
+// ----------------------------------------------------------------------------
+
+{% for stmt in select_statements %}
+{{ stmt | select_statement_defn }}
+
+{% endfor %}
+
+// ----------------------------------------------------------------------------
 // Function definitions
 // ----------------------------------------------------------------------------
 

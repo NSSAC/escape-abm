@@ -1,0 +1,31 @@
+void {{ name }}() {
+    #pragma omp parallel
+    {
+        size_type size = 0;
+        {% if is_node_select %}
+        for (node_index_type v = TN_START; v < TN_END; v++) {
+            const auto b = {{ function.value.name | mangle }}(v);
+            {{ set.value.name | mangle }}->is_in[v] = b;
+            size += b;
+        }
+        {% else %}
+        for (edge_index_type e = TE_START; e < TE_END; e++) {
+            const auto b = {{ function.value.name | mangle }}(e);
+            {{ set.value.name | mangle }}->is_in[e] = b;
+            size += b;
+        }
+        {% endif %}
+
+        {{ set.value.name | mangle  }}->thread_size[THREAD_IDX] = size;
+
+        #pragma omp barrier
+
+        #pragma omp master
+        {
+            {{ set.value.name | mangle }}->size = 0;
+            for (int tid = 0; tid < NUM_THREADS; tid++) {
+                {{ set.value.name | mangle }}->size += {{ set.value.name | mangle  }}->thread_size[tid];
+            }
+        }
+    }
+}
