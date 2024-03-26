@@ -1,0 +1,4 @@
+typedef {{ base_type }} {{ name | mangle }};
+{% for const in consts %}
+const {{ name | mangle }} {{ const | mangle }} = {{ loop.index0 }};
+{% endfor %}

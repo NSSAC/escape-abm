@@ -1361,6 +1361,7 @@ LValueRef = (
     | tuple[Param | Variable, NodeField | EdgeField]
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, Contagion, StateAccessor]
 )
 
 # References which can be evaluated to get a value
@@ -1378,6 +1379,7 @@ RValueRef = (
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, Contagion, StateAccessor]
 )
 
 # References which are valid types

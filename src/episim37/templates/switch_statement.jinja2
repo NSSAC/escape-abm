@@ -1,0 +1,16 @@
+{{ pos | line_pragma }}
+{% set else_ = joiner("else ") %}
+{% for case_ in cases %}
+{{ else_() }}if ({{ condition | expression }} == {{ case_.match | expression }}) {
+    {% for stmt in case_.body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}
+{% endfor %}
+{% if default is not none %}
+else {
+    {% for stmt in default.body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}
+{% endif %}

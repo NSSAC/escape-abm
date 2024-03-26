@@ -1,0 +1,15 @@
+{{ pos | line_pragma }}
+{% set comma = joiner(", ") %}
+{{ rtype | typename }} {{ name | mangle }}(
+    {% for p in params %}
+    {{ comma() }}{{ p.type | typename }} {{ p.name | mangle }}
+    {% endfor %}
+) {
+    {% for v  in variables %}
+    {{ v.type | typename }} {{ name | mangle }};
+    {% endfor %}
+
+    {% for stmt in body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}

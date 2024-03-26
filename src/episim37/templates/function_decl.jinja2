@@ -1,0 +1,2 @@
+{% set comma = joiner(", ") %}
+{{ rtype | typename }} {{ name | mangle }}({% for param in params %}{{ comma() }}{{ param.type | typename }}{% endfor %});

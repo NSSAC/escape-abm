@@ -1,0 +1,6 @@
+{{ pos | line_pragma }}
+while ({{ condition | expression }}) {
+    {% for stmt in body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}

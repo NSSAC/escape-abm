@@ -1,0 +1,20 @@
+{{ pos | line_pragma }}
+if ({{ condition | expression }}) {
+    {% for stmt in body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}
+{% for elif_ in elifs %}
+else if ({{ elif_.condition | expression }}) {
+    {% for stmt in elif_.body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}
+{% endfor %}
+{% if else_ is not none %}
+else {
+    {% for stmt in else_.body %}
+    {{ stmt | statement | indent }}
+    {% endfor %}
+}
+{% endif %}

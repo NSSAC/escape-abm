@@ -6,23 +6,28 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
-from itertools import chain
+
+# from itertools import chain
 from typing import assert_never, Any
 from tempfile import TemporaryDirectory
-from collections import defaultdict
+
+# from collections import defaultdict
 from importlib.resources import files
 
-import attrs
 import click
 import jinja2
-
 import rich
 import rich.markup
+from pydantic import BaseModel
+from typeguard import check_type, TypeCheckError
 
-from .parse_tree import mk_pt, ParseTreeConstructionError, SourcePosition
-from .ast1 import mk_ast1, ASTConstructionError
-from .alias_table import AliasTable
-from . import ast1
+from .misc import EslError, SourcePosition
+
+# from .alias_table import AliasTable
+from .parse_tree import mk_pt, ParseTreeConstructionError
+from .ast import mk_ast
+from .check_ast import check_ast
+from . import ast
 from .click_helpers import (
     simulation_file_option,
     gen_code_dir_option,
@@ -31,72 +36,23 @@ from .click_helpers import (
     output_file_option,
 )
 
-INC_CSR_INDPTR_DATASET_NAME = "/incoming/incidence/csr/indptr"
-TARGET_NODE_INDEX_DATASET_NAME = "/edge/_target_node_index"
-SOURCE_NODE_INDEX_DATASET_NAME = "/edge/_source_node_index"
-
-DEFERRED_TYPES = {
-    "int_type": "int64_t",
-    "uint_type": "uint64_t",
-    "float_type": "float",
-    "bool_type": "uint8_t",
-    "size_type": "uint64_t",
-    "node_index_type": "uint32_t",
-    "edge_index_type": "uint64_t",
-}
-
-
-@attrs.define
-class DeferredType:
-    name: str
-    base_ctype: str
-    h5_type: str
-    base_h5_type: str
-
+TEMPLATE_LOADER = jinja2.PackageLoader(
+    package_name="episim37", package_path="templates"
+)
 
 ENVIRONMENT = jinja2.Environment(
-    loader=jinja2.PackageLoader(package_name="episim37", package_path="templates"),
+    loader=TEMPLATE_LOADER,
     undefined=jinja2.StrictUndefined,
     trim_blocks=True,
     lstrip_blocks=True,
 )
 
+
+def render(template: str, **kwargs) -> str:
+    return ENVIRONMENT.get_template(f"{template}.jinja2").render(**kwargs)
+
+
 STATIC_DIR = files("episim37.static")
-
-
-class CodegenError(Exception):
-    def __init__(self, type: str, explanation: str, pos: SourcePosition | None):
-        super().__init__()
-        self.type = type
-        self.explanation = explanation
-        self.pos = pos
-
-    def __str__(self):
-        return "Failed to construct IR"
-
-    def rich_print(self):
-        rich.print(f"[red]{self}[/red]")
-
-        if self.pos is None:
-            print(self.explanation)
-            return
-
-        etype = f"[red]{self.type}[/red]"
-        fpath = f"[yellow]{self.pos.source}[/yellow]"
-        line = self.pos.line
-        col = self.pos.col
-        expl = rich.markup.escape(self.explanation)
-
-        rich.print(f"{etype}:{fpath}:{line}:{col}:{expl}")
-        print(self.pos.text)
-
-
-Error = CodegenError
-
-
-class UnexpectedValue(CodegenError):
-    def __init__(self, unexpected, pos: SourcePosition | None):
-        super().__init__("Unexpected value", repr(unexpected), pos)
 
 
 def smallest_uint_type(max_val: int) -> str | None:
@@ -112,10 +68,10 @@ def smallest_uint_type(max_val: int) -> str | None:
         return None
 
 
-def enum_base_type(t: ast1.EnumType) -> str:
+def enum_base_type(t: ast.EnumType) -> str:
     type = smallest_uint_type(len(t.consts) - 1)
     if type is None:
-        raise Error("Large enumeration", "Enum too large", t.pos)
+        raise EslError("Large enumeration", "Enum too large", t.pos)
     return type
 
 
@@ -146,38 +102,12 @@ def ctype(t: str) -> str:
         "node":  "node_index_type",
         "edge":  "edge_index_type",
 
-        "nodeset":  "nodeset*",
-        "edgeset":  "edgeset*",
+        "nodeset":  "NodeSet*",
+        "edgeset":  "EdgeSet*",
     }
     # fmt: on
 
     return type_map[t]
-
-
-def hdf5_type(t: str) -> str:
-    """C type to HDF5 type."""
-
-    # fmt: off
-    type_map = {
-        "uint8_t": "H5::PredType::NATIVE_UINT8",
-        "uint16_t": "H5::PredType::NATIVE_UINT16",
-        "uint32_t": "H5::PredType::NATIVE_UINT32",
-        "uint64_t": "H5::PredType::NATIVE_UINT64",
-
-        "int8_t": "H5::PredType::NATIVE_INT8",
-        "int16_t": "H5::PredType::NATIVE_INT16",
-        "int32_t": "H5::PredType::NATIVE_INT32",
-        "int64_t": "H5::PredType::NATIVE_INT64",
-
-        "float": "H5::PredType::NATIVE_FLOAT",
-        "double": "H5::PredType::NATIVE_DOUBLE",
-    }
-    # fmt: on
-
-    if t in type_map:
-        return type_map[t]
-
-    return t.upper() + "_H5_TYPE"
 
 
 def mangle(*args: str) -> str:
@@ -185,6 +115,9 @@ def mangle(*args: str) -> str:
         return "_" + args[0]
 
     return "_" + "__".join(args)
+
+
+ENVIRONMENT.filters["mangle"] = mangle
 
 
 def cstr_to_ctype_fn(t: str) -> str:
@@ -209,127 +142,130 @@ def cstr_to_ctype_fn(t: str) -> str:
             raise ValueError(unexpected)
 
 
-def typename(t: ast1.EnumType | ast1.BuiltinType) -> str:
-    match t:
-        case ast1.BuiltinType():
-            return ctype(t.name)
-        case ast1.EnumType():
-            return mangle(t.name)
-        case _ as unexpected:
-            assert_never(unexpected)
-
-
-def h5_typename(t: ast1.EnumType | ast1.BuiltinType) -> str:
-    match t:
-        case ast1.BuiltinType():
-            return hdf5_type(ctype(t.name))
-        case ast1.EnumType():
-            return hdf5_type(enum_base_type(t))
-        case _ as unexpected:
-            assert_never(unexpected)
-
-
-def update_globals() -> dict:
-    deferred_types = []
-    for type, base_ctype in DEFERRED_TYPES.items():
-        deferred_types.append(
-            DeferredType(type, base_ctype, hdf5_type(type), hdf5_type(base_ctype))
-        )
-
-    globals = dict(
-        INC_CSR_INDPTR_DATASET_NAME=INC_CSR_INDPTR_DATASET_NAME,
-        TARGET_NODE_INDEX_DATASET_NAME=TARGET_NODE_INDEX_DATASET_NAME,
-        SOURCE_NODE_INDEX_DATASET_NAME=SOURCE_NODE_INDEX_DATASET_NAME,
-        DEFERRED_TYPES=deferred_types,
-    )
-
-    return globals
-
-
-ENVIRONMENT.globals.update(update_globals())
-
-
-def ref_str(x: ast1.Referable) -> str:
+def tref_str(x: ast.TValueRef) -> str:
     match x:
-        case ast1.EnumConstant():
+        case ast.BuiltinType():
+            return ctype(x.name)
+        case ast.EnumType():
             return mangle(x.name)
-        case ast1.Config():
+        case _ as unexpected:
+            assert_never(unexpected)
+
+
+def cref_str(x: ast.CValueRef) -> str:
+    match x:
+        case ast.BuiltinFunction():
+            return x.name
+        case ast.Function():
             return mangle(x.name)
-        case ast1.BuiltinConfig():
-            return x.name.upper()
-        case ast1.Global():
+        case ast.NormalDist():
             return mangle(x.name)
-        case ast1.BuiltinGlobal():
-            return x.name.upper()
-        case ast1.Param():
+        case ast.UniformDist():
             return mangle(x.name)
-        case ast1.Variable():
+        case ast.DiscreteDist():
             return mangle(x.name)
-        case ast1.NodeSet():
+        case _ as unexpected:
+            assert_never(unexpected)
+
+
+def ref_str(x: ast.RValueRef) -> str:
+    match x:
+        case ast.BuiltinGlobal():
+            return x.name
+        case ast.EnumConstant():
             return mangle(x.name)
-        case ast1.EdgeSet():
+        case ast.Global():
             return mangle(x.name)
-        case [ast1.Param() | ast1.Variable() as v, ast1.NodeField() as f]:
+        case ast.Param():
+            return mangle(x.name)
+        case ast.Variable():
+            return mangle(x.name)
+        case ast.NodeSet():
+            return mangle(x.name)
+        case ast.BuiltinNodeset():
+            return x.name
+        case ast.EdgeSet():
+            return mangle(x.name)
+        case ast.BuiltinEdgeset():
+            return x.name
+
+        # Node / Edge fields
+        case [ast.Param() | ast.Variable() as v, ast.NodeField() as f]:
             v_ref = ref_str(v)
             f_ref = mangle(f.name)
             return f"NODE_TABLE->{f_ref}[{v_ref}]"
-        case [ast1.Param() | ast1.Variable() as e, ast1.EdgeField() as f]:
+        case [ast.Param() | ast.Variable() as e, ast.EdgeField() as f]:
             e_ref = ref_str(e)
             f_ref = mangle(f.name)
             return f"EDGE_TABLE->{f_ref}[{e_ref}]"
+
         case [
-            ast1.Param() | ast1.Variable() as v,
-            ast1.Contagion() as c,
-            ast1.StateAccessor(),
+            ast.Param() | ast.Variable() as v,
+            ast.Contagion() as c,
+            ast.StateAccessor(),
         ]:
             v_ref = ref_str(v)
             f_ref = mangle(c.name) + "_state"
             return f"NODE_TABLE->{f_ref}[{v_ref}]"
+
         case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.SourceNodeAccessor(),
+            ast.Param() | ast.Variable() as e,
+            ast.SourceNodeAccessor(),
         ]:
             e_ref = ref_str(e)
             return f"EDGE_TABLE->source_node_index[{e_ref}]"
+
         case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.TargetNodeAccessor(),
+            ast.Param() | ast.Variable() as e,
+            ast.TargetNodeAccessor(),
         ]:
             e_ref = ref_str(e)
             return f"EDGE_TABLE->target_node_index[{e_ref}]"
+
         case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.SourceNodeAccessor(),
-            ast1.NodeField() as f,
+            ast.Param() | ast.Variable() as e,
+            ast.SourceNodeAccessor(),
+            ast.NodeField() as f,
         ]:
             e_ref = ref_str(e)
             f_ref = mangle(f.name)
             return f"NODE_TABLE->{f_ref}[EDGE_TABLE->source_node_index[{e_ref}]]"
+
         case [
-            ast1.Param() | ast1.Variable() as e,
-            ast1.TargetNodeAccessor(),
-            ast1.NodeField() as f,
+            ast.Param() | ast.Variable() as e,
+            ast.TargetNodeAccessor(),
+            ast.NodeField() as f,
         ]:
             e_ref = ref_str(e)
             f_ref = mangle(f.name)
             return f"NODE_TABLE->{f_ref}[EDGE_TABLE->target_node_index[{e_ref}]]"
+
+
+        case [
+            ast.Param() | ast.Variable() as e,
+            ast.SourceNodeAccessor(),
+            ast.Contagion() as c,
+            ast.StateAccessor(),
+        ]:
+            e_ref = ref_str(e)
+            f_ref = mangle(c.name) + "_state"
+            return f"NODE_TABLE->{f_ref}[EDGE_TABLE->source_node_index[{e_ref}]]"
+
+        case [
+            ast.Param() | ast.Variable() as e,
+            ast.TargetNodeAccessor(),
+            ast.Contagion() as c,
+            ast.StateAccessor(),
+        ]:
+            e_ref = ref_str(e)
+            f_ref = mangle(c.name) + "_state"
+            return f"NODE_TABLE->{f_ref}[EDGE_TABLE->target_node_index[{e_ref}]]"
+
         case _ as unexpected:
             assert_never(unexpected)
 
 
-def call_str(x: ast1.Callable) -> str:
-    match x:
-        case ast1.BuiltinFunction():
-            return mangle(x.name)
-        case ast1.Function():
-            return mangle(x.name)
-        case _ as unexpected:
-            assert_never(unexpected)
-
-
-def upd_str(left: ast1.Updateable, op: str, right_str: str) -> str:
-    l_str = ref_str(left)
-    return f"{l_str} {op} {right_str}"
+ENVIRONMENT.filters["ref"] = ref_str
 
 
 def cpp_operator(t: str) -> str:
@@ -344,7 +280,7 @@ def cpp_operator(t: str) -> str:
             return t
 
 
-def expression_str(e: ast1.Expression) -> str:
+def expression_str(e: ast.Expression) -> str:
     match e:
         case bool():
             return str(int(e))
@@ -352,22 +288,41 @@ def expression_str(e: ast1.Expression) -> str:
             return str(e)
         case float():
             return str(e)
-        case ast1.UnaryExpression():
+        case ast.UnaryExpression():
             op = cpp_operator(e.operator)
             eo = expression_str(e.argument)
             return f"{op}{eo}"
-        case ast1.BinaryExpression():
+        case ast.BinaryExpression():
             left = expression_str(e.left)
             op = cpp_operator(e.operator)
             right = expression_str(e.right)
             return f"{left} {op} {right}"
-        case ast1.ParenthesizedExpression():
+        case ast.ParenthesizedExpression():
             eo = expression_str(e.expression)
             return f"({eo})"
-        case ast1.Reference():
-            return ref_str(e.resolve_referable())
-        case ast1.FunctionCall():
-            function = call_str(e.function.resolve_callable())
+        case ast.Reference():
+            value = e.value
+            try:
+                check_type(value, ast.RValueRef)
+            except TypeCheckError:
+                raise EslError(
+                    "Invalid reference", f"Can't get value of {e.name}", e.pos
+                )
+            return ref_str(value)
+        case ast.TemplateVariable():
+            if e.pos is None:
+                line, col = 1, 1
+            else:
+                line, col = e.pos.line, e.pos.col
+            return f"UNDEFINED_TEMPLATE_VARIABLE_{line}_{col}"
+        case ast.FunctionCall():
+            function = e.function.value
+            try:
+                check_type(function, ast.CValueRef)
+            except TypeCheckError:
+                raise EslError("Invalid callable", f"Can't call {function.name}", e.pos)
+
+            function = cref_str(function)
             args = [expression_str(a) for a in e.args]
             args = ", ".join(args)
             return f"{function}({args})"
@@ -375,93 +330,64 @@ def expression_str(e: ast1.Expression) -> str:
             assert_never(unexpected)
 
 
-@attrs.define
-class IndentedLines:
-    cur_indent: int
-    indents: list[int] = attrs.field(factory=list)
-    lines: list[str] = attrs.field(factory=list)
-
-    def append(self, line: str):
-        self.indents.append(self.cur_indent)
-        self.lines.append(line)
-
-    def extend(self, other: IndentedLines):
-        self.indents.extend(other.indents)
-        self.lines.extend(other.lines)
-
-    def to_string(self, shift: int = 4) -> str:
-        out = []
-        for indent, line in zip(self.indents, self.lines):
-            indent = indent * shift
-            if line:
-                out.append(" " * indent)
-                out.append(line)
-                out.append("\n")
-        return "".join(out)
+ENVIRONMENT.filters["expression"] = expression_str
 
 
-def make_line(pos: SourcePosition | None) -> str:
-    if pos is None:
-        return ""
+def fn_expression_str(e: ast.Expression, fn_param: str) -> str:
+    match e:
+        case ast.Reference() as r:
+            match r.value:
+                case ast.Function() as f:
+                    return cref_str(f) + f"({ fn_param })"
+                case ast.NormalDist() | ast.DiscreteDist() | ast.UniformDist() as d:
+                    return cref_str(d) + "()"
 
-    return f'#line {pos.line} "{pos.source}"'
+    return expression_str(e)
 
 
-def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
-    lines = IndentedLines(indent)
+def typename(x: ast.Reference | None) -> str:
+    match x:
+        case ast.Reference() as r:
+            return tref_str(r.value)
 
+    return "void"
+
+
+ENVIRONMENT.filters["typename"] = typename
+
+
+def line_pragma(pos: SourcePosition | None) -> str:
+    match pos:
+        case SourcePosition():
+            return f'#line {pos.line} "{pos.source}"'
+
+    return ""
+
+
+ENVIRONMENT.filters["line_pragma"] = line_pragma
+
+
+def asdict(m: BaseModel) -> dict:
+    return {k: getattr(m, k) for k in m.model_fields.keys()}
+
+
+def statement_str(s: ast.Statement) -> str:
     match s:
-        case ast1.PassStatement():
-            lines.append(make_line(s.pos))
-            lines.append("/* pass */")
-        case ast1.ReturnStatement():
-            lines.append(make_line(s.pos))
-            expr = expression_str(s.expression)
-            lines.append(f"return {expr};")
-        case ast1.ElifSection():
-            cond = expression_str(s.condition)
-            cond_line = "else if (%s) {" % cond
-            lines.append(cond_line)
-            for body in s.body:
-                lines.extend(statement_lines(body, indent + 1))
-            lines.append("}")
-        case ast1.ElseSection():
-            lines.append("else {")
-            for body in s.body:
-                lines.extend(statement_lines(body, indent + 1))
-            lines.append("}")
-        case ast1.IfStatement():
-            lines.append(make_line(s.pos))
-            cond = expression_str(s.condition)
-            cond_line = "if (%s) {" % cond
-            lines.append(cond_line)
-            for body in s.body:
-                lines.extend(statement_lines(body, indent + 1))
-            lines.append("}")
-            for elif_ in s.elifs:
-                lines.extend(statement_lines(elif_, indent))
-            if s.else_ is not None:
-                lines.extend(statement_lines(s.else_, indent))
-        case ast1.WhileLoop():
-            lines.append(make_line(s.pos))
-            cond = expression_str(s.condition)
-            cond_line = "while (%s) {" % cond
-            lines.append(cond_line)
-            for body in s.body:
-                lines.extend(statement_lines(body, indent + 1))
-            lines.append("}")
-        case ast1.CallStatement():
-            lines.append(make_line(s.pos))
-            call = expression_str(s.call)
-            call_line = "%s;" % call
-            lines.append(call_line)
-        case ast1.UpdateStatement():
-            lines.append(make_line(s.pos))
-            left = s.left.resolve_updateable()
-            op = s.operator
-            right = expression_str(s.right)
-            lines.append(upd_str(left, op, right) + ";")
-        case ast1.PrintStatement():
+        case ast.PassStatement():
+            return render("pass_statement", **asdict(s))
+        case ast.ReturnStatement():
+            return render("return_statement", **asdict(s))
+        case ast.IfStatement():
+            return render("if_statement", **asdict(s))
+        case ast.SwitchStatement():
+            return render("switch_statement", **asdict(s))
+        case ast.WhileLoop():
+            return render("while_loop", **asdict(s))
+        case ast.CallStatement():
+            return render("call_statement", **asdict(s))
+        case ast.UpdateStatement():
+            return render("update_statement", **asdict(s))
+        case ast.PrintStatement():
             args = []
             for arg in s.args:
                 if isinstance(arg, str):
@@ -471,611 +397,85 @@ def statement_lines(s: ast1.StatementParts, indent: int) -> IndentedLines:
                     arg = f"std::to_string({arg})"
                     args.append(arg)
             args = f" << {s.sep} << ".join(args)
-            line = "std::cout << " + args + f" << {s.end} << std::flush;"
-            lines.append(line)
-        case ast1.Variable():
-            lines.append(make_line(s.pos))
-            left = ref_str(s)
-            right = expression_str(s.init)
-            lines.append(f"{left} = {right};")
-        case ast1.SelectUsing():
-            lines.append(make_line(s.pos))
-            lines.append(f"{s.name}();")
-        case ast1.SelectApprox():
-            lines.append(make_line(s.pos))
-            lines.append(f"{s.name}();")
-        case ast1.SelectRelative():
-            lines.append(make_line(s.pos))
-            lines.append(f"{s.name}();")
-        case ast1.ForeachStatement():
-            lines.append(make_line(s.pos))
-            lines.append(f"{s.name}();")
+            print_statement_str = "std::cout << " + args + f" << {s.end} << std::flush"
+            return render(
+                "print_statement",
+                print_statement_str=print_statement_str,
+                **asdict(s),
+            )
+        case ast.Variable():
+            return render("variable", **asdict(s))
+        case ast.SelectStatement():
+            return render("select_statement_openmp", **asdict(s))
+        case ast.SampleStatement():
+            return render("sample_statement_openmp", **asdict(s))
+        case ast.ApplyStatement():
+            return render("apply_statement_openmp", **asdict(s))
+        case ast.ReduceStatement():
+            return render("reduce_statement_openmp", **asdict(s))
         case _ as unexpected:
             assert_never(unexpected)
 
-    return lines
 
+ENVIRONMENT.filters["statement"] = statement_str
 
-@attrs.define
-class EnumType:
-    name: str
-    base_type: str
-    consts: list[str]
-    print_consts: list[str]
 
-    @classmethod
-    def make(cls, et: ast1.EnumType) -> EnumType:
-        name = typename(et)
-        base_type = enum_base_type(et)
-        consts = [mangle(c) for c in et.consts]
-        return cls(name, base_type, consts, et.consts)
+def enum_defn_str(x: ast.EnumType) -> str:
+    base_type = enum_base_type(x)
+    return render("enum_defn", base_type=base_type, **asdict(x))
 
 
-@attrs.define
-class Config:
-    name: str
-    type: str
-    from_str_fn: str
-    env_var: str
-    print_name: str
-    default: str
+ENVIRONMENT.filters["enum_defn"] = enum_defn_str
 
-    @classmethod
-    def make(cls, c: ast1.Config) -> Config:
-        name = ref_str(c)
-        type = typename(c.type.resolve())
-        from_str_fn = cstr_to_ctype_fn(type)
-        env_var = c.name.upper()
-        default = expression_str(c.default)
-        return cls(name, type, from_str_fn, env_var, c.name, default)
 
+def global_defn_str(x: ast.Global) -> str:
+    return render("global_defn", **asdict(x))
 
-@attrs.define
-class Global:
-    name: str
-    type: str
-    default: str
 
-    @classmethod
-    def make(cls, c: ast1.Global) -> Global:
-        name = ref_str(c)
-        type = typename(c.type.resolve())
-        default = expression_str(c.default)
-        return cls(name, type, default)
+ENVIRONMENT.filters["global_defn"] = global_defn_str
 
 
-@attrs.define
-class Field:
-    name: str
-    print_name: str
-    dataset_name: str
-    type: str
-    h5_type: str
-    is_static: bool
-    is_used: bool
+def function_decl_str(x: ast.Function) -> str:
+    return render("function_decl", **asdict(x))
 
 
-@attrs.define
-class NodeTable:
-    fields: list[Field]
-    contagions: list[tuple[str, str]]  # contagion name, state_type
-    key: str
+ENVIRONMENT.filters["function_decl"] = function_decl_str
 
-    @classmethod
-    def make(cls, tab: ast1.NodeTable) -> NodeTable:
-        fields = []
-        for field in tab.fields:
-            name = mangle(field.name)
-            print_name = field.name
-            dataset_name = f"/node/{field.name}"
-            type = typename(field.type.resolve())
-            h5_type = h5_typename(field.type.resolve())
-            is_static = field.is_static
-            if field == tab.key:
-                is_used = False
-            else:
-                is_used = True
-            fields.append(
-                Field(name, print_name, dataset_name, type, h5_type, is_static, is_used)
-            )
 
-        contagions = []
-        for contagion in tab.contagions:
-            name = mangle(contagion.name)
-            state_type = typename(contagion.state_type.resolve())
-            contagions.append((name, state_type))
+def function_defn_str(x: ast.Function) -> str:
+    return render("function_defn", variables=x.variables(), **asdict(x))
 
-        return cls(fields, contagions, tab.key.name)
 
+ENVIRONMENT.filters["function_defn"] = function_defn_str
 
-@attrs.define
-class EdgeTable:
-    fields: list[Field]
-    contagions: list[str]  # contagion name
-    target_node_key: str
-    source_node_key: str
 
-    @classmethod
-    def make(cls, tab: ast1.EdgeTable) -> EdgeTable:
-        fields = []
-        for field in tab.fields:
-            name = mangle(field.name)
-            print_name = field.name
-            dataset_name = f"/edge/{field.name}"
-            type = typename(field.type.resolve())
-            h5_type = h5_typename(field.type.resolve())
-            is_static = field.is_static
-            if field == tab.target_node_key or field == tab.source_node_key:
-                is_used = False
-            else:
-                is_used = True
-            fields.append(
-                Field(name, print_name, dataset_name, type, h5_type, is_static, is_used)
-            )
+def simulator_str(x: ast.Source) -> str:
+    return render("simulator_openmp", **asdict(x))
 
-        contagions = []
-        for contagion in tab.contagions:
-            contagions.append(mangle(contagion.name))
 
-        return cls(
-            fields, contagions, tab.target_node_key.name, tab.source_node_key.name
-        )
-
-
-@attrs.define
-class ContagionOutput:
-    name: str  # contagion name
-    print_name: str  # unmangled name for datasets
-    state_type: str
-    state_h5_type: str
-
-    @classmethod
-    def make(cls, c: ast1.Contagion) -> ContagionOutput:
-        name = mangle(c.name)
-        print_name = c.name
-        state_type = typename(c.state_type.resolve())
-        state_h5_type = h5_typename(c.state_type.resolve())
-        return cls(name, print_name, state_type, state_h5_type)
-
-
-@attrs.define
-class ConstantDist:
-    name: str
-    v: str
-
-    @classmethod
-    def make(cls, d: ast1.ConstantDist) -> ConstantDist:
-        return cls(
-            name=mangle(d.name),
-            v=str(d.v),
-        )
-
-
-@attrs.define
-class DiscreteDist:
-    name: str
-    probs: list[str]
-    alias: list[str]
-    vs: list[str]
-
-    @classmethod
-    def make(cls, d: ast1.DiscreteDist) -> DiscreteDist:
-        name = mangle(d.name)
-        table = AliasTable.make(d.ps)
-        probs = [str(p) for p in table.probs]
-        alias = [str(p) for p in table.alias]
-        vs = [str(v) for v in d.vs]
-        return cls(name, probs, alias, vs)
-
-
-@attrs.define
-class NormalDist:
-    name: str
-    mean: str
-    std: str
-    min: str
-    max: str
-
-    @classmethod
-    def make(cls, d: ast1.NormalDist) -> NormalDist:
-        return cls(
-            name=mangle(d.name),
-            mean=str(d.mean),
-            std=str(d.std),
-            min=str(d.min),
-            max=str(d.max),
-        )
-
-
-@attrs.define
-class UniformDist:
-    name: str
-    low: str
-    high: str
-
-    @classmethod
-    def make(cls, d: ast1.UniformDist) -> UniformDist:
-        return cls(
-            name=mangle(d.name),
-            low=str(d.low),
-            high=str(d.high),
-        )
-
-
-@attrs.define
-class Function:
-    name: str
-    params: list[tuple[str, str]]
-    return_: str
-    variables: list[tuple[str, str]]
-    body: str
-    line: str
-
-    @classmethod
-    def make(cls, name: str, x: ast1.Function) -> Function:
-        params = []
-        for p in x.params:
-            p_name = ref_str(p)
-            p_type = typename(p.type.resolve())
-            params.append((p_name, p_type))
-
-        if x.return_ is None:
-            return_ = "void"
-        else:
-            return_ = typename(x.return_.resolve())
-
-        variables = []
-        for v in x.variables():
-            v_name = ref_str(v)
-            v_type = typename(v.type.resolve())
-            variables.append((v_name, v_type))
-
-        body = IndentedLines(cur_indent=1)
-        for s in x.body:
-            body.extend(statement_lines(s, body.cur_indent + 1))
-        body = body.to_string()
-
-        line = make_line(x.pos)
-        return cls(name, params, return_, variables, body, line)
-
-
-@attrs.define
-class SingleEdgeTransition:
-    entry: str
-    exit: str
-    dwell_dist: str
-
-    @classmethod
-    def make(cls, t: ast1.Transition) -> SingleEdgeTransition:
-        entry = ref_str(t.entry.resolve())
-        exit = ref_str(t.exit.resolve())
-        dwell_dist = mangle(t.dwell.resolve().name)
-        return cls(entry, exit, dwell_dist)
-
-
-@attrs.define
-class MultiEdgeTransition:
-    entry: str
-    p_functions: list[str]
-    exits: list[str]
-    dwell_dists: list[str]
-
-    @classmethod
-    def make(cls, ts: list[ast1.Transition]) -> MultiEdgeTransition:
-        entry = ref_str(ts[0].entry.resolve())
-
-        p_functions = []
-        for t in ts:
-            if t.p_function is None:
-                raise Error(
-                    "Invalid multi edge transition",
-                    "Every transition in a multi edge transition must provide a probability function",
-                    t.pos,
-                )
-            else:
-                p_functions.append(call_str(t.p_function.resolve()))
-
-        exits = [ref_str(t.exit.resolve()) for t in ts]
-        dwell_dists = [mangle(t.dwell.resolve().name) for t in ts]
-        return cls(entry, p_functions, exits, dwell_dists)
-
-
-@attrs.define
-class Transition:
-    single: list[SingleEdgeTransition]
-    multi: list[MultiEdgeTransition]
-    notrans: list[str]
-
-    @classmethod
-    def make(cls, c: ast1.Contagion) -> Transition:
-        entry_transi = defaultdict(list)
-        for transi in c.transitions:
-            entry_transi[ref_str(transi.entry.resolve())].append(transi)
-
-        single: list[SingleEdgeTransition] = []
-        multi: list[MultiEdgeTransition] = []
-        for vs in entry_transi.values():
-            if len(vs) == 1:
-                single.append(SingleEdgeTransition.make(vs[0]))
-            else:
-                multi.append(MultiEdgeTransition.make(vs))
-
-        notrans = []
-        for const in c.state_type.resolve().consts:
-            const = mangle(const)
-            if const not in entry_transi:
-                notrans.append(const)
-
-        return cls(
-            single=single,
-            multi=multi,
-            notrans=notrans,
-        )
-
-
-@attrs.define
-class Transmission:
-    transms: list[
-        tuple[str, list[tuple[str, list[str]]]]
-    ]  # entry -> [exit -> [contact]]
-    susceptibility: str
-    infectivity: str
-    transmissibility: str
-    enabled: str
-
-    @classmethod
-    def make(cls, c: ast1.Contagion) -> Transmission:
-        transms = defaultdict(lambda: defaultdict(list))
-        for t in c.transmissions:
-            contact = ref_str(t.contact.resolve())
-            entry = ref_str(t.entry.resolve())
-            exit = ref_str(t.exit.resolve())
-            transms[entry][exit].append(contact)
-        transms = [
-            (entry, [(exit, contacts) for exit, contacts in xs.items()])
-            for entry, xs in transms.items()
-        ]
-
-        susceptibility = call_str(c.susceptibility.resolve())
-        infectivity = call_str(c.infectivity.resolve())
-        transmissibility = call_str(c.transmissibility.resolve())
-        enabled = call_str(c.enabled.resolve())
-
-        return cls(
-            transms=transms,
-            susceptibility=susceptibility,
-            infectivity=infectivity,
-            transmissibility=transmissibility,
-            enabled=enabled,
-        )
-
-
-@attrs.define
-class Contagion:
-    name: str
-    print_name: str
-    state_type: str
-    num_states: int
-    transition: Transition
-    transmission: Transmission
-
-    @classmethod
-    def make(cls, c: ast1.Contagion) -> Contagion:
-        name = mangle(c.name)
-        print_name = c.name
-        state_type = typename(c.state_type.resolve())
-        num_states = len(c.state_type.resolve().consts)
-        transition = Transition.make(c)
-        transmission = Transmission.make(c)
-        return cls(name, print_name, state_type, num_states, transition, transmission)
-
-
-@attrs.define
-class SelectUsing:
-    name: str
-    set_name: str
-    function_name: str
-
-    @classmethod
-    def make(cls, s: ast1.SelectUsing) -> SelectUsing:
-        name = s.name
-        set_name = ref_str(s.set.resolve())
-        function_name = call_str(s.function.resolve())
-        return cls(name, set_name, function_name)
-
-
-@attrs.define
-class SelectApprox:
-    name: str
-    set_name: str
-    amount: str
-    parent_set_name: str
-
-    @classmethod
-    def make(cls, s: ast1.SelectApprox) -> SelectApprox:
-        name = s.name
-        set_name = ref_str(s.set.resolve())
-        amount = str(s.amount)
-        parent_set_name = ref_str(s.parent.resolve())
-        return cls(name, set_name, amount, parent_set_name)
-
-
-@attrs.define
-class SelectRelative:
-    name: str
-    set_name: str
-    amount: str
-    parent_set_name: str
-
-    @classmethod
-    def make(cls, s: ast1.SelectRelative) -> SelectRelative:
-        name = s.name
-        set_name = ref_str(s.set.resolve())
-        amount = str(s.amount)
-        parent_set_name = ref_str(s.parent.resolve())
-        return cls(name, set_name, amount, parent_set_name)
-
-
-@attrs.define
-class ForeachStatement:
-    name: str
-    set_name: str
-    function_name: str
-
-    @classmethod
-    def make(cls, s: ast1.ForeachStatement) -> ForeachStatement:
-        name = s.name
-        set_name = ref_str(s.set.resolve())
-        function_name = call_str(s.function.resolve())
-        return cls(name, set_name, function_name)
-
-
-@attrs.define
-class Source:
-    module: str
-    enums: list[EnumType]
-    configs: list[Config]
-    globals: list[Global]
-    node_table: NodeTable
-    edge_table: EdgeTable
-    contagion_outputs: list[ContagionOutput]
-    nodesets: list[str]
-    edgesets: list[str]
-    constant_dists: list[ConstantDist]
-    discrete_dists: list[DiscreteDist]
-    uniform_dists: list[UniformDist]
-    normal_dists: list[NormalDist]
-    functions: list[Function]
-    contagions: list[Contagion]
-    select_using_node: list[SelectUsing]
-    select_using_edge: list[SelectUsing]
-    select_approx_node: list[SelectApprox]
-    select_approx_edge: list[SelectApprox]
-    select_relative_node: list[SelectRelative]
-    select_relative_edge: list[SelectRelative]
-    foreach_node_statement: list[ForeachStatement]
-    foreach_edge_statement: list[ForeachStatement]
-
-    @classmethod
-    def make(cls, source: ast1.Source) -> Source:
-        module = source.module
-
-        enums = [EnumType.make(e) for e in source.enums]
-        configs = [Config.make(e) for e in source.configs]
-        globals = [Global.make(e) for e in source.globals]
-        node_table = NodeTable.make(source.node_table)
-        edge_table = EdgeTable.make(source.edge_table)
-        contagion_outputs = [ContagionOutput.make(c) for c in source.contagions]
-        nodesets = [ref_str(s) for s in source.nodesets]
-        edgesets = [ref_str(s) for s in source.edgesets]
-
-        constant_dists: list[ConstantDist] = []
-        discrete_dists: list[DiscreteDist] = []
-        uniform_dists: list[UniformDist] = []
-        normal_dists: list[NormalDist] = []
-        for dist in source.distributions:
-            match dist:
-                case ast1.ConstantDist():
-                    constant_dists.append(ConstantDist.make(dist))
-                case ast1.DiscreteDist():
-                    discrete_dists.append(DiscreteDist.make(dist))
-                case ast1.UniformDist():
-                    uniform_dists.append(UniformDist.make(dist))
-                case ast1.NormalDist():
-                    normal_dists.append(NormalDist.make(dist))
-                case _ as unexpected:
-                    assert_never(unexpected)
-
-        functions: list[Function] = []
-        for fn in source.functions:
-            name = call_str(fn)
-            functions.append(Function.make(name, fn))
-        functions.append(Function.make("do_initialize", source.initialize))
-        functions.append(Function.make("do_intervene", source.intervene))
-
-        contagions = [Contagion.make(c) for c in source.contagions]
-
-        select_using_node: list[SelectUsing] = []
-        select_using_edge: list[SelectUsing] = []
-        select_approx_node: list[SelectApprox] = []
-        select_approx_edge: list[SelectApprox] = []
-        select_relative_node: list[SelectRelative] = []
-        select_relative_edge: list[SelectRelative] = []
-        foreach_node_statement: list[ForeachStatement] = []
-        foreach_edge_statement: list[ForeachStatement] = []
-        for fn in chain(source.functions, [source.initialize, source.intervene]):
-            for stmt in fn.device_statements():
-                set = stmt.set.resolve()
-                match [stmt, set]:
-                    case [ast1.SelectUsing() as s, ast1.NodeSet()]:
-                        select_using_node.append(SelectUsing.make(s))
-                    case [ast1.SelectUsing() as s, ast1.EdgeSet()]:
-                        select_using_edge.append(SelectUsing.make(s))
-                    case [ast1.SelectApprox() as s, ast1.NodeSet()]:
-                        select_approx_node.append(SelectApprox.make(s))
-                    case [ast1.SelectApprox() as s, ast1.EdgeSet()]:
-                        select_approx_edge.append(SelectApprox.make(s))
-                    case [ast1.SelectRelative() as s, ast1.NodeSet()]:
-                        select_relative_node.append(SelectRelative.make(s))
-                    case [ast1.SelectRelative() as s, ast1.EdgeSet()]:
-                        select_relative_edge.append(SelectRelative.make(s))
-                    case [ast1.ForeachStatement() as s, ast1.NodeSet()]:
-                        foreach_node_statement.append(ForeachStatement.make(s))
-                    case [ast1.ForeachStatement() as s, ast1.EdgeSet()]:
-                        foreach_edge_statement.append(ForeachStatement.make(s))
-                    case _ as unexpected:
-                        raise UnexpectedValue(unexpected, stmt.pos)
-
-        return cls(
-            module=module,
-            enums=enums,
-            configs=configs,
-            globals=globals,
-            node_table=node_table,
-            edge_table=edge_table,
-            contagion_outputs=contagion_outputs,
-            nodesets=nodesets,
-            edgesets=edgesets,
-            constant_dists=constant_dists,
-            discrete_dists=discrete_dists,
-            uniform_dists=uniform_dists,
-            normal_dists=normal_dists,
-            functions=functions,
-            contagions=contagions,
-            select_using_node=select_using_node,
-            select_using_edge=select_using_edge,
-            select_approx_node=select_approx_node,
-            select_approx_edge=select_approx_edge,
-            select_relative_node=select_relative_node,
-            select_relative_edge=select_relative_edge,
-            foreach_node_statement=foreach_node_statement,
-            foreach_edge_statement=foreach_edge_statement,
-        )
-
-
-def mk_ir(ast1: ast1.Source) -> Source:
-    return Source.make(ast1)
-
-
-def do_prepare(gen_src_dir: Path, input: Path, source: Source) -> None:
+def do_prepare(gen_src_dir: Path, input: Path, source: ast.Source) -> None:
     gen_src_dir.mkdir(parents=True, exist_ok=True)
 
     with open(gen_src_dir / "CMakeLists.txt", "wt") as fobj:
-        template = ENVIRONMENT.get_template("cmakelists_txt_cpu.jinja2")
-        fobj.write(template.render(source=source, input=str(input.absolute())))
+        fobj.write(
+            render(
+                "cmakelists_txt_openmp",
+                module=source.module,
+                input=str(input.absolute()),
+            )
+        )
 
     cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
     subprocess.run(cmd, check=True)
 
 
-def do_compile(build_dir: Path, source: Source) -> None:
-    with open(build_dir / "simulator.cpp", "wt") as fobj:
-        template = ENVIRONMENT.get_template("simulator_cpp_cpu.jinja2")
-        fobj.write(template.render(source=source))
+def do_compile(build_dir: Path, source: ast.Source) -> None:
+    with open(build_dir / "simulator_openmp.cpp", "wt") as fobj:
+        fobj.write(simulator_str(source))
 
-    with open(build_dir / "sim_utils.h", "wt") as fobj:
-        fobj.write(STATIC_DIR.joinpath("sim_utils.h").read_text())
+    with open(build_dir / "simulation_common_openmp.h", "wt") as fobj:
+        fobj.write(STATIC_DIR.joinpath("simulation_common_openmp.h").read_text())
 
 
 def do_build(gen_src_dir: Path) -> None:
@@ -1092,7 +492,7 @@ def do_simulate(
     configs: dict[str, Any],
     verbose: bool = False,
 ) -> None:
-    assert (gen_src_dir / "build/simulator").exists(), "Simulator doesn't exist"
+    assert (gen_src_dir / "build/simulator_openmp").exists(), "Simulator doesn't exist"
     assert input_file.exists(), "Input file doesn't exist"
 
     env = dict(os.environ)
@@ -1108,7 +508,7 @@ def do_simulate(
             value = int(value)
         env[key.upper()] = str(value)
 
-    cmd = f"'{gen_src_dir!s}/build/simulator'"
+    cmd = f"'{gen_src_dir!s}/build/simulator_openmp'"
     cmd = shlex.split(cmd)
     if verbose:
         subprocess.run(cmd, env=env, check=True)
@@ -1122,26 +522,12 @@ def do_simulate(
         )
 
 
-@click.command()
-@simulation_file_option
-def print_cpu_ir(simulation_file: Path):
-    """Print intermediate representation."""
-    try:
-        pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
-        ast1 = mk_ast1(simulation_file, pt)
-        source = mk_ir(ast1)
-        rich.print(source)
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
-        e.rich_print()
-        raise SystemExit(1)
-
-
 @click.group()
-def codegen_cpu():
-    """Generate code targeted for CPUs."""
+def codegen_openmp():
+    """Generate parallel simulator using OpenMP."""
 
 
-@codegen_cpu.command()
+@codegen_openmp.command()
 @gen_code_dir_option
 @simulation_file_option
 def prepare(gen_code_dir: Path, simulation_file: Path):
@@ -1151,30 +537,30 @@ def prepare(gen_code_dir: Path, simulation_file: Path):
 
     try:
         pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
-        ast1 = mk_ast1(simulation_file, pt)
-        source = mk_ir(ast1)
-        do_prepare(gen_code_dir, simulation_file, source)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        ast = mk_ast(simulation_file, pt)
+        check_ast(ast)
+        do_prepare(gen_code_dir, simulation_file, ast)
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
 
-@codegen_cpu.command()
+@codegen_openmp.command()
 @existing_gen_code_dir_option
 @simulation_file_option
 def compile(gen_code_dir: Path, simulation_file: Path):
     """Compile simulator code."""
     try:
         pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
-        ast1 = mk_ast1(simulation_file, pt)
-        source = mk_ir(ast1)
-        do_compile(gen_code_dir, source)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+        ast = mk_ast(simulation_file, pt)
+        check_ast(ast)
+        do_compile(gen_code_dir, ast)
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
 
-@codegen_cpu.command()
+@codegen_openmp.command()
 @click.option(
     "-n",
     "--num-ticks",
@@ -1196,11 +582,10 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
             rich.print(f"[cyan]Temp output dir:[/cyan] {gen_src_dir!s}")
 
             pt = mk_pt(str(simulation_file), simulation_file.read_bytes())
-            ast1 = mk_ast1(simulation_file, pt)
-            source = mk_ir(ast1)
+            ast = mk_ast(simulation_file, pt)
 
             rich.print("[cyan]Preparing ...[/cyan]")
-            do_prepare(gen_src_dir, simulation_file, source)
+            do_prepare(gen_src_dir, simulation_file, ast)
 
             rich.print("[cyan]Building ...[/cyan]")
             do_build(gen_src_dir)
@@ -1212,8 +597,8 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
                 output_file=output_file,
                 num_ticks=num_ticks,
                 configs={},
-                verbose=True
+                verbose=True,
             )
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
