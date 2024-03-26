@@ -1,0 +1,12 @@
+float_type {{ name | mangle }}() {
+    auto ret = normal01(*THREAD_RND_STATE);
+    ret *= {{ std | expression }} ;
+    ret += {{ mean | expression }} ;
+
+    auto max = {{ max | expression }};
+    auto min = {{ min | expression }};
+
+    if (ret > max) { ret = max ; }
+    if (ret < min) { ret = min ; }
+    return ret;
+}

@@ -23,7 +23,7 @@ from typeguard import check_type, TypeCheckError
 
 from .misc import EslError, SourcePosition
 
-# from .alias_table import AliasTable
+from .alias_table import AliasTable
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast import mk_ast
 from .check_ast import check_ast
@@ -449,6 +449,24 @@ def node_table_defn_str(x: ast.NodeTable) -> str:
 @register_filter("edge_table_defn")
 def edge_table_defn_str(x: ast.EdgeTable) -> str:
     return render("edge_table_defn", **asdict(x))
+
+
+@register_filter("normal_dist_defn")
+def normal_dist_defn_str(x: ast.NormalDist) -> str:
+    return render("normal_dist_defn", **asdict(x))
+
+
+@register_filter("uniform_dist_defn")
+def uniform_dist_defn_str(x: ast.UniformDist) -> str:
+    return render("uniform_dist_defn", **asdict(x))
+
+
+@register_filter("discrete_dist_defn")
+def discrete_dist_defn_str(x: ast.DiscreteDist) -> str:
+    table = AliasTable.make(x.ps)
+    probs = [str(p) for p in table.probs]
+    alias = [str(p) for p in table.alias]
+    return render("discrete_dist_defn", probs=probs, alias=alias, **asdict(x))
 
 
 def simulator_str(x: ast.Source) -> str:

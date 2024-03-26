@@ -1,0 +1,23 @@
+{% set comma = joiner(", ") %}
+const float_type {{ name }}_PROBS[] = { {% for p in probs %}{{ comma() }}{{ p }}{% endfor %} };
+{% set comma = joiner(", ") %}
+const size_type {{ name }}_ALIAS[] = { {% for a in alias %}{{ comma() }}{{ a }}{% endfor %} };
+
+std::uniform_int_distribution<size_type> {{ name }}_INDEX_DIST { 0, {{ probs|length - 1 }} };
+
+float_type {{ name | mangle }}() {
+    auto i = {{ name }}_INDEX_DIST(*THREAD_RND_STATE);
+    const auto u = uniform01(*THREAD_RND_STATE);
+
+    if ({{ name }}_PROBS[i] < u) {
+        i = {{ name }}_ALIAS[i];
+    }
+
+    switch (i) {
+    {% for v in vs %}
+    case {{ loop.index0 }}: return {{ v | expression }};
+    {% endfor %}
+    }
+
+    return std::numeric_limits<float_type>::quiet_NaN();
+}

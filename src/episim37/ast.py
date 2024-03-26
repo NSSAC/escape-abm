@@ -1439,7 +1439,9 @@ class Source(BaseModel):
     globals: list[Global]
     node_table: NodeTable
     edge_table: EdgeTable
-    distributions: list[Distribution]
+    normal_dists: list[NormalDist]
+    uniform_dists: list[UniformDist]
+    discrete_dists: list[DiscreteDist]
     contagions: list[Contagion]
     nodesets: list[NodeSet]
     edgesets: list[EdgeSet]
@@ -1485,6 +1487,10 @@ class Source(BaseModel):
         edge_table = edge_tables[0]
 
         distributions = [d for ds in children["distributions"] for d in ds]
+        normal_dists = [d for d in distributions if isinstance(d, NormalDist)]
+        uniform_dists = [d for d in distributions if isinstance(d, UniformDist)]
+        discrete_dists = [d for d in distributions if isinstance(d, DiscreteDist)]
+
         contagions = children["contagion"]
 
         nodesets = [s for ss in children["nodeset"] for s in ss]
@@ -1528,7 +1534,9 @@ class Source(BaseModel):
             globals=globals,
             node_table=node_table,
             edge_table=edge_table,
-            distributions=distributions,
+            normal_dists=normal_dists,
+            uniform_dists=uniform_dists,
+            discrete_dists=discrete_dists,
             contagions=contagions,
             nodesets=nodesets,
             edgesets=edgesets,

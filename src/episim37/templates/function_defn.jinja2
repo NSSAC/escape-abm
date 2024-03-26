@@ -6,7 +6,7 @@
     {% endfor %}
 ) {
     {% for v  in variables %}
-    {{ v.type | typename }} {{ name | mangle }};
+    {{ v.type | typename }} {{ v.name | mangle }};
     {% endfor %}
 
     {% for stmt in body %}

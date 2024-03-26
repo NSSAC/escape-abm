@@ -1,0 +1,10 @@
+float_type {{ name | mangle }}() {
+    auto ret = uniform01(*THREAD_RND_STATE);
+    auto low = {{ low | expression }} ;
+    auto high = {{ high | expression }} ;
+
+    ret *= high - low;
+    ret += low;
+
+    return ret;
+}

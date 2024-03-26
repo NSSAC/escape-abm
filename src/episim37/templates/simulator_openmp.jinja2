@@ -3,6 +3,7 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <cassert>
+#include <limits>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -41,6 +42,33 @@ NodeTable *NODE_TABLE = nullptr;
 {{ edge_table | edge_table_defn }}
 
 EdgeTable *EDGE_TABLE = nullptr;
+
+// ----------------------------------------------------------------------------
+// Uniform distributions
+// ----------------------------------------------------------------------------
+
+{% for dist in uniform_dists %}
+{{ dist | uniform_dist_defn }}
+
+{% endfor %}
+
+// ----------------------------------------------------------------------------
+// Normal distributions
+// ----------------------------------------------------------------------------
+
+{% for dist in normal_dists %}
+{{ dist | normal_dist_defn }}
+
+{% endfor %}
+
+// ----------------------------------------------------------------------------
+// Discrete distributions
+// ----------------------------------------------------------------------------
+
+{% for dist in discrete_dists %}
+{{ dist | discrete_dist_defn }}
+
+{% endfor %}
 
 // ----------------------------------------------------------------------------
 // Function declarations
