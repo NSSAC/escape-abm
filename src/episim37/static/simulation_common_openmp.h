@@ -1,6 +1,10 @@
 #ifndef __SIMULATION_COMMON_OPENMP_H__
 #define __SIMULATION_COMMON_OPENMP_H__
 // Common code for simulations
+//
+// Conventions
+// init_* methods / functions use their own parallel section
+// thread_* and par_* methods / functions should be called from within parallel section
 
 #include <H5Cpp.h>
 #include <cassert>
@@ -111,17 +115,17 @@ template <typename Type> struct StaticArray {
         _size = 0;
     }
 
-    StaticArray() = delete;                              // default constructor
-    StaticArray(const StaticArray&) = delete;            // copy constructor
-    StaticArray(StaticArray&&) = delete;                 // move constructor
-    StaticArray& operator=(const StaticArray&) = delete; // copy assignment
-    StaticArray& operator=(StaticArray&&) = delete;      // move assignment
-
     void range_init(std::size_t start, std::size_t stop) {
         for (std::size_t i = start; i < stop; i++) {
             _data[i] = 0;
         }
     }
+
+    StaticArray() = delete;                              // default constructor
+    StaticArray(const StaticArray&) = delete;            // copy constructor
+    StaticArray(StaticArray&&) = delete;                 // move constructor
+    StaticArray& operator=(const StaticArray&) = delete; // copy assignment
+    StaticArray& operator=(StaticArray&&) = delete;      // move assignment
 
     [[nodiscard]] Type& operator[](std::size_t i) { return _data[i]; }
     [[nodiscard]] Type operator[](std::size_t i) const { return _data[i]; }
@@ -217,6 +221,14 @@ template <typename Type> struct PerThreadDynamicArray {
         _cap = nullptr;
     }
 
+    void par_init() {
+        const auto a = _data[THREAD_IDX];
+        const auto cap = _cap[THREAD_IDX];
+        for (std::size_t j = 0; j < cap; j++) {
+            a[j] = 0;
+        }
+    }
+
     PerThreadDynamicArray() = delete;                                        // default constructor
     PerThreadDynamicArray(const PerThreadDynamicArray&) = delete;            // copy constructor
     PerThreadDynamicArray(PerThreadDynamicArray&&) = delete;                 // move constructor
@@ -227,17 +239,6 @@ template <typename Type> struct PerThreadDynamicArray {
     [[nodiscard]] Type* end(std::size_t i) const { return _data[i] + _size[i]; }
     [[nodiscard]] std::size_t size(std::size_t i) const { return _size[i]; }
     [[nodiscard]] Type* data(std::size_t i) const { return _data[i]; }
-
-    void par_init() {
-#pragma omp parallel
-        {
-            const auto a = _data[THREAD_IDX];
-            const auto cap = _cap[THREAD_IDX];
-            for (std::size_t j = 0; j < cap; j++) {
-                a[j] = 0;
-            }
-        }
-    }
 
     void thread_append(const Type& v) {
         auto i = _size[THREAD_IDX];
@@ -280,7 +281,7 @@ template <typename Type> struct PerThreadDynamicArray {
 };
 
 // ----------------------------------------------------------------------------
-// Per thread random number generator
+// Random number generation
 // ----------------------------------------------------------------------------
 
 typedef std::mt19937 rnd_state_type;
@@ -329,7 +330,7 @@ static std::normal_distribution<float_type> normal01{0.0, 1.0};
 // HDF5 helpers
 // ----------------------------------------------------------------------------
 
-template <typename Type> Type get_attribute(const H5::H5File& file, const char* attr_name) {
+template <typename Type> Type read_attribute(const H5::H5File& file, const char* attr_name) {
     Type ret;
 
     H5::Attribute attr = file.openAttribute(attr_name);
@@ -337,6 +338,17 @@ template <typename Type> Type get_attribute(const H5::H5File& file, const char* 
     attr.close();
 
     return ret;
+}
+
+template <typename Type> void write_attribute(const H5::H5File& file, const char* attr_name, Type value) {
+    hsize_t dims = 1;
+    H5::DataSpace attr_dataspace(1, &dims);
+    H5::Attribute attribute = file.createAttribute(attr_name, h5_type<Type>(), attr_dataspace);
+
+    attribute.write(h5_type<Type>(), &value);
+
+    attribute.close();
+    attr_dataspace.close();
 }
 
 static void create_group(H5::H5File& output_file, const std::string& group_name) {
@@ -348,8 +360,8 @@ static void create_group(H5::H5File& output_file, const std::string& group_name)
 // Global variables
 // ----------------------------------------------------------------------------
 
-static std::size_t NUM_NODES = 0;
-static std::size_t NUM_EDGES = 0;
+static size_type NUM_NODES = 0;
+static size_type NUM_EDGES = 0;
 
 static int_type NUM_TICKS = 0;
 static int_type CUR_TICK = -1;
@@ -359,9 +371,9 @@ static float_type TICK_ELAPSED = 1.0;
 // Node and edge count getters
 // ----------------------------------------------------------------------------
 
-static std::size_t get_num_nodes(const H5::H5File& file) { return get_attribute<size_type>(file, "num_nodes"); }
+static size_type get_num_nodes(const H5::H5File& file) { return read_attribute<size_type>(file, "num_nodes"); }
 
-static std::size_t get_num_edges(const H5::H5File& file) { return get_attribute<size_type>(file, "num_edges"); }
+static size_type get_num_edges(const H5::H5File& file) { return read_attribute<size_type>(file, "num_edges"); }
 
 // ----------------------------------------------------------------------------
 // Incidence network (target_node_index, edge_index)
@@ -382,13 +394,13 @@ static IncomingIncidenceCSR* IN_INC_CSR = nullptr;
 // Thread to node range mapping
 // ----------------------------------------------------------------------------
 
-static std::size_t TN_START = 0; // thread node range start
-static std::size_t TN_END = 0;   // thread node range end
+static size_type TN_START = 0; // thread node range start
+static size_type TN_END = 0;   // thread node range end
 #pragma omp threadprivate(TN_START)
 #pragma omp threadprivate(TN_END)
 
 static void init_thread_node_range() {
-    StaticArray<std::size_t> ptr(NUM_THREADS + 1);
+    StaticArray<size_type> ptr(NUM_THREADS + 1);
 
     auto thread_load = NUM_NODES / NUM_THREADS;
     thread_load += (NUM_NODES % NUM_THREADS != 0);
@@ -406,7 +418,7 @@ static void init_thread_node_range() {
 
     assert(ptr[0] == 0);
     assert(ptr[NUM_THREADS] == NUM_NODES);
-    for (std::size_t i = 0; i < NUM_THREADS; i++) {
+    for (size_type i = 0; i < NUM_THREADS; i++) {
         assert(ptr[i] <= ptr[i + 1]);
     }
 
@@ -425,13 +437,13 @@ static void init_thread_node_range() {
 // Thread to edge range mapping
 // ----------------------------------------------------------------------------
 
-static std::size_t TE_START = 0; // thread edge range start
-static std::size_t TE_END = 0;   // thread edge range end
+static size_type TE_START = 0; // thread edge range start
+static size_type TE_END = 0;   // thread edge range end
 #pragma omp threadprivate(TE_START)
 #pragma omp threadprivate(TE_END)
 
 static void init_thread_edge_range() {
-    StaticArray<std::size_t> ptr(NUM_THREADS + 1);
+    StaticArray<size_type> ptr(NUM_THREADS + 1);
 
     auto thread_load = NUM_EDGES / NUM_THREADS;
     thread_load += (NUM_EDGES % NUM_THREADS != 0);
@@ -449,7 +461,7 @@ static void init_thread_edge_range() {
 
     assert(ptr[0] == 0);
     assert(ptr[NUM_THREADS] == NUM_EDGES);
-    for (std::size_t i = 0; i < NUM_THREADS; i++) {
+    for (size_type i = 0; i < NUM_THREADS; i++) {
         assert(ptr[i] <= ptr[i + 1]);
     }
 
@@ -465,67 +477,212 @@ static void init_thread_edge_range() {
 }
 
 // ----------------------------------------------------------------------------
-// Nodeset
+// Node or Edge Set
 // ----------------------------------------------------------------------------
 
-struct NodeSet {
-    StaticArray<uint8_t> is_in;
-    StaticArray<std::size_t> thread_k;    // for absolute sampling
-    StaticArray<std::size_t> thread_size; // size per thread
-    std::size_t size;                     // total size
+struct Set {
+    bool_type is_node_set;
+    StaticArray<bool_type> is_in;
+    StaticArray<size_type> thread_k;    // for absolute sampling
+    StaticArray<size_type> thread_size; // size per thread
+    size_type size;                     // total size
 
-    NodeSet()
-        : is_in{NUM_NODES}
+    explicit Set(bool_type is_node_set_)
+        : is_node_set{is_node_set_}
+        , is_in{is_node_set ? NUM_NODES : NUM_EDGES}
         , thread_k{std::size_t(NUM_THREADS)}
         , thread_size{std::size_t(NUM_THREADS)}
-        , size{0} {
-        thread_k.range_init(0, NUM_THREADS);
-        thread_size.range_init(0, NUM_THREADS);
-#pragma omp parallel
-        { is_in.range_init(TN_START, TN_END); }
+        , size{0} {}
+
+    void par_init() {
+#pragma omp master
+        {
+            thread_k.range_init(0, NUM_THREADS);
+            thread_size.range_init(0, NUM_THREADS);
+        }
+
+        is_in.range_init(thread_start(), thread_end());
     }
+
+    size_type thread_start() { return is_node_set ? TN_START : TE_START; }
+    size_type thread_end() { return is_node_set ? TN_END : TE_END; }
+
+    void update_size() {
+        size = 0;
+        for (int tid = 0; tid < NUM_THREADS; tid++) {
+            size += thread_size[tid];
+        }
+    }
+
+    size_type max_size() { return is_node_set ? NUM_NODES : NUM_EDGES; }
+    size_type thread_max_size() { return is_node_set ? (TN_END - TN_START) : (TE_END - TE_START); }
 };
 
-const static NodeSet* ALL_NODES = nullptr;
+const static Set* ALL_NODES = static_cast<Set*>((void*)1);
+const static Set* ALL_EDGES = static_cast<Set*>((void*)2);
 
-static size_type len(NodeSet* set) {
+static size_type len(Set* set) {
     if (set == ALL_NODES) {
         return NUM_NODES;
+    } else if (set == ALL_EDGES) {
+        return NUM_EDGES;
     } else {
         return set->size;
     }
 }
 
-// ----------------------------------------------------------------------------
-// Edgeset
-// ----------------------------------------------------------------------------
-
-struct EdgeSet {
-    StaticArray<uint8_t> is_in;
-    StaticArray<std::size_t> thread_k;    // for absolute sampling
-    StaticArray<std::size_t> thread_size; // size per thread
-    std::size_t size;                     // total size
-
-    EdgeSet()
-        : is_in{NUM_EDGES}
-        , thread_k{std::size_t(NUM_THREADS)}
-        , thread_size{std::size_t(NUM_THREADS)}
-        , size{0} {
-        thread_k.range_init(0, NUM_THREADS);
-        thread_size.range_init(0, NUM_THREADS);
-#pragma omp parallel
-        { is_in.range_init(TE_START, TE_END); }
+static void par_sample_rel(Set* set, float_type prob) {
+    size_type size = 0;
+    for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
+        set->is_in[x] = 0;
+        if (uniform01(*THREAD_RND_STATE) < prob) {
+            set->is_in[x] = 1;
+            size += 1;
+        }
     }
-};
 
-const static EdgeSet* ALL_EDGES = nullptr;
+    set->thread_size[THREAD_IDX] = size;
 
-static size_type len(EdgeSet* set) {
-    if (set == ALL_EDGES) {
-        return NUM_EDGES;
-    } else {
-        return set->size;
+#pragma omp barrier
+
+#pragma omp master
+    set->update_size();
+}
+
+static void par_sample_rel(Set* set, Set* parent, float_type prob) {
+    size_type size = 0;
+    for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
+        set->is_in[x] = 0;
+        if (parent->is_in[x]) {
+            if (uniform01(*THREAD_RND_STATE) < prob) {
+                set->is_in[x] = 1;
+                size += 1;
+            }
+        }
     }
+
+    set->thread_size[THREAD_IDX] = size;
+
+#pragma omp barrier
+
+#pragma omp master
+    set->update_size();
+}
+
+static void allocate_k(Set* set, size_type total_k) {
+    if (total_k > set->max_size()) {
+        total_k = set->max_size();
+    }
+
+    size_type remaining_n = set->max_size();
+    size_type remaining_k = total_k;
+    for (int tid = 0; tid < NUM_THREADS; tid++) {
+        float_type p = float_type(remaining_k) / remaining_n;
+        size_type k_max = set->thread_max_size();
+
+        remaining_n -= k_max;
+
+        size_type k_min = 0;
+        if (remaining_n < remaining_k) {
+            k_min = remaining_k - remaining_n;
+        }
+
+        std::binomial_distribution<size_type> sampler(k_max, p);
+        size_type tid_k = sampler(*THREAD_RND_STATE);
+        if (tid_k < k_min) {
+            tid_k = k_min;
+        }
+
+        set->thread_k[tid] = tid_k;
+        remaining_k -= tid_k;
+    }
+}
+
+static void par_sample_abs(Set* set, size_type total_k) {
+#pragma omp master
+    allocate_k(set, total_k);
+
+#pragma omp barrier
+
+    size_type size = 0;
+    size_type remaining_n = set->thread_max_size();
+    size_type remaining_k = set->thread_k[THREAD_IDX];
+    for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
+        set->is_in[x] = 0;
+        float_type p = float_type(remaining_k) / remaining_n;
+        if (uniform01(*THREAD_RND_STATE) < p) {
+            set->is_in[x] = 1;
+            size += 1;
+            remaining_k -= 1;
+        }
+        remaining_n -= 1;
+    }
+
+    set->thread_size[THREAD_IDX] = size;
+
+#pragma omp barrier
+
+#pragma omp master
+    set->update_size();
+}
+
+static void allocate_k(Set* set, Set* parent, size_type total_k) {
+    if (total_k > parent->size) {
+        total_k = parent->size;
+    }
+
+    size_type remaining_n = parent->size;
+    size_type remaining_k = total_k;
+    for (int tid = 0; tid < NUM_THREADS; tid++) {
+        float_type p = float_type(remaining_k) / remaining_n;
+        size_type k_max = parent->thread_size[tid];
+
+        remaining_n -= k_max;
+
+        size_type k_min = 0;
+        if (remaining_n < remaining_k) {
+            k_min = remaining_k - remaining_n;
+        }
+
+        std::binomial_distribution<size_type> sampler(k_max, p);
+        size_type tid_k = sampler(*THREAD_RND_STATE);
+        if (tid_k < k_min) {
+            tid_k = k_min;
+        }
+
+        set->thread_k[tid] = tid_k;
+        remaining_k -= tid_k;
+    }
+}
+
+static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
+#pragma omp master
+    allocate_k(set, parent, total_k);
+
+#pragma omp barrier
+
+    size_type size = 0;
+    size_type remaining_n = set->thread_max_size();
+    size_type remaining_k = set->thread_k[THREAD_IDX];
+    for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
+        set->is_in[x] = 0;
+        if (parent->is_in[x]) {
+            float_type p = float_type(remaining_k) / remaining_n;
+            if (uniform01(*THREAD_RND_STATE) < p) {
+                set->is_in[x] = 1;
+                size += 1;
+                remaining_k -= 1;
+            }
+        }
+        remaining_n -= 1;
+    }
+
+    set->thread_size[THREAD_IDX] = size;
+
+#pragma omp barrier
+
+#pragma omp master
+    set->update_size();
 }
 
 // ----------------------------------------------------------------------------
@@ -546,7 +703,9 @@ template <typename StateType> struct ContagionOutputContainer {
         , transition_node_idx{thread_node_count}
         , transition_state{thread_node_count}
         , transmission_edge_idx{thread_node_count}
-        , transmission_state{thread_node_count} {
+        , transmission_state{thread_node_count} {}
+
+    void par_init() {
         transition_node_idx.par_init();
         transition_state.par_init();
         transmission_edge_idx.par_init();
