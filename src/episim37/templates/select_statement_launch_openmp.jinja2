@@ -1,2 +1,5 @@
 {{ pos | line_pragma }}
-{{ name }}() ;
+#pragma omp parallel
+{
+    {{ name }}() ;
+}

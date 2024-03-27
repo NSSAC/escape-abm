@@ -1,0 +1,20 @@
+void {{ name }}() {
+{% if is_all_apply %}
+    {% if is_node_apply %}
+    auto thread_start = TN_START;
+    auto thread_end = TN_END:
+    {% else %}
+    auto thread_start = TE_START;
+    auto thread_end = TE_END:
+    {% endif %}
+    for (size_type x = thread_start; x < thread_end; x++) {
+        {{ function.value.name | mangle }}(x);
+    }
+{% else %}
+    for (size_type x = {{ set.value.name | mangle }}->thread_start(); x < {{ set.value.name | mangle }}->thread_end(); x++) {
+        if ({{ set.value.name | mangle }}->is_in[x]) {
+            {{ function.value.name | mangle }}(x);
+        }
+    }
+{% endif %}
+}

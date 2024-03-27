@@ -1,2 +1,13 @@
 {{ pos | line_pragma }}
-{{ name }}({{ amount | expression}}) ;
+#pragma omp parallel
+{
+    {% if is_absolute and is_all_sample %}
+    par_sample_abs({{ set.value.name | mangle }}, {{ amount | expression}}) ;
+    {% elif is_absolute and not is_all_sample %}
+    par_sample_abs({{ set.value.name | mangle }}, {{ parent.value.name | mangle }}, {{ amount | expression}}) ;
+    {% elif not is_absolute and is_all_sample %}
+    par_sample_rel({{ set.value.name | mangle }}, {{ amount | expression}}) ;
+    {% else %}{# not is_absolute and not is_all_sample #}
+    par_sample_rel({{ set.value.name | mangle }}, {{ parent.value.name | mangle }}, {{ amount | expression}}) ;
+    {% endif %}
+}

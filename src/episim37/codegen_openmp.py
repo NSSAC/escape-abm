@@ -25,7 +25,7 @@ from .misc import EslError, SourcePosition
 
 from .alias_table import AliasTable
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast import mk_ast
+from .ast import Reference, mk_ast
 from .check_ast import check_ast, is_node_set
 from . import ast
 from .click_helpers import (
@@ -115,8 +115,8 @@ def ctype(t: str) -> str:
         "node":  "node_index_type",
         "edge":  "edge_index_type",
 
-        "nodeset":  "NodeSet*",
-        "edgeset":  "EdgeSet*",
+        "nodeset":  "Set*",
+        "edgeset":  "Set*",
     }
     # fmt: on
 
@@ -373,6 +373,16 @@ def asdict(m: BaseModel) -> dict:
     return {k: getattr(m, k) for k in m.model_fields.keys()}
 
 
+def is_all_set(r: ast.Reference) -> bool:
+    match r.value:
+        case ast.BuiltinNodeset(name="ALL_NODES"):
+            return True
+        case ast.BuiltinEdgeset(name="ALL_EDGES"):
+            return True
+
+    return False
+
+
 @register_filter("statement")
 def statement_str(s: ast.Statement) -> str:
     match s:
@@ -409,13 +419,31 @@ def statement_str(s: ast.Statement) -> str:
         case ast.Variable():
             return render("variable", **asdict(s))
         case ast.SelectStatement():
-            return render("select_statement_launch_openmp", **asdict(s))
+            return render(
+                "select_statement_launch_openmp",
+                **asdict(s),
+            )
         case ast.SampleStatement():
-            return render("sample_statement_launch_openmp", **asdict(s))
+            is_all_sample = is_all_set(s.parent)
+            return render(
+                "sample_statement_launch_openmp",
+                is_all_sample=is_all_sample,
+                **asdict(s),
+            )
         case ast.ApplyStatement():
-            return render("apply_statement_launch_openmp", **asdict(s))
+            return render(
+                "apply_statement_launch_openmp",
+                **asdict(s),
+            )
         case ast.ReduceStatement():
-            return render("reduce_statement_launch_openmp", **asdict(s))
+            is_node_reduce = is_node_set(s.set)
+            is_all_reduce = is_all_set(s.set)
+            return render(
+                "reduce_statement_launch_openmp",
+                is_node_reduce=is_node_reduce,
+                is_all_reduce=is_all_reduce,
+                **asdict(s),
+            )
         case _ as unexpected:
             assert_never(unexpected)
 
@@ -471,9 +499,30 @@ def discrete_dist_defn_str(x: ast.DiscreteDist) -> str:
 
 @register_filter("select_statement_defn")
 def select_statemetn_defn_str(x: ast.SelectStatement) -> str:
-    is_node_select = is_node_set(x.set)
+    return render("select_statement_defn_openmp", **asdict(x))
+
+
+@register_filter("apply_statement_defn")
+def apply_statemetn_defn_str(x: ast.ApplyStatement) -> str:
+    is_all_apply = is_all_set(x.set)
+    is_node_apply = is_node_set(x.set)
     return render(
-        "select_statement_defn_openmp", is_node_select=is_node_select, **asdict(x)
+        "apply_statement_defn_openmp",
+        is_all_apply=is_all_apply,
+        is_node_apply=is_node_apply,
+        **asdict(x),
+    )
+
+
+@register_filter("reduce_statement_defn")
+def reduce_statemetn_defn_str(x: ast.ReduceStatement) -> str:
+    is_all_reduce = is_all_set(x.set)
+    is_node_reduce = is_node_set(x.set)
+    return render(
+        "reduce_statement_defn_openmp",
+        is_all_reduce=is_all_reduce,
+        is_node_reduce=is_node_reduce,
+        **asdict(x),
     )
 
 

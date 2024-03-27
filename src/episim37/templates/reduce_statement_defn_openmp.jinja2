@@ -1,0 +1,52 @@
+{{ outvar.value.type | typename }} {{ name }}() {
+    {% if operator == "+" %}
+    {{ outvar.value.type | typename }} ret = 0;
+    {% else %}{# operator == "*" #}
+    {{ outvar.value.type | typename }} ret = 1;
+    {% endif %}
+
+    #pragma omp parallel
+    {
+        {% if operator == "+" %}
+        {{ outvar.value.type | typename }} thread_ret = 0;
+        {% else %}{# operator == "*" #}
+        {{ outvar.value.type | typename }} thread_ret = 1;
+        {% endif %}
+
+        {% if is_all_reduce %}
+        {% if is_node_reduce %}
+        auto thread_start = TN_START;
+        auto thread_end = TN_END;
+        {% else %}
+        auto thread_start = TE_START;
+        auto thread_end = TE_END;
+        {% endif %}
+        for (size_type x = thread_start; x < thread_end; x++) {
+            {% if operator == "+" %}
+            thread_ret += {{ function.value.name | mangle }}(x);
+            {% else %}{# operator == "*" #}
+            thread_ret *= {{ function.value.name | mangle }}(x);
+            {% endif %}
+        }
+        {% else %}
+        for (size_type x = {{ set.value.name | mangle }}->thread_start(); x < {{ set.value.name | mangle }}->thread_end(); x++) {
+            if ({{ set.value.name | mangle }}->is_in[x]) {
+                {% if operator == "+" %}
+                thread_ret += {{ function.value.name | mangle }}(x);
+                {% else %}{# operator == "*" #}
+                thread_ret *= {{ function.value.name | mangle }}(x);
+                {% endif %}
+            }
+        }
+        {% endif %}
+
+        #pragma omp atomic
+        {% if operator == "+" %}
+        ret += thread_ret;
+        {% else %}{# operator == "*" #}
+        ret *= thread_ret;
+        {% endif %}
+    }
+
+    return ret;
+}
