@@ -1,0 +1,222 @@
+void {{ name | mangle }}_transition_node(const node_index_type v, const float_type elapsed) {
+    auto state = NODE_TABLE->{{ name | mangle }}_state[v];
+    auto state_prev = NODE_TABLE->{{ name | mangle }}_state_prev[v];
+    auto next_state = NODE_TABLE->{{ name | mangle }}_next_state[v];
+    auto dwell_time = NODE_TABLE->{{ name | mangle }}_dwell_time[v];
+
+    // Nothing has changed
+    if (state == state_prev) {
+        // Nothing will change
+        if (state == next_state) {
+            return;
+        }
+
+        dwell_time -= elapsed;
+        // Nothing will change this tick
+        if (dwell_time > 0.0) {
+            NODE_TABLE->{{ name | mangle }}_dwell_time[v] = dwell_time;
+            return;
+        }
+    }
+
+    // state changed by transition
+    if (state == state_prev) {
+        state = next_state;
+    }
+
+    dwell_time = 0.0;
+    {{ name | mangle }}_OUTPUT->add_transition(v, state);
+
+    switch (state) {
+    {% for st in single_exit_transitions %}
+    case {{ st.entry | mangle }}:
+        next_state = {{ st.exit | mangle }};
+        dwell_time = {{ st.dwell | fn_expression("v") }};
+        break;
+    {% endfor %}
+    {% for mt in multi_exit_transitions %}
+    case {{ mt.entry | mangle }}:
+        {
+            float_type cum_probs[{{ mt.num_exits }}] = {0};
+            {% for i in range(mt.num_exits) %}
+            cum_probs[{{ i }}] = {{ mt.pexprs[i] | fn_expression("v") }};
+            {% if i > 0 %}
+            cum_probs[{{ i }}] += cum_probs[{{ i }} - 1];
+            {% endif %}
+            {% endfor %}
+
+            auto p = uniform01(*THREAD_RND_STATE);
+            p *= cum_probs[{{ mt.num_exits }} - 1];
+
+            {% for i in range(mt.num_exits) %}
+            if (p <= cum_probs[{{ i }}]) {
+                next_state = {{ mt.exits[i] | mangle }};
+                dwell_time = {{ mt.dwells[i] | fn_expression("v") }};
+                break;
+            }
+            {% endfor %}
+        }
+    {% endfor %}
+    }
+
+    NODE_TABLE->{{ name | mangle }}_state[v] = state;
+    NODE_TABLE->{{ name | mangle }}_state_prev[v] = state;
+    NODE_TABLE->{{ name | mangle }}_next_state[v] = next_state;
+    NODE_TABLE->{{ name | mangle }}_dwell_time[v] = dwell_time;
+}
+
+void {{ name | mangle }}_update_transmission_prob() {
+    for (edge_index_type e = TE_START; e < TE_END; e++) {
+        const auto u = EDGE_TABLE->source_node_index[e];
+        const auto v = EDGE_TABLE->target_node_index[e];
+
+        float_type tprob = {{ susceptibility | fn_expression("v") }};
+        if (tprob > 0) {
+            tprob *= {{ infectivity | fn_expression("u") }};
+        }
+
+        EDGE_TABLE->{{ name | mangle }}_transmission_prob[e] = tprob;
+    }
+
+    for (edge_index_type e = TE_START; e < TE_END; e++) {
+        auto tprob = EDGE_TABLE->{{ name | mangle }}_transmission_prob[e];
+        if (tprob > 0) {
+            tprob *= {{ transmissibility | fn_expression("e") }};
+        }
+        if (tprob > 0) {
+            tprob *= {{ enabled | fn_expression("e") }};
+        }
+
+        EDGE_TABLE->{{ name | mangle }}_transmission_prob[e] = tprob;
+    }
+}
+
+void {{ name | mangle }}_transmit(const node_index_type v) {
+    const auto start = IN_INC_CSR->indptr[v];
+    const auto end = IN_INC_CSR->indptr[v+1];
+
+    float_type tprob_sum = 0.0;
+    float_type tprob = 1.0;
+    for (size_type e = start; e < end; e++) {
+        auto p = EDGE_TABLE->{{ name | mangle }}_transmission_prob[e];
+        tprob_sum += p;
+        tprob *= (1.0 - p);
+    }
+    tprob = 1.0 - tprob;
+
+    auto prob = uniform01(*THREAD_RND_STATE);
+    if (prob >= tprob) {
+        return;
+    }
+
+    auto esel = NUM_EDGES;
+    auto esel_weight = uniform01(*THREAD_RND_STATE) * tprob_sum;
+    tprob_sum = 0.0;
+    for (size_type e = start; e < end; e++) {
+        auto p = EDGE_TABLE->{{ name | mangle }}_transmission_prob[e];
+        tprob_sum += p;
+        if (tprob_sum >= esel_weight) {
+            esel = e;
+            break;
+        }
+    }
+    assert(esel != NUM_EDGES);
+
+    const auto u = EDGE_TABLE->source_node_index[esel];
+    const auto v_state = NODE_TABLE->{{ name | mangle }}_state_prev[v];
+    const auto u_state = NODE_TABLE->{{ name | mangle }}_state_prev[u];
+
+    switch (v_state) {
+    {% for entry, xs in grouped_transmissions %}
+    case {{ entry | mangle }}:
+            switch (u_state) {
+            {% for exit, contacts in xs %}
+            {% for contact in contacts %}
+            case {{ contact | mangle }}:
+            {% endfor %}
+                NODE_TABLE->{{ name | mangle }}_state[v] = {{ exit | mangle }};
+                {{ name | mangle }}_OUTPUT->add_transmission(esel, {{ exit | mangle }});
+                break;
+            {% endfor %}
+            }
+        break;
+    {% endfor %}
+    }
+}
+
+void {{ name | mangle }}_save_state_count() {
+    size_type state_count[{{ num_states }}] = {0};
+
+    #pragma omp parallel
+    {
+        size_type thread_state_count[{{ num_states }}] = {0};
+
+        for (node_index_type v = TN_START; v < TN_END; v++) {
+            thread_state_count[NODE_TABLE->{{ name | mangle }}_state[v]] += 1;
+        }
+
+        #pragma omp critical
+        {
+            for (size_type i = 0; i < {{ num_states }}; i++) {
+                state_count[i] += thread_state_count[i];
+            }
+        }
+    }
+
+    hsize_t dims[1] = { {{ num_states }} };
+    H5::DataSpace dataspace(1, dims);
+
+    auto dataset_name = fmt::format("/{{ name }}/state_count/tick_{}", CUR_TICK);
+    H5::DataSet dataset = OUTPUT_FILE->createDataSet(dataset_name, h5_type<size_type>(), dataspace);
+    dataset.write(state_count, h5_type<size_type>());
+
+    dataset.close();
+    dataspace.close();
+}
+
+
+void {{ name | mangle }}_step() {
+    #pragma omp parallel
+    {
+        // First we do transitions caused by interventions
+
+        {{ name | mangle }}_OUTPUT->reset_transitions();
+        for (node_index_type v = TN_START; v < TN_END; v++) {
+            {{ name | mangle }}_transition_node(v, 0.0);
+        }
+
+        #pragma omp barrier
+        #pragma omp master
+        {{ name | mangle }}_OUTPUT->save_interventions();
+        #pragma omp barrier
+
+        // Second we do transmissions
+
+        {{ name | mangle }}_update_transmission_prob();
+
+        #pragma omp barrier
+
+        {{ name | mangle }}_OUTPUT->reset_transmissions();
+        for (node_index_type v = TN_START; v < TN_END; v++) {
+            {{ name | mangle }}_transmit(v);
+        }
+
+        #pragma omp barrier
+        #pragma omp master
+        {{ name | mangle }}_OUTPUT->save_transmissions();
+        #pragma omp barrier
+
+        // Third we do do transitions caused by progression
+
+        {{ name | mangle }}_OUTPUT->reset_transitions();
+        for (node_index_type v = TN_START; v < TN_END; v++) {
+            {{ name | mangle }}_transition_node(v, TICK_ELAPSED);
+        }
+
+        #pragma omp barrier
+        #pragma omp master
+        {{ name | mangle }}_OUTPUT->save_transitions();
+    }
+
+    {{ name | mangle }}_save_state_count();
+}

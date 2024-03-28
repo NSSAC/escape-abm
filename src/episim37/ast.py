@@ -567,7 +567,7 @@ def if_fn_make_ref(x: Any, scope: Scope) -> Any:
 class Transition(BaseModel):
     entry: Reference
     exit: Reference
-    pexpr: Expression | None
+    pexpr: Expression
     dwell: Expression
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -579,6 +579,8 @@ class Transition(BaseModel):
         if pexpr is not None:
             pexpr = parse(pexpr, scope)
             pexpr = if_fn_make_ref(pexpr, scope)
+        else:
+            pexpr = 1
         dwell = parse(node.field("dwell"), scope)
         dwell = if_fn_make_ref(dwell, scope)
         return cls(entry=entry, exit=exit, pexpr=pexpr, dwell=dwell, pos=node.pos)
@@ -1361,7 +1363,12 @@ LValueRef = (
     | tuple[Param | Variable, NodeField | EdgeField]
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
-    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, Contagion, StateAccessor]
+    | tuple[
+        Param | Variable,
+        SourceNodeAccessor | TargetNodeAccessor,
+        Contagion,
+        StateAccessor,
+    ]
 )
 
 # References which can be evaluated to get a value
@@ -1379,7 +1386,12 @@ RValueRef = (
     | tuple[Param | Variable, Contagion, StateAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor]
     | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
-    | tuple[Param | Variable, SourceNodeAccessor | TargetNodeAccessor, Contagion, StateAccessor]
+    | tuple[
+        Param | Variable,
+        SourceNodeAccessor | TargetNodeAccessor,
+        Contagion,
+        StateAccessor,
+    ]
 )
 
 # References which are valid types

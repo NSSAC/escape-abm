@@ -118,6 +118,17 @@ static Set* {{ set.name | mangle }} = nullptr;
 {% endfor %}
 
 // ----------------------------------------------------------------------------
+// Contagion methods
+// ----------------------------------------------------------------------------
+
+{% for contagion in contagions %}
+ContagionOutputContainer<{{ contagion.state_type | typename}}>* {{ contagion.name | mangle }}_OUTPUT = nullptr;
+
+{{ contagion | contagion_methods }}
+
+{% endfor %}
+
+// ----------------------------------------------------------------------------
 // Function definitions
 // ----------------------------------------------------------------------------
 

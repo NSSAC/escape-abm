@@ -737,9 +737,9 @@ template <typename StateType> struct ContagionOutputContainer {
         }
     }
 
-    void save_interventions(int cur_tick) { do_save_transitions("interventions"); }
+    void save_interventions() { do_save_transitions("interventions"); }
 
-    void save_transitions(int cur_tick) { do_save_transitions("transitions"); }
+    void save_transitions() { do_save_transitions("transitions"); }
 
     void reset_transmissions() {
         transmission_edge_idx.thread_clear();
@@ -751,7 +751,7 @@ template <typename StateType> struct ContagionOutputContainer {
         transmission_state.thread_append(state);
     }
 
-    void save_transmissions(int cur_tick) {
+    void save_transmissions() {
         auto group_name = fmt::format("/{}/transmissions/tick_{}", name, CUR_TICK);
         create_group(*OUTPUT_FILE, group_name);
 

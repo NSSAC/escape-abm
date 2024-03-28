@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import os
 import shlex
 import subprocess
 from pathlib import Path
 
 # from itertools import chain
-from typing import assert_never, Any, TypeVar, Callable
+from typing import assert_never, Any, TypeVar, ParamSpec, Callable
 from tempfile import TemporaryDirectory
 
 # from collections import defaultdict
@@ -25,7 +26,7 @@ from .misc import EslError, SourcePosition
 
 from .alias_table import AliasTable
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast import Reference, mk_ast
+from .ast import mk_ast
 from .check_ast import check_ast, is_node_set
 from . import ast
 from .click_helpers import (
@@ -36,7 +37,9 @@ from .click_helpers import (
     output_file_option,
 )
 
+Params = ParamSpec("Params")
 Type = TypeVar("Type")
+
 
 TEMPLATE_LOADER = jinja2.PackageLoader(
     package_name="episim37", package_path="templates"
@@ -58,7 +61,7 @@ def register_filter(name: str):
     if name in ENVIRONMENT.filters:
         raise RuntimeError(f"Filter with name {name!r} has already been defined")
 
-    def wrapper(wrapped: Callable[[Type], str]) -> Callable[[Type], str]:
+    def wrapper(wrapped: Callable[Params, str]) -> Callable[Params, str]:
         ENVIRONMENT.filters[name] = wrapped
         return wrapped
 
@@ -339,6 +342,7 @@ def expression_str(e: ast.Expression) -> str:
             assert_never(unexpected)
 
 
+@register_filter("fn_expression")
 def fn_expression_str(e: ast.Expression, fn_param: str) -> str:
     match e:
         case ast.Reference() as r:
@@ -522,6 +526,74 @@ def reduce_statemetn_defn_str(x: ast.ReduceStatement) -> str:
         "reduce_statement_defn_openmp",
         is_all_reduce=is_all_reduce,
         is_node_reduce=is_node_reduce,
+        **asdict(x),
+    )
+
+
+class SingleExitTransition(BaseModel):
+    entry: str
+    exit: str
+    dwell: ast.Expression
+
+
+class MultiExitTransition(BaseModel):
+    entry: str
+    exits: list[str]
+    pexprs: list[ast.Expression]
+    dwells: list[ast.Expression]
+    num_exits: int
+
+
+@register_filter("contagion_methods")
+def contagion_methods_str(x: ast.Contagion) -> str:
+    num_states = len(x.state_type.value.consts)
+
+    entry_transitions = defaultdict(list)
+    for t in x.transitions:
+        entry_transitions[t.entry.value.name].append(t)
+
+    single_exit_transitions: list[SingleExitTransition] = []
+    multi_exit_transitions: list[MultiExitTransition] = []
+    for vs in entry_transitions.values():
+        if len(vs) == 1:
+            single_exit_transitions.append(
+                SingleExitTransition(
+                    entry=vs[0].entry.value.name,
+                    exit=vs[0].exit.value.name,
+                    dwell=vs[0].dwell,
+                )
+            )
+        else:
+            multi_exit_transitions.append(
+                MultiExitTransition(
+                    entry=vs[0].entry.value.name,
+                    exits=[v.exit.value.name for v in vs],
+                    pexprs=[v.pexpr for v in vs],
+                    dwells=[v.dwell for v in vs],
+                    num_exits=len(vs),
+                )
+            )
+
+    # entry -> [exit -> [contact]]
+    grouped_transmissions = defaultdict(lambda: defaultdict(list))
+
+    for t in x.transmissions:
+        contact = t.contact.value.name
+        entry = t.entry.value.name
+        exit = t.exit.value.name
+        grouped_transmissions[entry][exit].append(contact)
+
+    grouped_transmissions = [
+        (entry, [(exit, contacts) for exit, contacts in xs.items()])
+        for entry, xs in grouped_transmissions.items()
+    ]
+
+    return render(
+        "contagion_methods",
+        num_states=num_states,
+        single_exit_transitions=single_exit_transitions,
+        multi_exit_transitions=multi_exit_transitions,
+        grouped_transmissions=grouped_transmissions,
         **asdict(x),
     )
 
