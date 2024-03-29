@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 import rich
 import rich.markup
 
@@ -35,41 +35,34 @@ class SourcePosition(BaseModel):
 class EslError(Exception):
     """Error attributable to a section of the code."""
 
-    def __init__(self, short: str, long: str, pos: SourcePosition | None):
+    def __init__(self, type: str, description: str, pos: SourcePosition | None):
         """
         Initialize.
 
-        :param short: short description of error.
-        :param long: longer description of error.
+        :param type: type of error.
+        :param description: description of error.
         :param pos: position in source.
         """
 
         super().__init__()
-        self.short = short
-        self.long = long
+        self.type = type
+        self.description = description
         self.pos = pos
 
     def __str__(self):
-        return self.short
+        return f"{self.type}: {self.description}"
 
     def rich_print(self):
         if self.pos is not None:
-            etype = f"[red]{self.short}[/red]"
+            etype = f"[red]{self.type}[/red]"
             fpath = f"[yellow]{self.pos.source}[/yellow]"
             line = self.pos.line
             col = self.pos.col
-            expl = rich.markup.escape(self.long)
+            expl = rich.markup.escape(self.description)
 
             rich.print(f"{etype}:{fpath}:{line}:{col}: {expl}")
             print(self.pos.text)
         else:
-            etype = f"[red]{self.short}[/red]"
-            expl = rich.markup.escape(self.long)
+            etype = f"[red]{self.type}[/red]"
+            expl = rich.markup.escape(self.description)
             rich.print(f"{etype}: {expl}")
-
-
-def validation_error_str(e: ValidationError) -> str:
-    out = []
-    for error in e.errors():
-        out.append(str(e))
-    return "\n".join(out)

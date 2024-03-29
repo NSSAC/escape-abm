@@ -21,8 +21,7 @@ from .misc import SourcePosition, EslError
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast import mk_ast
 from .check_ast import check_ast
-
-# from .codegen_cpu import Source as SourceCPU, CodegenError
+from .codegen_openmp import simulator_str
 
 server = LanguageServer("esl37-server", "v0.1")
 
@@ -63,15 +62,16 @@ async def make_diagnostics(
         pt = mk_pt(str(file_path), file_bytes)
         ast = mk_ast(file_path, pt)
         check_ast(ast)
+        simulator_str(ast)
     except ParseTreeConstructionError as ptce:
         diagnostics = []
         for e in ptce.errors:
-            diagnostic = error_to_diagnostic(e.short, e.long, e.pos)
+            diagnostic = error_to_diagnostic(e.type, e.description, e.pos)
             diagnostics.append(diagnostic)
         ls.publish_diagnostics(params.text_document.uri, diagnostics)
         return
     except EslError as e:
-        diagnostic = error_to_diagnostic(e.short, e.long, e.pos)
+        diagnostic = error_to_diagnostic(e.type, e.description, e.pos)
         ls.publish_diagnostics(params.text_document.uri, [diagnostic])
         return
     except Exception as e:

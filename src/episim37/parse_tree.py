@@ -55,7 +55,7 @@ class PTNode:
     def field(self, name: str) -> PTNode:
         child = self.node.child_by_field_name(name)
         if child is None:
-            raise ValueError(
+            raise KeyError(
                 f"Node of type '{self.type}' doesn't have a field named '{name}'"
             )
         return PTNode(self.source, self.source_bytes, child)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,14 @@ from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError
 from .click_helpers import simulation_file_option
 
 Type = TypeVar("Type")
+
+
+@contextmanager
+def err_desc(description: str, pos: SourcePosition | None):
+    try:
+        yield
+    except AssertionError:
+        raise EslError("Semantic error", description, pos)
 
 
 class Scope(BaseModel):
@@ -99,7 +108,10 @@ def parse(node: PTNode, scope: Scope) -> Any:
     except EslError:
         raise
     except Exception as e:
-        raise EslError("AST Error", f"Failed to parse '{node.type}': {e!s}", node.pos)
+        estr = f"{e.__class__.__name__}: {e!s}"
+        raise EslError(
+            "AST Error", f"Failed to parse '{node.type}': ({estr})", node.pos
+        )
 
 
 def register_parser(type: str, parser: NodeParser):
@@ -289,10 +301,8 @@ class NodeField(BaseModel):
         is_static = "static" in annotations or is_node_key
         save_to_output = "save" in annotations
 
-        if save_to_output and is_static:
-            raise EslError(
-                "Constraint error", "Static field can't be saved to output", node.pos
-            )
+        with err_desc("Static field can't be saved to output.", node.pos):
+            assert not (save_to_output and is_static)
 
         obj = cls(
             name=name,
@@ -327,12 +337,8 @@ class NodeTable(BaseModel):
 
         fields = [parse(child, scope) for child in node.named_children]
         key = [f for f in fields if f.is_node_key]
-        if len(key) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one node key field must be specified.",
-                node.pos,
-            )
+        with err_desc("One and only one node key field must be specified.", node.pos):
+            assert len(key) == 1
         key = key[0]
 
         obj = cls(fields=fields, key=key, contagions=[], scope=scope, pos=node.pos)
@@ -369,10 +375,8 @@ class EdgeField(BaseModel):
         is_static = "static" in annotations or is_source_node_key or is_target_node_key
         save_to_output = "save" in annotations
 
-        if save_to_output and is_static:
-            raise EslError(
-                "Constraint error", "Static field can't be saved in output", node.pos
-            )
+        with err_desc("Static field can't be saved to output.", node.pos):
+            assert not (save_to_output and is_static)
 
         obj = cls(
             name=name,
@@ -419,21 +423,17 @@ class EdgeTable(BaseModel):
 
         fields = [parse(child, scope) for child in node.named_children]
         target_key = [f for f in fields if f.is_target_node_key]
-        if len(target_key) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one target node key field must be specified.",
-                node.pos,
-            )
+        with err_desc(
+            "One and only one target node key field must be specified.", node.pos
+        ):
+            assert len(target_key) == 1
         target_key = target_key[0]
 
         source_key = [f for f in fields if f.is_source_node_key]
-        if len(source_key) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one source node key field must be specified.",
-                node.pos,
-            )
+        with err_desc(
+            "One and only one source node key field must be specified.", node.pos
+        ):
+            assert len(source_key) == 1
         source_key = source_key[0]
 
         source_node = SourceNodeAccessor()
@@ -666,60 +666,39 @@ class Contagion(BaseModel):
         scope.define("state", state)
 
         state_type = children["contagion_state_type"]
-        if len(state_type) != 1:
-            raise EslError(
-                "Constraint error",
-                "State type must defined once for each contagion",
-                node.pos,
-            )
+        with err_desc("State type must defined once for each contagion.", node.pos):
+            assert len(state_type) == 1
         state_type = state_type[0]
 
         transitions = [t for ts in children["transitions"] for t in ts]
         transmissions = [t for ts in children["transmissions"] for t in ts]
+        contagion_functions = children["contagion_function"]
 
-        susceptibility = [
-            f for k, f in children["contagion_function"] if k == "susceptibility"
-        ]
-        if len(susceptibility) != 1:
-            raise EslError(
-                "Constraint error",
-                "Susceptibility must defined once for each contagion",
-                node.pos,
-            )
+        susceptibility = [f for k, f in contagion_functions if k == "susceptibility"]
+        with err_desc("Susceptibility must defined once for each contagion.", node.pos):
+            assert len(susceptibility) == 1
         susceptibility = susceptibility[0]
         susceptibility = if_fn_make_ref(susceptibility, scope)
 
-        infectivity = [
-            f for k, f in children["contagion_function"] if k == "infectivity"
-        ]
-        if len(infectivity) != 1:
-            raise EslError(
-                "Constraint error",
-                "Infectivity must defined once for each contagion",
-                node.pos,
-            )
+        infectivity = [f for k, f in contagion_functions if k == "infectivity"]
+        with err_desc("Infectivity must defined once for each contagion.", node.pos):
+            assert len(infectivity) == 1
         infectivity = infectivity[0]
         infectivity = if_fn_make_ref(infectivity, scope)
 
         transmissibility = [
-            f for k, f in children["contagion_function"] if k == "transmissibility"
+            f for k, f in contagion_functions if k == "transmissibility"
         ]
-        if len(transmissibility) != 1:
-            raise EslError(
-                "Constraint error",
-                "Transmissibility must defined once for each contagion",
-                node.pos,
-            )
+        with err_desc(
+            "Transmissibility must defined once for each contagion.", node.pos
+        ):
+            assert len(transmissibility) == 1
         transmissibility = transmissibility[0]
         transmissibility = if_fn_make_ref(transmissibility, scope)
 
-        enabled = [f for k, f in children["contagion_function"] if k == "enabled"]
-        if len(enabled) != 1:
-            raise EslError(
-                "Constraint error",
-                "Enabled (edge) must defined once for each contagion",
-                node.pos,
-            )
+        enabled = [f for k, f in contagion_functions if k == "enabled"]
+        with err_desc("Enabled (edge) must defined once for each contagion.", node.pos):
+            assert len(enabled) == 1
         enabled = enabled[0]
         enabled = if_fn_make_ref(enabled, scope)
 
@@ -1481,21 +1460,13 @@ class Source(BaseModel):
         globals = children["global"]
 
         node_tables = children["node"]
-        if len(node_tables) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one node table must be defined",
-                node.pos,
-            )
+        with err_desc("One and only one node table must be defined", node.pos):
+            assert len(node_tables) == 1
         node_table = node_tables[0]
 
         edge_tables = children["edge"]
-        if len(edge_tables) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one edge table must be defined",
-                node.pos,
-            )
+        with err_desc("One and only one edge table must be defined", node.pos):
+            assert len(edge_tables) == 1
         edge_table = edge_tables[0]
 
         distributions = [d for ds in children["distributions"] for d in ds]
@@ -1511,12 +1482,8 @@ class Source(BaseModel):
         functions: list[Function] = get_instances(Function)
 
         intervenes = [f for f in functions if f.name == "intervene"]
-        if len(intervenes) != 1:
-            raise EslError(
-                "Constraint error",
-                "One and only one intervene function must be defined",
-                node.pos,
-            )
+        with err_desc("One and only one intervene function must be defined", node.pos):
+            assert len(intervenes) == 1
         intervene = intervenes[0]
 
         function_calls: list[FunctionCall] = get_instances(FunctionCall)
@@ -1568,12 +1535,14 @@ def mk_ast(filename: Path, node: PTNode) -> Source:
     """Make AST from parse tree."""
     module = filename.stem.replace(".", "_")
     try:
-        source = Source.make(module, node)
+        return Source.make(module, node)
     except EslError:
         raise
     except Exception as e:
-        raise EslError("AST Error", f"Failed to parse '{node.type}'\n{e!s}", node.pos)
-    return source
+        estr = f"{e.__class__.__name__}: {e!s}"
+        raise EslError(
+            "AST Error", f"Failed to parse '{node.type}': ({estr})", node.pos
+        )
 
 
 @click.command()

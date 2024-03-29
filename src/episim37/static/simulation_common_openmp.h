@@ -47,6 +47,25 @@ template <> inline const H5::PredType& h5_type<float>() { return H5::PredType::N
 template <> inline const H5::PredType& h5_type<double>() { return H5::PredType::NATIVE_DOUBLE; }
 
 // ----------------------------------------------------------------------------
+// Parse Cstring
+// ----------------------------------------------------------------------------
+
+template <typename Type> Type parse_cstr(const char* s) = delete;
+
+template <> inline int8_t parse_cstr<int8_t>(const char* s) { return std::stol(s); }
+template <> inline int16_t parse_cstr<int16_t>(const char* s) { return std::stol(s); }
+template <> inline int32_t parse_cstr<int32_t>(const char* s) { return std::stol(s); }
+template <> inline int64_t parse_cstr<int64_t>(const char* s) { return std::stol(s); }
+
+template <> inline uint8_t parse_cstr<uint8_t>(const char* s) { return std::stoul(s); }
+template <> inline uint16_t parse_cstr<uint16_t>(const char* s) { return std::stoul(s); }
+template <> inline uint32_t parse_cstr<uint32_t>(const char* s) { return std::stoul(s); }
+template <> inline uint64_t parse_cstr<uint64_t>(const char* s) { return std::stoul(s); }
+
+template <> inline float parse_cstr<float>(const char* s) { return std::stod(s); }
+template <> inline double parse_cstr<double>(const char* s) { return std::stod(s); }
+
+// ----------------------------------------------------------------------------
 // Useful constants
 // ----------------------------------------------------------------------------
 
@@ -269,7 +288,7 @@ template <typename Type> struct PerThreadDynamicArray {
             hsize_t offset[] = {write_offset};
             file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
 
-            dataset.write(_data[i], h5_type, mem_space, file_space);
+            dataset.write(_data[i], h5_type<Type>(), mem_space, file_space);
 
             write_offset += count[0];
             mem_space.close();

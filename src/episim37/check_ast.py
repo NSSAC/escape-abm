@@ -1,457 +1,360 @@
 """Run correctness checks on AST."""
 
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
+from contextlib import contextmanager
 
 from typeguard import TypeCheckError, check_type
 
 from .click_helpers import simulation_file_option
 from .misc import EslError, SourcePosition
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast import (
-    INT_TYPES,
-    FLOAT_TYPES,
-    SCALAR_TYPES,
-    TABLE_TYPES,
-    BuiltinEdgeset,
-    BuiltinFunction,
-    BuiltinNodeset,
-    BuiltinType,
-    Contagion,
-    Distribution,
-    EdgeSet,
-    EnumConstant,
-    EnumType,
-    Expression,
-    Global,
-    NodeSet,
-    Param,
-    Function,
-    Variable,
-    FunctionCall,
-    SelectStatement,
-    SampleStatement,
-    ApplyStatement,
-    ReduceStatement,
-    Reference,
-    Source,
-    mk_ast,
-)
+from . import ast
+from .ast import mk_ast
 
 import click
 import rich
 
 
-class UnexpectedValue(EslError):
-    def __init__(self, unexpected: Any, expected: str, pos: SourcePosition | None):
-        super().__init__("Unexpected value", f"{expected}; got {unexpected}", pos)
+@contextmanager
+def err_desc(description: str, pos: SourcePosition | None):
+    try:
+        yield
+    except AssertionError:
+        raise EslError("Semantic error", description, pos)
 
 
-def is_scalar_type(r: Reference) -> bool:
+def is_scalar_type(r: ast.Reference) -> bool:
     match r.value:
-        case BuiltinType() as t:
-            if t.name in SCALAR_TYPES:
+        case ast.BuiltinType() as t:
+            if t.name in ast.SCALAR_TYPES:
                 return True
 
     return False
 
 
-def is_table_type(r: Reference) -> bool:
+def is_int_type(r: ast.Reference) -> bool:
     match r.value:
-        case BuiltinType() as t:
-            if t.name in TABLE_TYPES:
+        case ast.BuiltinType() as t:
+            if t.name in ast.INT_TYPES:
+                return True
+        case ast.EnumType():
+            return True
+
+    return False
+
+
+def is_float_type(r: ast.Reference) -> bool:
+    match r.value:
+        case ast.BuiltinType() as t:
+            if t.name in ast.FLOAT_TYPES:
                 return True
 
     return False
 
 
-def is_int_type(r: Reference) -> bool:
+def is_bool_type(r: ast.Reference) -> bool:
     match r.value:
-        case BuiltinType() as t:
-            if t.name in INT_TYPES:
-                return True
-
-    return False
-
-
-def is_float_type(r: Reference) -> bool:
-    match r.value:
-        case BuiltinType() as t:
-            if t.name in FLOAT_TYPES:
-                return True
-
-    return False
-
-
-def is_bool_type(r: Reference) -> bool:
-    match r.value:
-        case BuiltinType() as t:
+        case ast.BuiltinType() as t:
             if t.name == "bool":
                 return True
 
     return False
 
 
-def is_node_type(r: Reference) -> bool:
+def is_node_type(r: ast.Reference) -> bool:
     match r.value:
-        case BuiltinType() as t:
+        case ast.BuiltinType() as t:
             if t.name == "node":
                 return True
 
     return False
 
 
-def is_edge_type(r: Reference) -> bool:
+def is_edge_type(r: ast.Reference) -> bool:
     match r.value:
-        case BuiltinType() as t:
+        case ast.BuiltinType() as t:
             if t.name == "edge":
                 return True
 
     return False
 
 
-def is_node_set(r: Reference) -> bool:
+def is_node_set(r: ast.Reference) -> bool:
     match r.value:
-        case NodeSet():
+        case ast.NodeSet():
             return True
-        case BuiltinNodeset():
+        case ast.BuiltinNodeset():
             return True
 
     return False
 
 
-def is_edge_set(r: Reference) -> bool:
+def is_edge_set(r: ast.Reference) -> bool:
     match r.value:
-        case EdgeSet():
+        case ast.EdgeSet():
             return True
-        case BuiltinEdgeset():
+        case ast.BuiltinEdgeset():
             return True
 
     return False
 
 
-def ensure_node_or_edgeset(r: Reference, allow_builtin: bool = False):
+def is_set(r: ast.Reference, allow_builtin: bool = False) -> bool:
     match r.value:
-        case NodeSet() | EdgeSet():
-            return
-        case BuiltinNodeset() | BuiltinEdgeset():
+        case ast.NodeSet() | ast.EdgeSet():
+            return True
+        case ast.BuiltinNodeset() | ast.BuiltinEdgeset():
             if allow_builtin:
-                return
+                return True
 
-    raise EslError(
-        "Incompatible value",
-        f"Expected a node or edgeset; builtin allowed={allow_builtin!s}.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_table_func(r: Reference):
+def is_node_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
-            if len(f.params) == 1 and is_table_type(f.params[0].type):
-                return
-
-    raise EslError(
-        "Incompatible function",
-        "Expected function with single parameter of type node or edge.",
-        r.pos,
-    )
-
-
-def ensure_node_func(r: Reference):
-    match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if len(f.params) == 1 and is_node_type(f.params[0].type):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with single parameter of type node.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_edge_func(r: Reference):
+def is_edge_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if len(f.params) == 1 and is_edge_type(f.params[0].type):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with single parameter of type edge.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_no_params(r: Reference):
+def is_int_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
-            if not f.params:
-                return
-
-    raise EslError(
-        "Incompatible function", "Expected function with no parameters.", r.pos
-    )
-
-
-def ensure_int_func(r: Reference):
-    match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if f.rtype is not None and is_int_type(f.rtype):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with return type int.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_float_func(r: Reference):
+def is_float_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if f.rtype is not None and is_float_type(f.rtype):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with return type float.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_bool_func(r: Reference):
+def is_bool_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if f.rtype is not None and is_bool_type(f.rtype):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with return type bool.",
-        r.pos,
-    )
+    return False
 
 
-def ensure_scalar_func(r: Reference):
+def is_scalar_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function() as f:
+        case ast.Function() as f:
             if f.rtype is not None and is_scalar_type(f.rtype):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected function with a scalar return type.",
-        r.pos,
-    )
-
-
-def ensure_void_func(r: Reference):
-    match r.value:
-        case Function() as f:
-            if f.rtype is None:
-                return
-
-    raise EslError(
-        "Incompatible function",
-        "Expected function with no return type.",
-        r.pos,
-    )
+    return False
 
 
 # FIXME: this is a stub
-def ensure_kernel_func(r: Reference):
+def is_kernel_func(r: ast.Reference) -> bool:
     match r.value:
-        case Function():
-            return
+        case ast.Function():
+            return True
 
-    raise EslError(
-        "Incompatible function",
-        "Expected a valid kernel function",
-        r.pos,
-    )
+    return False
 
 
-def check_select_statement(stmt: SelectStatement):
-    ensure_node_or_edgeset(stmt.set)
-    ensure_table_func(stmt.function)
+def check_select_statement(stmt: ast.SelectStatement):
+    with err_desc("Expected reference to a user defined set.", stmt.set.pos):
+        assert is_set(stmt.set, allow_builtin=False)
 
     if is_node_set(stmt.set):
-        ensure_node_func(stmt.function)
-    elif is_edge_set(stmt.set):
-        ensure_edge_func(stmt.function)
+        with err_desc("Expected a node function.", stmt.function.pos):
+            assert is_node_func(stmt.function)
+    else:  # is_edge_set(stmt.set)
+        with err_desc("Expected a edge function.", stmt.function.pos):
+            assert is_edge_func(stmt.function)
 
-    ensure_bool_func(stmt.function)
-    ensure_kernel_func(stmt.function)
-
-
-def check_sample_statement(stmt: SampleStatement):
-    ensure_node_or_edgeset(stmt.set)
-    ensure_node_or_edgeset(stmt.parent, allow_builtin=True)
-
-    if is_node_set(stmt.set) and is_node_set(stmt.parent):
-        pass
-    elif is_edge_set(stmt.set) and is_edge_set(stmt.parent):
-        pass
-    else:
-        raise EslError("Incompatible sets", "Sets must be of same type.", stmt.pos)
+    with err_desc("Expected a function returning bool.", stmt.function.pos):
+        assert is_bool_func(stmt.function)
+    with err_desc("Expected a kernel function.", stmt.function.pos):
+        assert is_kernel_func(stmt.function)
 
 
-def check_apply_statement(stmt: ApplyStatement):
-    ensure_node_or_edgeset(stmt.set, allow_builtin=True)
-    ensure_table_func(stmt.function)
+def check_sample_statement(stmt: ast.SampleStatement):
+    with err_desc("Expected reference to a user defined set.", stmt.set.pos):
+        assert is_set(stmt.set, allow_builtin=False)
+    with err_desc("Expected reference to a set.", stmt.set.pos):
+        assert is_set(stmt.parent, allow_builtin=True)
 
     if is_node_set(stmt.set):
-        ensure_node_func(stmt.function)
-    elif is_edge_set(stmt.set):
-        ensure_edge_func(stmt.function)
+        with err_desc(
+            "Node sets can only be sampled from other node sets.", stmt.set.pos
+        ):
+            assert is_node_set(stmt.parent)
+    else:  # is_edge_set(stmt.set)
+        with err_desc(
+            "Edge sets can only be sampled from other edge sets.", stmt.set.pos
+        ):
+            assert is_node_set(stmt.parent)
 
-    ensure_void_func(stmt.function)
-    ensure_kernel_func(stmt.function)
+
+def check_apply_statement(stmt: ast.ApplyStatement):
+    with err_desc("Expected reference to a set.", stmt.set.pos):
+        assert is_set(stmt.set, allow_builtin=True)
+
+    if is_node_set(stmt.set):
+        with err_desc("Expected a node function.", stmt.function.pos):
+            assert is_node_func(stmt.function)
+    else:  # is_edge_set(stmt.set)
+        with err_desc("Expected a edge function.", stmt.function.pos):
+            assert is_edge_func(stmt.function)
+
+    with err_desc("Expected a function with no return type.", stmt.function.pos):
+        assert stmt.function.value.rtype is None
+    with err_desc("Expected a kernel function.", stmt.function.pos):
+        assert is_kernel_func(stmt.function)
 
 
-def check_reduce_outvar(r: Reference):
+def is_scalar_var(r: ast.Reference) -> bool:
     match r.value:
-        case Param() | Variable() | Global() as t:
+        case ast.Param() | ast.Variable() | ast.Global() as t:
             if is_scalar_type(t.type):
-                return
+                return True
 
-    raise EslError(
-        "Incompatible variable",
-        "Output of reduce statements can only be set to scalar variables.",
-        r.pos,
-    )
+    return False
 
 
-def check_reduce_statement(stmt: ReduceStatement):
-    ensure_node_or_edgeset(stmt.set, allow_builtin=True)
-    check_reduce_outvar(stmt.outvar)
+def check_reduce_statement(stmt: ast.ReduceStatement):
+    with err_desc("Expected reference to a set.", stmt.set.pos):
+        assert is_set(stmt.set, allow_builtin=True)
+    with err_desc("Expect a scalar variable.", stmt.outvar.pos):
+        assert is_scalar_var(stmt.outvar)
 
     if is_node_set(stmt.set):
-        ensure_node_func(stmt.function)
-    elif is_edge_set(stmt.set):
-        ensure_edge_func(stmt.function)
-    else:
-        raise UnexpectedValue(stmt.set, "Node or edgeset reference", stmt.set.pos)
+        with err_desc("Expected a node function.", stmt.function.pos):
+            assert is_node_func(stmt.function)
+    else:  # is_edge_set(stmt.set)
+        with err_desc("Expected a edge function.", stmt.function.pos):
+            assert is_edge_func(stmt.function)
 
-    ensure_scalar_func(stmt.function)
-    ensure_kernel_func(stmt.function)
-
-
-def check_intervene(f: Function):
-    if not f.params and f.rtype == None:
-        return
-
-    raise EslError(
-        "Bad intervene",
-        "Intervene function must have no parameters and not return type",
-        f.pos,
-    )
+    with err_desc("Expected a function with scalar return type.", stmt.function.pos):
+        assert is_scalar_func(stmt.function)
+    with err_desc("Expected a kernel function.", stmt.function.pos):
+        assert is_kernel_func(stmt.function)
 
 
-def check_susceptibility(o: Expression):
+def check_intervene(f: ast.Function):
+    with err_desc("Intervene function must not take any parameters.", f.pos):
+        assert not f.params
+
+    with err_desc("Intervene function must not have a return type.", f.pos):
+        assert f.rtype is None
+
+
+def check_susceptibility(o: ast.Expression):
     if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_node_func(oref)
-        ensure_float_func(oref)
-        ensure_kernel_func(oref)
+        fn = cast(ast.Reference, o)
+        with err_desc("Expected a node function.", fn.pos):
+            assert is_node_func(fn)
+        with err_desc("Expected a function with float return type.", fn.pos):
+            assert is_float_func(fn)
+        with err_desc("Expected a kernel function.", fn.pos):
+            assert is_kernel_func(fn)
 
 
-def check_infectivity(o: Expression):
+check_infectivity = check_susceptibility
+
+
+def check_transmissibility(o: ast.Expression):
     if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_node_func(oref)
-        ensure_float_func(oref)
-        ensure_kernel_func(oref)
+        fn = cast(ast.Reference, o)
+        with err_desc("Expected a edge function.", fn.pos):
+            assert is_edge_func(fn)
+        with err_desc("Expected a function with float return type.", fn.pos):
+            assert is_float_func(fn)
+        with err_desc("Expected a kernel function.", fn.pos):
+            assert is_kernel_func(fn)
 
 
-def check_transmissibility(o: Expression):
+def check_enabled(o: ast.Expression):
     if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_edge_func(oref)
-        ensure_float_func(oref)
-        ensure_kernel_func(oref)
+        fn = cast(ast.Reference, o)
+        with err_desc("Expected a edge function.", fn.pos):
+            assert is_edge_func(fn)
+        with err_desc("Expected a function with bool return type.", fn.pos):
+            assert is_bool_func(fn)
+        with err_desc("Expected a kernel function.", fn.pos):
+            assert is_kernel_func(fn)
 
 
-def check_enabled(o: Expression):
+def check_pexpr(o: ast.Expression):
     if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_edge_func(oref)
-        ensure_bool_func(oref)
-        ensure_kernel_func(oref)
+        fn = cast(ast.Reference, o)
+        with err_desc("Expected a node function.", fn.pos):
+            assert is_node_func(fn)
+        with err_desc("Expected a function with float return type.", fn.pos):
+            assert is_float_func(fn)
+        with err_desc("Expected a kernel function.", fn.pos):
+            assert is_kernel_func(fn)
 
 
-def check_pexpr(o: Expression | None):
-    if o is None:
-        return
-
-    if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_node_func(oref)
-        ensure_float_func(oref)
-        ensure_kernel_func(oref)
+check_dwell = check_pexpr
 
 
-def check_dwell_expr(o: Expression):
-    if is_fn_ref(o):
-        oref = cast(Reference, o)
-        ensure_node_func(oref)
-        ensure_float_func(oref)
-        ensure_kernel_func(oref)
-
-
-def check_function_call(fc: FunctionCall):
+def check_function_call(fc: ast.FunctionCall):
     func = fc.function.value
     n_args = len(fc.args)
     match func:
-        case Function() | BuiltinFunction() as f:
+        case ast.Function() | ast.BuiltinFunction() as f:
             n_params = len(f.params)
-            if n_params != n_args:
-                raise EslError(
-                    "Invalid args",
-                    f"Expected {n_params} args; got {n_args}.",
-                    fc.pos,
-                )
-        case f if isinstance(f, Distribution):
-            if n_args != 0:
-                raise EslError(
-                    "Invalid args",
-                    f"Expected 0 args; got {n_args}.",
-                    fc.pos,
-                )
-        case _ as unexpected:
-            raise UnexpectedValue(
-                unexpected, "Expected a function or distribution", fc.function.pos
+            with err_desc(f"Expected {n_params} args; got {n_args}.", fc.pos):
+                assert n_params == n_args
+        case f if isinstance(f, ast.Distribution):
+            with err_desc(f"Expected 0 args; got {n_args}.", fc.pos):
+                assert n_args == 0
+        case _:
+            raise EslError(
+                "Unexpected value",
+                f"Expected a function or distribution; got {func}",
+                fc.function.pos,
             )
 
 
-def ensure_enum_compat(type: EnumType, const_ref: Reference):
+def is_enum_compat(type: ast.EnumType, const_ref: ast.Reference) -> bool:
     match const_ref.value:
-        case EnumConstant() as const:
-            if const.type != type:
-                raise EslError(
-                    "Incompatibale value",
-                    f"Expected constant of type {type.name}",
-                    const_ref.pos,
-                )
+        case ast.EnumConstant() as const:
+            if const.type == type:
+                return True
+
+    return False
 
 
-def is_fn_ref(o: Any) -> bool:
+def is_fn_ref(o: ast.Expression) -> bool:
     match o:
-        case Reference() as r:
+        case ast.Reference() as r:
             match r.value:
-                case Function():
+                case ast.Function():
                     return True
 
     return False
 
 
-def is_dist_ref(o: Any) -> bool:
+def is_dist_ref(o: ast.Expression) -> bool:
     match o:
-        case Reference() as r:
+        case ast.Reference() as r:
             try:
-                check_type(r.value, Distribution)
+                check_type(r.value, ast.Distribution)
                 return True
             except TypeCheckError:
                 pass
@@ -459,26 +362,32 @@ def is_dist_ref(o: Any) -> bool:
     return False
 
 
-def check_contagion(c: Contagion):
+def check_contagion(c: ast.Contagion):
     state_type = c.state_type.value
     match state_type:
-        case EnumType():
+        case ast.EnumType():
             pass
         case _:
             raise EslError(
                 "Invalid type", "State type needs to be a enum type", c.state_type.pos
             )
 
-    for transition in c.transitions:
-        ensure_enum_compat(state_type, transition.entry)
-        ensure_enum_compat(state_type, transition.exit)
-        check_pexpr(transition.pexpr)
-        check_dwell_expr(transition.dwell)
+    for t in c.transitions:
+        with err_desc("Incompatible enumeration constant", t.entry.pos):
+            assert is_enum_compat(state_type, t.entry)
+        with err_desc("Incompatible enumeration constant", t.exit.pos):
+            assert is_enum_compat(state_type, t.exit)
 
-    for transmission in c.transmissions:
-        ensure_enum_compat(state_type, transmission.contact)
-        ensure_enum_compat(state_type, transmission.entry)
-        ensure_enum_compat(state_type, transmission.exit)
+        check_pexpr(t.pexpr)
+        check_dwell(t.dwell)
+
+    for t in c.transmissions:
+        with err_desc("Incompatible enumeration constant", t.contact.pos):
+            assert is_enum_compat(state_type, t.contact)
+        with err_desc("Incompatible enumeration constant", t.entry.pos):
+            assert is_enum_compat(state_type, t.entry)
+        with err_desc("Incompatible enumeration constant", t.exit.pos):
+            assert is_enum_compat(state_type, t.exit)
 
     check_susceptibility(c.susceptibility)
     check_infectivity(c.infectivity)
@@ -486,28 +395,35 @@ def check_contagion(c: Contagion):
     check_enabled(c.enabled)
 
 
-def check_ast(source: Source):
+def check_ast(source: ast.Source):
     """Check the generated AST."""
+    try:
+        for c in source.contagions:
+            check_contagion(c)
 
-    for c in source.contagions:
-        check_contagion(c)
+        for fc in source.function_calls:
+            check_function_call(fc)
 
-    for fc in source.function_calls:
-        check_function_call(fc)
+        for stmt in source.select_statements:
+            check_select_statement(stmt)
 
-    for stmt in source.select_statements:
-        check_select_statement(stmt)
+        for stmt in source.sample_statements:
+            check_sample_statement(stmt)
 
-    for stmt in source.sample_statements:
-        check_sample_statement(stmt)
+        for stmt in source.apply_statements:
+            check_apply_statement(stmt)
 
-    for stmt in source.apply_statements:
-        check_apply_statement(stmt)
+        for stmt in source.reduce_statements:
+            check_reduce_statement(stmt)
 
-    for stmt in source.reduce_statements:
-        check_reduce_statement(stmt)
-
-    check_intervene(source.intervene)
+        check_intervene(source.intervene)
+    except EslError:
+        raise
+    except Exception as e:
+        estr = f"{e.__class__.__name__}: {e!s}"
+        raise EslError(
+            "AST Check Error", f"Failed to check source: ({estr})", source.pos
+        )
 
 
 @click.command()

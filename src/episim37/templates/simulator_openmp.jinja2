@@ -142,5 +142,134 @@ ContagionOutputContainer<{{ contagion.state_type | typename}}>* {{ contagion.nam
 // ----------------------------------------------------------------------------
 
 int main() {
+    const auto init_start = omp_get_wtime();
+
+    init_thread_idx();
+
+    fmt::print("### num_threads = {}\n", NUM_THREADS);
+
+    {% for var in globals if var.is_config %}
+    {
+        const char *p = std::getenv("{{ var.name | upper }}");
+        if (p) {
+            {{ var.name | mangle }} = parse_cstr<{{ var.type | typename }}>(p);
+        }
+        fmt::print("### {{ var.name }} = {}\n", {{ var.name | mangle }});
+    }
+    {% endfor %}
+    {
+        const char *p = std::getenv("NUM_TICKS");
+        if (p) {
+            NUM_TICKS = std::stol(p);
+        }
+        fmt::print("### num_ticks = {}\n", NUM_TICKS);
+    }
+
+    const char *input_file_name = "input.h5";
+    {
+        const char *p = std::getenv("INPUT_FILE");
+        if (p) {
+            input_file_name = p;
+        }
+        fmt::print("### input_file = {}\n", input_file_name);
+    }
+
+    const char *output_file_name = "output.h5";
+    {
+        const char *p = std::getenv("OUTPUT_FILE");
+        if (p) {
+            output_file_name = p;
+        }
+        fmt::print("### output_file = {}\n", output_file_name);
+    }
+
+    H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
+
+    NUM_NODES = get_num_nodes(input_file);
+    fmt::print("### num_nodes = {}\n", NUM_NODES);
+
+    NUM_EDGES = get_num_edges(input_file);
+    fmt::print("### num_edges = {}\n", NUM_EDGES);
+
+    IncomingIncidenceCSR csr(input_file);
+    IN_INC_CSR = &csr;
+
+    init_thread_node_range();
+    init_thread_edge_range();
+
+    NodeTable nt(input_file);
+    NODE_TABLE = &nt;
+
+    EdgeTable et(input_file);
+    EDGE_TABLE = &et;
+
+    input_file.close();
+
+    H5::H5File output_file(output_file_name, H5F_ACC_TRUNC);
+    OUTPUT_FILE = &output_file;
+
+    write_attribute(output_file, "num_ticks", NUM_TICKS);
+
+    StaticArray<size_type> thread_node_count(NUM_THREADS);
+    #pragma omp parallel
+    {
+        #pragma omp critical
+        {
+            thread_node_count[THREAD_IDX] = TN_END - TN_START;
+        }
+    }
+
+    {% for contagion in contagions %}
+    ContagionOutputContainer<{{ contagion.state_type | typename}}> {{ contagion.name | mangle }}_output("{{ contagion.name }}", thread_node_count);
+    #pragma omp parallel
+    {
+        {{ contagion.name | mangle }}_output.par_init();
+    }
+    {{ contagion.name | mangle }}_output.create_output_groups();
+    {{ contagion.name | mangle }}_OUTPUT = &{{ contagion.name | mangle }}_output;
+    {% endfor %}
+
+    ThreadRndState thread_rnd_state;
+
+    {% for set in nodesets %}
+    Set {{ set.name | mangle }}_(1);
+    #pragma omp parallel
+    {
+        {{ set.name | mangle }}_.par_init();
+    }
+    {{ set.name | mangle }} = &{{ set.name | mangle }}_;
+    {% endfor %}
+
+    {% for set in edgesets %}
+    Set {{ set.name | mangle }}_(0);
+    #pragma omp parallel
+    {
+        {{ set.name | mangle }}_.par_init();
+    }
+    {{ set.name | mangle }} = &{{ set.name | mangle }}_;
+    {% endfor %}
+
+    const auto init_end = omp_get_wtime();
+
+    const auto main_start = omp_get_wtime();
+
+    for (CUR_TICK = -1; CUR_TICK < NUM_TICKS; CUR_TICK++) {
+        fmt::print("### cur_tick = {}\n", CUR_TICK);
+        {{ intervene.name | mangle }}();
+
+        {% for contagion in contagions %}
+        {{ contagion.name | mangle }}_step();
+        {% endfor %}
+    }
+
+    const auto main_end = omp_get_wtime();
+
+    output_file.close();
+    OUTPUT_FILE = nullptr;
+
+    fmt::print("### mem_use_gb = {:g}\n", double(TOTAL_ALLOC) / 1e9);
+    fmt::print("### init_time_s = {:g}\n", init_end - init_start);
+    fmt::print("### main_time_s = {:g}\n", main_end - main_start);
+
     return 0;
 }

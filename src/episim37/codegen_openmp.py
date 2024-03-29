@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import os
 import shlex
 import subprocess
 from pathlib import Path
-
-# from itertools import chain
-from typing import assert_never, Any, TypeVar, ParamSpec, Callable
-from tempfile import TemporaryDirectory
-
-# from collections import defaultdict
+from collections import defaultdict
 from importlib.resources import files
+from tempfile import TemporaryDirectory
+from typing import assert_never, Any, TypeVar, ParamSpec, Callable
 
 import click
 import jinja2
@@ -22,9 +18,8 @@ import rich.markup
 from pydantic import BaseModel
 from typeguard import check_type, TypeCheckError
 
-from .misc import EslError, SourcePosition
-
 from .alias_table import AliasTable
+from .misc import EslError, SourcePosition
 from .parse_tree import mk_pt, ParseTreeConstructionError
 from .ast import mk_ast
 from .check_ast import check_ast, is_node_set
@@ -117,9 +112,6 @@ def ctype(t: str) -> str:
 
         "node":  "node_index_type",
         "edge":  "edge_index_type",
-
-        "nodeset":  "Set*",
-        "edgeset":  "Set*",
     }
     # fmt: on
 
@@ -132,28 +124,6 @@ def mangle(*args: str) -> str:
         return "_" + args[0]
 
     return "_" + "__".join(args)
-
-
-def cstr_to_ctype_fn(t: str) -> str:
-    match t:
-        case "int_type" | "int8_t" | "int16_t" | "int32_t" | "int64_t":
-            return "std::stol"
-        case (
-            "uint_type"
-            | "bool_type"
-            | "size_type"
-            | "node_index_type"
-            | "edge_index_type"
-            | "uint8_t"
-            | "uint16_t"
-            | "uint32_t"
-            | "uint64_t"
-        ):
-            return "std::stoul"
-        case "float_type" | "float" | "double":
-            return "std::stod"
-        case _ as unexpected:
-            raise ValueError(unexpected)
 
 
 def tref_str(x: ast.TValueRef) -> str:
@@ -182,7 +152,6 @@ def cref_str(x: ast.CValueRef) -> str:
             assert_never(unexpected)
 
 
-@register_filter("ref")
 def ref_str(x: ast.RValueRef) -> str:
     match x:
         case ast.BuiltinGlobal():
@@ -403,7 +372,15 @@ def statement_str(s: ast.Statement) -> str:
         case ast.CallStatement():
             return render("call_statement", **asdict(s))
         case ast.UpdateStatement():
-            return render("update_statement", **asdict(s))
+            left = s.left.value
+            try:
+                check_type(left, ast.LValueRef)
+            except TypeCheckError:
+                raise EslError(
+                    "Invalid reference", f"Can't update {s.left.name}", s.left.pos
+                )
+            left_str = ref_str(left)
+            return render("update_statement", left_str=left_str, **asdict(s))
         case ast.PrintStatement():
             args = []
             for arg in s.args:
@@ -502,12 +479,12 @@ def discrete_dist_defn_str(x: ast.DiscreteDist) -> str:
 
 
 @register_filter("select_statement_defn")
-def select_statemetn_defn_str(x: ast.SelectStatement) -> str:
+def select_statement_defn_str(x: ast.SelectStatement) -> str:
     return render("select_statement_defn_openmp", **asdict(x))
 
 
 @register_filter("apply_statement_defn")
-def apply_statemetn_defn_str(x: ast.ApplyStatement) -> str:
+def apply_statement_defn_str(x: ast.ApplyStatement) -> str:
     is_all_apply = is_all_set(x.set)
     is_node_apply = is_node_set(x.set)
     return render(
@@ -519,7 +496,7 @@ def apply_statemetn_defn_str(x: ast.ApplyStatement) -> str:
 
 
 @register_filter("reduce_statement_defn")
-def reduce_statemetn_defn_str(x: ast.ReduceStatement) -> str:
+def reduce_statement_defn_str(x: ast.ReduceStatement) -> str:
     is_all_reduce = is_all_set(x.set)
     is_node_reduce = is_node_set(x.set)
     return render(
@@ -598,8 +575,18 @@ def contagion_methods_str(x: ast.Contagion) -> str:
     )
 
 
-def simulator_str(x: ast.Source) -> str:
-    return render("simulator_openmp", **asdict(x))
+def simulator_str(source: ast.Source) -> str:
+    try:
+        return render("simulator_openmp", **asdict(source))
+    except EslError:
+        raise
+    except jinja2.TemplateError:
+        raise
+    except Exception as e:
+        estr = f"{e.__class__.__name__}: {e!s}"
+        raise EslError(
+            "Codegen Error", f"Failed to generate code: ({estr})", source.pos
+        )
 
 
 def do_prepare(gen_src_dir: Path, input: Path, source: ast.Source) -> None:
