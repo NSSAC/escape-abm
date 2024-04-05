@@ -6,9 +6,9 @@ from pathlib import Path
 import click
 from lsprotocol.types import (
     DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams,
+    DidChangeTextDocumentParams,
     TEXT_DOCUMENT_DID_OPEN,
-    TEXT_DOCUMENT_DID_SAVE,
+    TEXT_DOCUMENT_DID_CHANGE,
     Diagnostic,
     DiagnosticSeverity,
     Range,
@@ -48,9 +48,9 @@ def error_to_diagnostic(
 
 
 @server.feature(TEXT_DOCUMENT_DID_OPEN)
-@server.feature(TEXT_DOCUMENT_DID_SAVE)
+@server.feature(TEXT_DOCUMENT_DID_CHANGE)
 async def make_diagnostics(
-    ls: LanguageServer, params: DidOpenTextDocumentParams | DidSaveTextDocumentParams
+    ls: LanguageServer, params: DidOpenTextDocumentParams | DidChangeTextDocumentParams
 ):
     ls.show_message_log("checking document")
 
