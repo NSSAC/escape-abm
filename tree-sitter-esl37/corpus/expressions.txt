@@ -235,7 +235,7 @@ __test expression:
 end
 
 __test expression:
-    a * (b.c1.dwell)
+    a * (b.c1.state)
 end
 
 ---
@@ -264,7 +264,7 @@ Function Call 1
 ===============
 
 __test expression:
-    a + b.susceptibility()
+    a + susceptibility()
 end
 
 ---
@@ -274,7 +274,7 @@ end
         (binary_expression
             (reference (identifier))
             (function_call
-                (reference (identifier) (identifier))
+                (reference (identifier))
             )
         )
     )

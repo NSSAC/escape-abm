@@ -502,30 +502,10 @@ module.exports = grammar({
 
         _number: $ => choice($.integer, $.float),
 
-        integer: _ => token(choice(
-            seq(
-                choice('0x', '0X'),
-                repeat1(/_?[A-Fa-f0-9]+/),
-                optional(/[Ll]/),
-            ),
-            seq(
-                choice('0o', '0O'),
-                repeat1(/_?[0-7]+/),
-                optional(/[Ll]/),
-            ),
-            seq(
-                choice('0b', '0B'),
-                repeat1(/_?[0-1]+/),
-                optional(/[Ll]/),
-            ),
-            seq(
-                repeat1(/[0-9]+_?/),
-                optional(/[Ll]/), // long numbers
-            ),
-        )),
+        integer: _ => token(repeat1(/[0-9]+/)),
 
         float: _ => {
-            const digits = repeat1(/[0-9]+_?/);
+            const digits = repeat1(/[0-9]+/);
             const exponent = seq(/[eE][\+-]?/, digits);
 
             return token(seq(
@@ -534,7 +514,6 @@ module.exports = grammar({
                     seq(optional(digits), '.', digits, optional(exponent)),
                     seq(digits, exponent),
                 ),
-                optional(/[Ll]/),
             ));
         },
 
