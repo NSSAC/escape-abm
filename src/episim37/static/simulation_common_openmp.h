@@ -360,8 +360,7 @@ template <typename Type> Type read_attribute(const H5::H5File& file, const char*
 }
 
 template <typename Type> void write_attribute(const H5::H5File& file, const char* attr_name, Type value) {
-    hsize_t dims = 1;
-    H5::DataSpace attr_dataspace(1, &dims);
+    H5::DataSpace attr_dataspace(H5S_SCALAR);
     H5::Attribute attribute = file.createAttribute(attr_name, h5_type<Type>(), attr_dataspace);
 
     attribute.write(h5_type<Type>(), &value);

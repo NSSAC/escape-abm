@@ -68,13 +68,13 @@ STATIC_DIR = files("episim37.static")
 
 def smallest_uint_type(max_val: int) -> str | None:
     if max_val < 2**8:
-        return "uint8_t"
+        return "u8"
     elif max_val < 2**16:
-        return "uint64_t"
+        return "u16"
     elif max_val < 2**32:
-        return "uint32_t"
+        return "u32"
     elif max_val < 2**64:
-        return "uint64_t"
+        return "u64"
     else:
         return None
 
@@ -86,36 +86,31 @@ def enum_base_type(t: ast.EnumType) -> str:
     return type
 
 
-def ctype(t: str) -> str:
-    """ESL type to C type."""
+# fmt: off
+TYPE_TO_CTYPE = {
+    "int":   "int_type",
+    "uint":  "uint_type",
+    "float": "float_type",
+    "bool":  "bool_type",
+    "size":  "size_type",
 
-    # fmt: off
-    type_map = {
-        "int":   "int_type",
-        "uint":  "uint_type",
-        "float": "float_type",
-        "bool":  "bool_type",
-        "size":  "size_type",
+    "u8":  "uint8_t",
+    "u16": "uint16_t",
+    "u32": "uint32_t",
+    "u64": "uint64_t",
 
-        "u8":  "uint8_t",
-        "u16": "uint16_t",
-        "u32": "uint32_t",
-        "u64": "uint64_t",
+    "i8":  "int8_t",
+    "i16": "int16_t",
+    "i32": "int32_t",
+    "i64": "int64_t",
 
-        "i8":  "int8_t",
-        "i16": "int16_t",
-        "i32": "int32_t",
-        "i64": "int64_t",
+    "f32": "float",
+    "f64": "double",
 
-        "f32": "float",
-        "f64": "double",
-
-        "node":  "node_index_type",
-        "edge":  "edge_index_type",
-    }
-    # fmt: on
-
-    return type_map[t]
+    "node":  "node_index_type",
+    "edge":  "edge_index_type",
+}
+# fmt: on
 
 
 @register_filter("mangle")
@@ -129,7 +124,7 @@ def mangle(*args: str) -> str:
 def tref_str(x: ast.TValueRef) -> str:
     match x:
         case ast.BuiltinType():
-            return ctype(x.name)
+            return TYPE_TO_CTYPE[x.name]
         case ast.EnumType():
             return mangle(x.name)
         case _ as unexpected:
@@ -431,7 +426,7 @@ def statement_str(s: ast.Statement) -> str:
 
 @register_filter("enum_defn")
 def enum_defn_str(x: ast.EnumType) -> str:
-    base_type = enum_base_type(x)
+    base_type = TYPE_TO_CTYPE[enum_base_type(x)]
     return render("enum_defn", base_type=base_type, **asdict(x))
 
 

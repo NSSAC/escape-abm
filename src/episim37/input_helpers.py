@@ -12,15 +12,10 @@ import h5py as h5
 import click
 import rich
 
+from .misc import EslError
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast1 import mk_ast1, ASTConstructionError
-from .codegen_cpu import (
-    CodegenError,
-    INC_CSR_INDPTR_DATASET_NAME,
-    EnumType as Enum,
-    Source as SourceCPU,
-    DEFERRED_TYPES,
-)
+from .ast import BuiltinType, EdgeTable, NodeTable, mk_ast, EnumType, Source
+from .codegen_openmp import enum_base_type
 from .output_helpers import save_df
 from .click_helpers import (
     simulation_file_option,
@@ -33,37 +28,34 @@ from .click_helpers import (
 )
 
 # fmt: off
-CTYPE_TO_DTYPE = {
-    "uint8_t":  np.uint8,
-    "uint16_t": np.uint16,
-    "uint32_t": np.uint32,
-    "uint64_t": np.uint64,
+TYPE_TO_DTYPE = {
+    "int": np.int64,
+    "uint": np.uint64,
+    "float": np.float32,
+    "bool": np.uint8,
+    "size": np.uint64,
 
-    "int8_t":  np.int8,
-    "int16_t": np.int16,
-    "int32_t": np.int32,
-    "int64_t": np.int64,
+    "u8":  np.uint8,
+    "u16": np.uint16,
+    "u32": np.uint32,
+    "u64": np.uint64,
 
-    "float":  np.float32,
-    "double": np.float64
+    "i8":  np.int8,
+    "i16": np.int16,
+    "i32": np.int32,
+    "i64": np.int64,
+
+    "f32":  np.float32,
+    "f64": np.float64,
+
+    "node": np.uint32,
+    "edge": np.uint64,
 }
 # fmt: on
 
 
-def make_out_dtypes(enums: list[Enum]) -> dict[str, type]:
-    type_map = dict(CTYPE_TO_DTYPE)
-
-    for deferred_type, base_type in DEFERRED_TYPES.items():
-        type_map[deferred_type] = CTYPE_TO_DTYPE[base_type]
-
-    for enum in enums:
-        type_map[enum.name] = CTYPE_TO_DTYPE[enum.base_type]
-
-    return type_map
-
-
-def make_enum_encoder(enum: Enum) -> dict[str, int]:
-    return {c: i for i, c in enumerate(enum.print_consts)}
+def enum_encoder(enum: EnumType) -> dict[str, int]:
+    return {c: i for i, c in enumerate(enum.consts)}
 
 
 @attrs.define
@@ -71,31 +63,30 @@ class NodeTableMeta:
     columns: list[str]
     enum_encoders: dict[str, dict[str, int]]
     out_dtypes: dict[str, type]
-    dataset_names: dict[str, str]
     key: str
 
     @classmethod
-    def from_source_cpu(cls, source: SourceCPU) -> NodeTableMeta:
-        out_dtypes_all = make_out_dtypes(source.enums)
-        enum_encoders_all = {
-            enum.name: make_enum_encoder(enum) for enum in source.enums
-        }
-
+    def from_source(cls, node_table: NodeTable) -> NodeTableMeta:
         columns = []
         enum_encoders = {}
         out_dtypes = {}
-        dataset_names = {}
-        for field in source.node_table.fields:
+
+        for field in node_table.fields:
             if not field.is_static:
                 continue
-            columns.append(field.print_name)
-            if field.type in enum_encoders_all:
-                enum_encoders[field.print_name] = enum_encoders_all[field.type]
-            out_dtypes[field.print_name] = out_dtypes_all[field.type]
-            dataset_names[field.print_name] = field.dataset_name
-        key = source.node_table.key
 
-        return cls(columns, enum_encoders, out_dtypes, dataset_names, key)
+            columns.append(field.name)
+            match field.type.value:
+                case EnumType() as t:
+                    enum_encoders[field.name] = enum_encoder(t)
+                    out_dtypes[field.name] = TYPE_TO_DTYPE[enum_base_type(t)]
+                case BuiltinType() as t:
+                    out_dtypes[field.name] = TYPE_TO_DTYPE[t.name]
+                case unexpected:
+                    raise RuntimeError(f"Expected type: {unexpected!r}")
+
+        key = node_table.key.name
+        return cls(columns, enum_encoders, out_dtypes, key)
 
 
 @attrs.define
@@ -103,46 +94,41 @@ class EdgeTableMeta:
     columns: list[str]
     enum_encoders: dict[str, dict[str, int]]
     out_dtypes: dict[str, type]
-    dataset_names: dict[str, str]
     target_node_key: str
     source_node_key: str
-    edge_index_dtype: type
 
     @classmethod
-    def from_source_cpu(cls, source: SourceCPU) -> EdgeTableMeta:
-        out_dtypes_all = make_out_dtypes(source.enums)
-        enum_encoders_all = {
-            enum.name: make_enum_encoder(enum) for enum in source.enums
-        }
-
+    def from_source(cls, edge_table: EdgeTable) -> EdgeTableMeta:
         columns = []
         enum_encoders = {}
         out_dtypes = {}
-        dataset_names = {}
-        for field in source.edge_table.fields:
+
+        for field in edge_table.fields:
             if not field.is_static:
                 continue
-            columns.append(field.print_name)
-            if field.type in enum_encoders_all:
-                enum_encoders[field.print_name] = enum_encoders_all[field.type]
-            out_dtypes[field.print_name] = out_dtypes_all[field.type]
-            dataset_names[field.print_name] = field.dataset_name
 
-        target_node_key = source.edge_table.target_node_key
-        source_node_key = source.edge_table.source_node_key
+            columns.append(field.name)
+            match field.type.value:
+                case EnumType() as t:
+                    enum_encoders[field.name] = enum_encoder(t)
+                    out_dtypes[field.name] = TYPE_TO_DTYPE[enum_base_type(t)]
+                case BuiltinType() as t:
+                    out_dtypes[field.name] = TYPE_TO_DTYPE[t.name]
+                case unexpected:
+                    raise RuntimeError(f"Expected type: {unexpected!r}")
 
-        out_dtypes["_target_node_index"] = out_dtypes_all["node_index_type"]
-        out_dtypes["_source_node_index"] = out_dtypes_all["node_index_type"]
-        edge_index_dtype = out_dtypes_all["edge_index_type"]
+        out_dtypes["_source_node_index"] = TYPE_TO_DTYPE["node"]
+        out_dtypes["_target_node_index"] = TYPE_TO_DTYPE["node"]
+
+        target_node_key = edge_table.target_node_key.name
+        source_node_key = edge_table.source_node_key.name
 
         return cls(
             columns,
             enum_encoders,
             out_dtypes,
-            dataset_names,
             target_node_key,
             source_node_key,
-            edge_index_dtype,
         )
 
 
@@ -164,12 +150,11 @@ def check_null(table: pl.DataFrame, name: str):
             raise SystemExit(1)
 
 
-def make_source_cpu(simulation_file: Path) -> SourceCPU:
+def make_source(simulation_file: Path) -> Source:
     simulation_bytes = simulation_file.read_bytes()
     pt = mk_pt(str(simulation_file), simulation_bytes)
-    ast1 = mk_ast1(simulation_file, pt)
-    source = SourceCPU.make(ast1)
-    return source
+    ast = mk_ast(simulation_file, pt)
+    return ast
 
 
 def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
@@ -193,18 +178,16 @@ def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pl.Da
     return edge_table
 
 
-def make_in_inc_csr_indptr(
-    edge_table: pl.DataFrame, Vn: int, etm: EdgeTableMeta
-) -> np.ndarray:
+def make_in_inc_csr_indptr(edge_table: pl.DataFrame, Vn: int) -> np.ndarray:
     target_node_index = edge_table["_target_node_index"].to_numpy()
     edge_count = np.bincount(target_node_index, minlength=Vn)
     cum_edge_count = np.cumsum(edge_count)
-    in_inc_csr_indptr = np.zeros(Vn + 1, dtype=etm.edge_index_dtype)
+    in_inc_csr_indptr = np.zeros(Vn + 1, dtype=TYPE_TO_DTYPE["edge"])
     in_inc_csr_indptr[1:] = cum_edge_count
     return in_inc_csr_indptr
 
 
-def make_input_file_cpu(
+def make_input_file(
     data_file: Path,
     node_table: pl.DataFrame,
     edge_table: pl.DataFrame,
@@ -212,7 +195,7 @@ def make_input_file_cpu(
     etm: EdgeTableMeta,
     in_inc_csr_indptr: np.ndarray,
 ):
-    size_dtype = CTYPE_TO_DTYPE[DEFERRED_TYPES["size_type"]]
+    size_dtype = TYPE_TO_DTYPE["size"]
 
     with h5.File(data_file, "w") as fobj:
         for col, dtype in ntm.out_dtypes.items():
@@ -225,7 +208,7 @@ def make_input_file_cpu(
             data = np.asarray(data, dtype)
             fobj.create_dataset(f"/edge/{col}", data=data)
 
-        fobj.create_dataset(INC_CSR_INDPTR_DATASET_NAME, data=in_inc_csr_indptr)
+        fobj.create_dataset("/incoming/incidence/csr/indptr", data=in_inc_csr_indptr)
 
         fobj.attrs.create("num_nodes", len(node_table), dtype=size_dtype)
         fobj.attrs.create("num_edges", len(edge_table), dtype=size_dtype)
@@ -247,8 +230,8 @@ def do_read_nodes_df(data_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
 
 
 def read_nodes_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
-    source = make_source_cpu(simulation_file)
-    ntm = NodeTableMeta.from_source_cpu(source)
+    source = make_source(simulation_file)
+    ntm = NodeTableMeta.from_source(source.node_table)
     return do_read_nodes_df(input_file, ntm)
 
 
@@ -268,8 +251,8 @@ def do_read_edges_df(data_file: Path, etm: EdgeTableMeta) -> pl.DataFrame:
 
 
 def read_edges_df(simulation_file: Path, input_file: Path) -> pl.DataFrame:
-    source = make_source_cpu(simulation_file)
-    etm = EdgeTableMeta.from_source_cpu(source)
+    source = make_source(simulation_file)
+    etm = EdgeTableMeta.from_source(source.edge_table)
     return do_read_edges_df(input_file, etm)
 
 
@@ -305,14 +288,14 @@ def do_prepare_input(
 
     # Step 6: Make incoming incidence CSR graph's indptr
     rich.print("[cyan]Computing incoming incidence CSR graph's indptr.[/cyan]")
-    in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn, etm)
+    in_inc_csr_indptr = make_in_inc_csr_indptr(edge_table, Vn)
 
     En = len(edge_table)
     print("### num_edges: ", En)
 
     # Step 7: Create the data file.
     rich.print("[cyan]Creating input file.[/cyan]")
-    make_input_file_cpu(input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
+    make_input_file(input_file, node_table, edge_table, ntm, etm, in_inc_csr_indptr)
 
     rich.print("[green]Input file created successfully.[/green]")
 
@@ -328,12 +311,12 @@ def prepare_input(
     """Prepare input for simulation."""
     try:
         rich.print("[cyan]Parsing simulator code.[/cyan]")
-        source = make_source_cpu(simulation_file)
-        ntm = NodeTableMeta.from_source_cpu(source)
-        etm = EdgeTableMeta.from_source_cpu(source)
+        source = make_source(simulation_file)
+        ntm = NodeTableMeta.from_source(source.node_table)
+        etm = EdgeTableMeta.from_source(source.edge_table)
 
         do_prepare_input(ntm, etm, node_file, edge_file, input_file)
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -356,7 +339,7 @@ def extract_nodes(
     try:
         df = read_nodes_df(simulation_file, input_file)
         save_df(df, node_file)
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -374,6 +357,6 @@ def extract_edges(
     try:
         df = read_edges_df(simulation_file, input_file)
         save_df(df, edge_file)
-    except (ParseTreeConstructionError, ASTConstructionError, CodegenError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)

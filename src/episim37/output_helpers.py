@@ -9,8 +9,9 @@ import h5py as h5
 import click
 import rich
 
+from .misc import EslError
 from .parse_tree import mk_pt, ParseTreeConstructionError
-from .ast1 import mk_ast1, ASTConstructionError, Source, Contagion
+from .ast import mk_ast, Source, Contagion
 from .click_helpers import (
     simulation_file_option,
     existing_output_file_option,
@@ -48,12 +49,12 @@ def save_df(df: pl.DataFrame, fname: Path):
 def make_source(simulation_file: Path) -> Source:
     simulation_bytes = simulation_file.read_bytes()
     pt = mk_pt(str(simulation_file), simulation_bytes)
-    ast1 = mk_ast1(simulation_file, pt)
-    return ast1
+    ast = mk_ast(simulation_file, pt)
+    return ast
 
 
 def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pl.DataFrame:
-    states = [const for const in contagion.state_type.resolve().consts]
+    states = [const for const in contagion.state_type.value.consts]
     group = sim_output[contagion.name]["state_count"]  # type: ignore
 
     num_ticks = sim_output.attrs["num_ticks"]
@@ -93,7 +94,7 @@ def do_extract_transitions(
     contagion: Contagion,
     gkey: str = "transitions",
 ) -> pl.DataFrame:
-    states = [const for const in contagion.state_type.resolve().consts]
+    states = [const for const in contagion.state_type.value.consts]
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name][gkey]  # type: ignore
@@ -153,7 +154,7 @@ def do_extract_transmissions(
     sim_output: h5.File,
     contagion: Contagion,
 ) -> pl.DataFrame:
-    states = [const for const in contagion.state_type.resolve().consts]
+    states = [const for const in contagion.state_type.value.consts]
     states = {i: n for i, n in enumerate(states)}
 
     group = sim_output[contagion.name]["transmissions"]  # type: ignore
@@ -213,7 +214,7 @@ def extract_summary(
     try:
         df = read_summary_df(simulation_file, output_file, contagion_name)
         save_df(df, summary_file)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -233,7 +234,7 @@ def extract_interventions(
     try:
         df = read_interventions_df(simulation_file, output_file, contagion_name)
         save_df(df, interventions_file)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -253,7 +254,7 @@ def extract_transitions(
     try:
         df = read_transitions_df(simulation_file, output_file, contagion_name)
         save_df(df, transitions_file)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -273,7 +274,7 @@ def extract_transmissions(
     try:
         df = read_transmissions_df(simulation_file, output_file, contagion_name)
         save_df(df, transmissions_file)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -316,6 +317,6 @@ def extract_all(
             rich.print("[yellow]Extracting transmissions.[/yellow]")
             df = do_extract_transmissions(sim_output, contagion)
             save_df(df, transmissions_file)
-    except (ParseTreeConstructionError, ASTConstructionError) as e:
+    except (ParseTreeConstructionError, EslError) as e:
         e.rich_print()
         raise SystemExit(1)
