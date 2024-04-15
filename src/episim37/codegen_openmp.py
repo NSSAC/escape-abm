@@ -610,7 +610,7 @@ def do_compile(build_dir: Path, source: ast.Source) -> None:
 
 
 def do_build(gen_src_dir: Path) -> None:
-    cmd = f"make -C '{gen_src_dir!s}/build'"
+    cmd = f"cmake --build '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
     subprocess.run(cmd, check=True)
 

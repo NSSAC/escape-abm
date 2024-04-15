@@ -7,12 +7,12 @@ import h5py as h5
 import polars as pl
 
 from .parse_tree import mk_pt
-from .ast1 import mk_ast1
-from .codegen_cpu import (
-    mk_ir as mk_cpu_ir,
-    do_prepare as do_prepare_cpu,
-    do_build as do_build_cpu,
-    do_simulate as do_simulate_cpu,
+from .ast import mk_ast
+from .check_ast import check_ast
+from .codegen_openmp import (
+    do_prepare as do_prepare_openmp,
+    do_build as do_build_openmp,
+    do_simulate as do_simulate_openmp,
 )
 from .input_helpers import (
     NodeTableMeta,
@@ -30,7 +30,7 @@ from .output_helpers import (
 )
 
 
-class CPUSimulator:
+class OpenMPSimulator:
     """Simulate on CPU."""
 
     def __init__(
@@ -44,11 +44,11 @@ class CPUSimulator:
         assert self.simulation_file.exists(), "Simulation file doesn't exist"
 
         self.pt = mk_pt(str(self.simulation_file), self.simulation_file.read_bytes())
-        self.ast1 = mk_ast1(self.simulation_file, self.pt)
-        self.ir = mk_cpu_ir(self.ast1)
+        self.ast = mk_ast(self.simulation_file, self.pt)
+        check_ast(self.ast)
 
-        self.ntm = NodeTableMeta.from_source_cpu(self.ir)
-        self.etm = EdgeTableMeta.from_source_cpu(self.ir)
+        self.ntm = NodeTableMeta.from_source(self.ast.node_table)
+        self.etm = EdgeTableMeta.from_source(self.ast.edge_table)
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self.gen_code_dir = self.work_dir / "gen_code"
@@ -61,25 +61,25 @@ class CPUSimulator:
         (self.simulation_file, self.work_dir) = d
 
         self.pt = mk_pt(str(self.simulation_file), self.simulation_file.read_bytes())
-        self.ast1 = mk_ast1(self.simulation_file, self.pt)
-        self.ir = mk_cpu_ir(self.ast1)
+        self.ast = mk_ast(self.simulation_file, self.pt)
+        check_ast(self.ast)
 
-        self.ntm = NodeTableMeta.from_source_cpu(self.ir)
-        self.etm = EdgeTableMeta.from_source_cpu(self.ir)
+        self.ntm = NodeTableMeta.from_source(self.ast.node_table)
+        self.etm = EdgeTableMeta.from_source(self.ast.edge_table)
 
         self.gen_code_dir = self.work_dir / "gen_code"
 
     def prepare_build(self) -> None:
-        do_prepare_cpu(self.gen_code_dir, self.simulation_file, self.ir)
+        do_prepare_openmp(self.gen_code_dir, self.simulation_file, self.ast)
 
     def build(self) -> None:
-        do_build_cpu(self.gen_code_dir)
+        do_build_openmp(self.gen_code_dir)
 
 
 class Simulation:
     def __init__(
         self,
-        simulator: CPUSimulator,
+        simulator: OpenMPSimulator,
         node_file: str | Path,
         edge_file: str | Path,
         input_file: str | Path,
@@ -109,7 +109,7 @@ class Simulation:
         verbose: bool = False,
     ) -> None:
         output_file = Path(output_file)
-        do_simulate_cpu(
+        do_simulate_openmp(
             self.simulator.gen_code_dir,
             input_file=self.input_file,
             output_file=output_file,
@@ -138,7 +138,7 @@ class Simulation:
         self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
         output_file = Path(output_file)
-        contagion = find_contagion(contagion_name, self.simulator.ast1)
+        contagion = find_contagion(contagion_name, self.simulator.ast)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_summary(sim_output, contagion)
         return df
@@ -147,7 +147,7 @@ class Simulation:
         self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
         output_file = Path(output_file)
-        contagion = find_contagion(contagion_name, self.simulator.ast1)
+        contagion = find_contagion(contagion_name, self.simulator.ast)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_transitions(sim_output, contagion)
         return df
@@ -156,7 +156,7 @@ class Simulation:
         self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
         output_file = Path(output_file)
-        contagion = find_contagion(contagion_name, self.simulator.ast1)
+        contagion = find_contagion(contagion_name, self.simulator.ast)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_interventions(sim_output, contagion)
         return df
@@ -165,7 +165,12 @@ class Simulation:
         self, output_file: str | Path, contagion_name: str = ""
     ) -> pl.DataFrame:
         output_file = Path(output_file)
-        contagion = find_contagion(contagion_name, self.simulator.ast1)
+        contagion = find_contagion(contagion_name, self.simulator.ast)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_transmissions(sim_output, contagion)
         return df
+
+    def num_ticks(self, output_file: str | Path) -> int:
+        output_file = Path(output_file)
+        with h5.File(output_file, "r") as fobj:
+            return fobj.attrs["num_ticks"].item()  # type: ignore
