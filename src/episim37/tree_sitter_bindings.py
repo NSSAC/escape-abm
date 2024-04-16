@@ -1,5 +1,9 @@
 """Python bindings for the tree-sitter-parser."""
 
+import warnings
+
+warnings.simplefilter("ignore")
+
 from pathlib import Path
 from functools import cache
 from tree_sitter import Language, Parser, Query
@@ -18,8 +22,12 @@ def get_language() -> Language:
 
     library_file = state_dir / "languages.so"
 
-    Language.build_library(str(library_file), [str(TREE_SITTER_DIR)])
-    language = Language(str(library_file), LANGUAGE)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        Language.build_library(str(library_file), [str(TREE_SITTER_DIR)])
+        language = Language(str(library_file), LANGUAGE)
+
     return language
 
 
