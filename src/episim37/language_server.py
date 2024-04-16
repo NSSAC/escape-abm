@@ -160,10 +160,15 @@ def completions(params: lsp.CompletionParams | None = None) -> lsp.CompletionLis
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
+@server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
 @server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
 async def validate(
     ls: LanguageServer,
-    params: lsp.DidOpenTextDocumentParams | lsp.DidChangeTextDocumentParams,
+    params: (
+        lsp.DidOpenTextDocumentParams
+        | lsp.DidSaveTextDocumentParams
+        | lsp.DidChangeTextDocumentParams
+    ),
 ):
     global _MOST_RECENT_PARSE_TREE
 
