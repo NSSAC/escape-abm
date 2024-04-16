@@ -1,0 +1,158 @@
+# Example 1: In-school NPIs
+
+config enable_hybrid_learning: bool = True
+config enable_day_30_antigen_test: bool = True
+config enable_day_30_pcr_test: bool = False
+config transmissibility_scale: float = 0.3
+
+node
+    pid: int node key
+    is_in_school: bool static
+    home_isolation_start: int
+    home_isolation_end: int
+end
+
+edge
+    target_pid: int target node key
+    source_pid: int source node key
+    duration: int static
+    is_school_edge: bool static
+    is_non_home_edge: bool static
+end
+
+enum c1_state_t
+    S, E, Ipresymp, Isymp, Iasymp, R
+end
+
+contagion c1
+    state type c1_state_t
+
+    transition
+        E -> Ipresymp, p = 0.65, dwell = 3.0
+        E -> Iasymp, p = 0.35, dwell = normal5
+        Ipresymp -> Isymp, dwell = 2.0
+        Isymp -> R, dwell = isymp_r_dwell
+        Iasymp -> R, dwell = normal5
+    end
+
+    transmission
+        Ipresymp => S -> E
+        Isymp => S -> E
+        Iasymp => S -> E
+    end
+
+    susceptibility c1_susceptibility
+    infectivity c1_infectivity
+    transmissibility c1_transmissibility
+    enabled c1_enabled
+end
+
+def c1_susceptibility(v: node) -> float:
+    if v.c1.state == S:
+        return 1.0
+    else:
+        return 0.0
+    end
+end
+
+def c1_infectivity(v: node) -> float:
+    if v.c1.state == Isymp or v.c1.state == Iasymp:
+        return 1.0
+    else:
+        return 0.0
+    end
+end
+
+def c1_transmissibility(e: edge) -> float:
+    return transmissibility_scale * e.duration / 86400
+end
+
+def c1_enabled(e: edge) -> bool:
+    if e.is_non_home_edge and (is_isolating(e.source_node) or is_isolating(e.target_node)):
+        return False
+    elif e.is_school_edge and not is_school_day():
+        return False
+    else:
+        return True
+    end
+end
+
+def is_isolating(n: node) -> bool:
+    if CUR_TICK <= n.home_isolation_start and n.home_isolation_end < CUR_TICK:
+        return True
+    else:
+        return False
+    end
+end
+
+# Sunday = 0, Monday = 1, Tuesday = 2, Wednesday = 3
+# Thursday = 4, Friday = 5
+def is_school_day() -> bool:
+    var day_of_week : int = CUR_TICK % 7
+
+    if enable_hybrid_learning and 1 <= day_of_week and day_of_week <= 3:
+        return True
+    elif 1 <= day_of_week and day_of_week <= 5:
+        return True
+    else:
+        return False
+    end
+end
+
+distribution
+    discrete isymp_r_dwell
+        p = 0.175, v = 1
+        p = 0.175, v = 2
+        p = 0.1, v = 3
+        p = 0.1, v = 4
+        p = 0.1, v = 5
+        p = 0.1, v = 6
+        p = 0.1, v = 7
+        p = 0.05, v = 8
+        p = 0.05, v = 9
+        p = 0.05, v = 10
+    end
+
+    normal normal5
+        mean = 5.0, std = 1.0, min = 0.0
+    end
+end
+
+nodeset susceptibles
+nodeset seed_nodes
+nodeset positive_inschool_nodes
+nodeset will_start_isolation
+
+def intervene():
+    if CUR_TICK < 10:
+        select(susceptibles, [n: node -> bool](n.c1.state == S))
+        sample(seed_nodes, susceptibles, 5, ABSOLUTE)
+        apply(seed_nodes, [n: node]{ n.c1.state = E ; })
+    end
+
+    select(susceptibles, [n: node -> bool](n.c1.state == S))
+
+    if (enable_day_30_antigen_test or enable_day_30_pcr_test) and CUR_TICK >= 30:
+        select(positive_inschool_nodes, [n: node -> bool](
+            (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
+            and n.is_in_school
+            and not is_isolating(n)
+        ))
+    end
+
+    if enable_day_30_antigen_test and CUR_TICK >= 30:
+        sample(will_start_isolation, positive_inschool_nodes, 0.8, RELATIVE)
+        apply(will_start_isolation, [n: node]{
+            n.home_isolation_start = CUR_TICK+1
+            n.home_isolation_end = CUR_TICK+15
+        })
+    end
+
+    if enable_day_30_pcr_test and CUR_TICK >= 30:
+        sample(will_start_isolation, positive_inschool_nodes, 0.95, RELATIVE)
+        apply(will_start_isolation, [n: node]{
+            n.home_isolation_start = CUR_TICK+2
+            n.home_isolation_end = CUR_TICK+16
+        })
+    end
+end
