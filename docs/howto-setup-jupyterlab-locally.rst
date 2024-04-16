@@ -1,11 +1,7 @@
 Howto setup Jupyter Lab for local EpiSim37 development
 ======================================================
 
-To run EpiSim37 on a local machine one needs
-to install a C++ compiler, CMake, and HDF5 libraries
-using their system's package manager.
-For the rest of the dependencies we recommend
-using the Conda package manager.
+For this setup we shall use the Conda package manager.
 
 Installation instructions for Miniconda can be found
 `here <https://docs.conda.io/en/latest/miniconda.html>`_.
@@ -30,32 +26,23 @@ Please ensure you have the latest version of conda.
    $ conda --version
    conda 24.3.0
 
-Create and activate a conda environment with Python, NodeJS, and Jupyter Lab.
+Create and activate a conda environment.
 
 .. code::
 
-  $ conda create -n episim37 python=3.11 nodejs=20 jupyterlab=4
+  $ conda create -n episim37 python=3.11 nodejs=20 jupyterlab=4 gxx_impl_linux-64 cmake hdf5
   $ conda activate episim37
 
-Install Jupyter Lab extension for ESL37 file type support.
+Install jupyterlab_esl37 (for ESL37 file type support),
+episim37 (for ESL37 language server),
+and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
+
 
 .. code::
 
-  $ pip install jupyterlab_esl37
+  $ pip install jupyterlab_esl37 episim37 jupyterlab-lsp
 
-Install episim37.
-
-.. code::
-
-  $ pip install episim37
-
-Install jupyterlab-lsp for ESL37 language server support inside Jupyter Lab.
-
-.. code::
-
-  $ pip install jupyterlab-lsp
-
-Configure jupyterlab-lsp so that it find ESL37 language server.
+Configure jupyterlab-lsp.
 
 .. code::
 
@@ -101,5 +88,19 @@ Start Jupyter Lab using the following command:
 
 .. code::
 
+   $ cd $HOME
    $ jupyter lab
+
+
+Known Issues
+------------
+
+If your Jupyter kernel keeps crashing on a Apple Mac
+it maybe due to incompatibility with `polars'.
+You can try using the long term release version of polars.
+
+.. code::
+
+   $ pip uninstall polars
+   $ pip install polars-lts-cpu
 
