@@ -5,6 +5,7 @@ from typing import Any
 
 import h5py as h5
 import polars as pl
+import jinja2
 
 from .parse_tree import mk_pt
 from .ast import mk_ast
@@ -29,30 +30,45 @@ from .output_helpers import (
     find_contagion,
 )
 
+ENVIRONMENT = jinja2.Environment(
+    undefined=jinja2.StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
 
 class OpenMPSimulator:
     """Simulate on CPU."""
 
     def __init__(
-        self,
-        simulation_file: str | Path,
-        work_dir: str | Path,
+        self, simulation_file: str | Path, work_dir: str | Path, **template_kwargs
     ):
         self.simulation_file = Path(simulation_file)
         self.work_dir = Path(work_dir)
 
         assert self.simulation_file.exists(), "Simulation file doesn't exist"
 
-        self.pt = mk_pt(str(self.simulation_file), self.simulation_file.read_bytes())
-        self.ast = mk_ast(self.simulation_file, self.pt)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.gen_code_dir = self.work_dir / "gen_code"
+        self.gen_code_dir.mkdir(parents=True, exist_ok=True)
+
+        self.rendered_simulation_file = self.gen_code_dir / "simulator.esl37"
+        if template_kwargs:
+            sim_template = ENVIRONMENT.from_string(self.simulation_file.read_text())
+            sim_rendered = sim_template.render(**template_kwargs)
+            self.rendered_simulation_file.write_text(sim_rendered)
+        else:
+            self.rendered_simulation_file.write_text(self.simulation_file.read_text())
+
+        self.pt = mk_pt(
+            str(self.rendered_simulation_file),
+            self.rendered_simulation_file.read_bytes(),
+        )
+        self.ast = mk_ast(self.rendered_simulation_file, self.pt)
         check_ast(self.ast)
 
         self.ntm = NodeTableMeta.from_source(self.ast.node_table)
         self.etm = EdgeTableMeta.from_source(self.ast.edge_table)
-
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        self.gen_code_dir = self.work_dir / "gen_code"
-        self.gen_code_dir.mkdir(parents=True, exist_ok=True)
 
     def __getstate__(self):
         return (self.simulation_file, self.work_dir)
@@ -60,17 +76,21 @@ class OpenMPSimulator:
     def __setstate__(self, d):
         (self.simulation_file, self.work_dir) = d
 
-        self.pt = mk_pt(str(self.simulation_file), self.simulation_file.read_bytes())
-        self.ast = mk_ast(self.simulation_file, self.pt)
+        self.gen_code_dir = self.work_dir / "gen_code"
+        self.rendered_simulation_file = self.gen_code_dir / "simulator.esl37"
+
+        self.pt = mk_pt(
+            str(self.rendered_simulation_file),
+            self.rendered_simulation_file.read_bytes(),
+        )
+        self.ast = mk_ast(self.rendered_simulation_file, self.pt)
         check_ast(self.ast)
 
         self.ntm = NodeTableMeta.from_source(self.ast.node_table)
         self.etm = EdgeTableMeta.from_source(self.ast.edge_table)
 
-        self.gen_code_dir = self.work_dir / "gen_code"
-
     def prepare_build(self) -> None:
-        do_prepare_openmp(self.gen_code_dir, self.simulation_file, self.ast)
+        do_prepare_openmp(self.gen_code_dir, self.rendered_simulation_file, self.ast)
 
     def build(self) -> None:
         do_build_openmp(self.gen_code_dir)

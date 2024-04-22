@@ -22,8 +22,8 @@ from rich.tree import Tree
 from rich.pretty import Pretty
 from pydantic import BaseModel, Field
 
-from .misc import EslError, SourcePosition
-from .parse_tree import mk_pt, PTNode, ParseTreeConstructionError
+from .misc import SourcePosition, EslError, RichException
+from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
 
 Type = TypeVar("Type")
@@ -194,6 +194,9 @@ register_parser("reference", Reference.make)
 
 class TemplateVariable(BaseModel):
     pos: SourcePosition | None = Field(default=None, repr=False)
+
+    def model_post_init(self, _: Any) -> None:
+        register_instance(self)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> TemplateVariable:
@@ -1443,6 +1446,7 @@ class Source(BaseModel):
     apply_statements: list[ApplyStatement]
     reduce_statements: list[ReduceStatement]
     intervene: Function
+    template_variables: list[TemplateVariable]
     scope: Scope | None = Field(default=None, repr=False)
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -1500,6 +1504,8 @@ class Source(BaseModel):
         Param.link_tables(node_table, edge_table)
         Variable.link_tables(node_table, edge_table)
 
+        template_variables: list[TemplateVariable] = get_instances(TemplateVariable)
+
         # rich.print(scope.rich_tree())
 
         # At this point all references should be resolve without errors
@@ -1526,6 +1532,7 @@ class Source(BaseModel):
             apply_statements=apply_statements,
             reduce_statements=reduce_statements,
             intervene=intervene,
+            template_variables=template_variables,
             scope=scope,
             pos=node.pos,
         )
@@ -1554,6 +1561,6 @@ def print_ast(simulation_file: Path):
         pt = mk_pt(str(simulation_file), file_bytes)
         ast = mk_ast(simulation_file, pt)
         rich.print(ast)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)

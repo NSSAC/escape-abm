@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from typeguard import TypeCheckError, check_type
 
 from .click_helpers import simulation_file_option
-from .misc import EslError, SourcePosition
-from .parse_tree import mk_pt, ParseTreeConstructionError
+from .misc import SourcePosition, EslError, RichException
+from .parse_tree import mk_pt
 from . import ast
 from .ast import mk_ast
 
@@ -436,6 +436,6 @@ def print_checked_ast(simulation_file: Path):
         ast = mk_ast(simulation_file, pt)
         check_ast(ast)
         rich.print(ast)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)

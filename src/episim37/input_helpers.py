@@ -12,8 +12,8 @@ import h5py as h5
 import click
 import rich
 
-from .misc import EslError
-from .parse_tree import mk_pt, ParseTreeConstructionError
+from .misc import RichException
+from .parse_tree import mk_pt
 from .ast import BuiltinType, EdgeTable, NodeTable, mk_ast, EnumType, Source
 from .codegen_openmp import enum_base_type
 from .output_helpers import save_df
@@ -316,7 +316,7 @@ def prepare_input(
         etm = EdgeTableMeta.from_source(source.edge_table)
 
         do_prepare_input(ntm, etm, node_file, edge_file, input_file)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -339,7 +339,7 @@ def extract_nodes(
     try:
         df = read_nodes_df(simulation_file, input_file)
         save_df(df, node_file)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -357,6 +357,6 @@ def extract_edges(
     try:
         df = read_edges_df(simulation_file, input_file)
         save_df(df, edge_file)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)

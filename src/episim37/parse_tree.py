@@ -12,7 +12,7 @@ import rich.markup
 from rich.tree import Tree
 from rich.pretty import Pretty
 
-from .misc import SourcePosition, EslError
+from .misc import SourcePosition, EslError, EslErrorList
 from .tree_sitter_bindings import get_parser
 from .click_helpers import simulation_file_option
 
@@ -140,20 +140,6 @@ def check_parse_errors(
     return errors
 
 
-class ParseTreeConstructionError(Exception):
-    def __init__(self, errors: list[EslError]):
-        super().__init__()
-        self.errors = errors
-
-    def __str__(self):
-        return "Failed to construct parse tree"
-
-    def rich_print(self):
-        rich.print(f"[red]{self}[/red]")
-        for error in self.errors:
-            error.rich_print()
-
-
 def mk_pt(source: str, source_bytes: bytes) -> PTNode:
     """Make parse tree."""
     parser = get_parser()
@@ -161,7 +147,7 @@ def mk_pt(source: str, source_bytes: bytes) -> PTNode:
     root_node = parse_tree.root_node
     errors = check_parse_errors(source, source_bytes, root_node)
     if errors:
-        raise ParseTreeConstructionError(errors)
+        raise EslErrorList("Failed to construct parse tree", errors)
     root_node = PTNode(source, source_bytes, root_node)
     return root_node
 
@@ -174,6 +160,6 @@ def print_parse_tree(simulation_file: Path):
     try:
         pt = mk_pt(str(simulation_file), file_bytes)
         rich.print(pt.rich_tree())
-    except ParseTreeConstructionError as e:
+    except EslErrorList as e:
         e.rich_print()
         raise SystemExit(1)

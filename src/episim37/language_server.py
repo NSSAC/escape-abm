@@ -10,9 +10,9 @@ import lsprotocol.types as lsp
 from pygls.server import LanguageServer
 from platformdirs import user_log_dir
 
-from .misc import SourcePosition, EslError
+from .misc import SourcePosition, EslError, EslErrorList
 from .tree_sitter_bindings import get_parser, enum_query
-from .parse_tree import mk_pt, ParseTreeConstructionError
+from .parse_tree import mk_pt
 from .ast import mk_ast
 from .check_ast import check_ast
 from .codegen_openmp import simulator_str
@@ -184,9 +184,9 @@ async def validate(
         ast = mk_ast(file_path, pt)
         check_ast(ast)
         simulator_str(ast)
-    except ParseTreeConstructionError as ptce:
+    except EslErrorList as es:
         diagnostics = []
-        for e in ptce.errors:
+        for e in es.errors:
             diagnostic = error_to_diagnostic(e.type, e.description, e.pos)
             diagnostics.append(diagnostic)
         ls.publish_diagnostics(params.text_document.uri, diagnostics)

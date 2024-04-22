@@ -19,8 +19,8 @@ from pydantic import BaseModel
 from typeguard import check_type, TypeCheckError
 
 from .alias_table import AliasTable
-from .misc import EslError, SourcePosition
-from .parse_tree import mk_pt, ParseTreeConstructionError
+from .misc import EslError, EslErrorList, SourcePosition, RichException
+from .parse_tree import mk_pt
 from .ast import mk_ast
 from .check_ast import check_ast, is_node_set
 from . import ast
@@ -585,6 +585,15 @@ def simulator_str(source: ast.Source) -> str:
 
 
 def do_prepare(gen_src_dir: Path, input: Path, source: ast.Source) -> None:
+    if source.template_variables:
+        errors: list[EslError] = []
+        for tvar in source.template_variables:
+            e = EslError("Codegen error", "Unrendered template variable", tvar.pos)
+            errors.append(e)
+        raise EslErrorList(
+            "Can't run prepare for code with unrendered template variables.", errors
+        )
+
     gen_src_dir.mkdir(parents=True, exist_ok=True)
 
     with open(gen_src_dir / "CMakeLists.txt", "wt") as fobj:
@@ -671,7 +680,7 @@ def prepare(gen_code_dir: Path, simulation_file: Path):
         ast = mk_ast(simulation_file, pt)
         check_ast(ast)
         do_prepare(gen_code_dir, simulation_file, ast)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -686,7 +695,7 @@ def compile(gen_code_dir: Path, simulation_file: Path):
         ast = mk_ast(simulation_file, pt)
         check_ast(ast)
         do_compile(gen_code_dir, ast)
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)
 
@@ -730,6 +739,6 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
                 configs={},
                 verbose=True,
             )
-    except (ParseTreeConstructionError, EslError) as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)

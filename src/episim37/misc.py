@@ -32,7 +32,14 @@ class SourcePosition(BaseModel):
         return self.get_bytes().decode()
 
 
-class EslError(Exception):
+class RichException(Exception):
+    """Exception with a rich_print method."""
+
+    def rich_print(self):
+        rich.print(f"[red]{self!s}[/red]")
+
+
+class EslError(RichException):
     """Error attributable to a section of the code."""
 
     def __init__(self, type: str, description: str, pos: SourcePosition | None):
@@ -66,3 +73,20 @@ class EslError(Exception):
             etype = f"[red]{self.type}[/red]"
             expl = rich.markup.escape(self.description)
             rich.print(f"{etype}: {expl}")
+
+
+class EslErrorList(RichException):
+    """List of errors."""
+
+    def __init__(self, description: str, errors: list[EslError]):
+        super().__init__()
+        self.description = description
+        self.errors = errors
+
+    def __str__(self):
+        return self.description
+
+    def rich_print(self):
+        rich.print(f"[red]{self}[/red]")
+        for error in self.errors:
+            error.rich_print()
