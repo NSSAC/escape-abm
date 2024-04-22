@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "episim37"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
   { name="Parantapa Bhattacharya", email="parantapa@virginia.edu" },
 ]
