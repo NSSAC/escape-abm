@@ -21,7 +21,6 @@ dependencies = [
     "click",
     "platformdirs",
     "rich",
-    "attrs",
     "tree_sitter",
     "jinja2",
     "pygls",

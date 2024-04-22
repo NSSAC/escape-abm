@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass
 
-import attrs
 import numpy as np
 import polars as pl
 import h5py as h5
@@ -58,7 +58,7 @@ def enum_encoder(enum: EnumType) -> dict[str, int]:
     return {c: i for i, c in enumerate(enum.consts)}
 
 
-@attrs.define
+@dataclass
 class NodeTableMeta:
     columns: list[str]
     enum_encoders: dict[str, dict[str, int]]
@@ -89,7 +89,7 @@ class NodeTableMeta:
         return cls(columns, enum_encoders, out_dtypes, key)
 
 
-@attrs.define
+@dataclass
 class EdgeTableMeta:
     columns: list[str]
     enum_encoders: dict[str, dict[str, int]]
