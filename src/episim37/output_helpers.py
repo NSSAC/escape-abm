@@ -61,7 +61,7 @@ def do_extract_summary(sim_output: h5.File, contagion: Contagion) -> pl.DataFram
 
     ticks = []
     counts = []
-    for tick in range(-1, num_ticks):  # type: ignore
+    for tick in range(num_ticks):  # type: ignore
         dset_name = f"tick_{tick}"
         dset = group[dset_name][...]  # type: ignore
 
@@ -101,7 +101,7 @@ def do_extract_transitions(
     num_ticks = sim_output.attrs["num_ticks"]
 
     parts = []
-    for tick in range(-1, num_ticks):  # type: ignore
+    for tick in range(num_ticks):  # type: ignore
         tick_gname = f"tick_{tick}"
         tick_group = group[tick_gname]  # type: ignore
 
@@ -161,7 +161,7 @@ def do_extract_transmissions(
     num_ticks = sim_output.attrs["num_ticks"]
 
     parts = []
-    for tick in range(-1, num_ticks):  # type: ignore
+    for tick in range(num_ticks):  # type: ignore
         tick_gname = f"tick_{tick}"
         tick_group = group[tick_gname]  # type: ignore
 

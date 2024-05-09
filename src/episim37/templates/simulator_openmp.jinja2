@@ -253,7 +253,7 @@ int main() {
 
     const auto main_start = omp_get_wtime();
 
-    for (CUR_TICK = -1; CUR_TICK < NUM_TICKS; CUR_TICK++) {
+    for (CUR_TICK = 0; CUR_TICK < NUM_TICKS; CUR_TICK++) {
         fmt::print("### cur_tick = {}\n", CUR_TICK);
         {{ intervene.name | mangle }}();
 
