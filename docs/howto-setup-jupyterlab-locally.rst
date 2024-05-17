@@ -18,19 +18,11 @@ Once setup is done, please ensure that your conda config contains the following:
   anaconda_upload: false
   auto_activate_base: false
 
-Please ensure you have the latest version of conda.
-
-.. code::
-
-   $ conda update -n base conda
-   $ conda --version
-   conda 24.3.0
-
 Create and activate a conda environment.
 
 .. code::
 
-  $ conda create -n episim37 python=3.11 nodejs=20 jupyterlab=4 gxx_impl_linux-64 cmake hdf5
+  $ conda create -n episim37 python=3.11 nodejs=20 jupyterlab=4.1.8 gxx_impl_linux-64 cmake ninja hdf5
   $ conda activate episim37
 
 Install jupyterlab_esl37 (for ESL37 file type support),
