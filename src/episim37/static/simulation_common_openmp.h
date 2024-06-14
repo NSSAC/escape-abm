@@ -680,7 +680,7 @@ static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
 #pragma omp barrier
 
     size_type size = 0;
-    size_type remaining_n = set->thread_max_size();
+    size_type remaining_n = parent->thread_size[THREAD_IDX];
     size_type remaining_k = set->thread_k[THREAD_IDX];
     for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
         set->is_in[x] = 0;
