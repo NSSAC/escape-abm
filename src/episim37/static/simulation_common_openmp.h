@@ -691,8 +691,8 @@ static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
                 size += 1;
                 remaining_k -= 1;
             }
+	    remaining_n -= 1;
         }
-        remaining_n -= 1;
     }
 
     set->thread_size[THREAD_IDX] = size;
