@@ -56,7 +56,9 @@ def c1_susceptibility(v: node) -> float:
 end
 
 def c1_infectivity(v: node) -> float:
-    if v.c1.state == Isymp or v.c1.state == Iasymp:
+    if v.c1.state == Ipresymp:
+        return 0.8
+    elif v.c1.state == Isymp or v.c1.state == Iasymp:
         return 1.0
     else:
         return 0.0
