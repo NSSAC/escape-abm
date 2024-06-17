@@ -1,0 +1,6 @@
+{
+    project: "episim37",
+    remotes: {
+        rivanna: "rivanna:episim37",
+    }
+}
