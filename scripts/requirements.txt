@@ -1,7 +1,0 @@
-parsl[monitoring,visualization]
-optuna
-optuna-dashboard
-optuna-fast-fanova
-gunicorn
-psycopg2
-netifaces
