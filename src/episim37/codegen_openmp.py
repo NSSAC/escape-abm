@@ -638,7 +638,6 @@ def do_simulate(
     env = dict(os.environ)
 
     env["OMP_PROC_BIND"] = "true"
-    env["OMP_PLACES"] = "sockets"
 
     env["INPUT_FILE"] = str(input_file)
     env["OUTPUT_FILE"] = str(output_file)
