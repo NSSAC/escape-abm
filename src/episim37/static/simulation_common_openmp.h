@@ -597,23 +597,32 @@ static void allocate_k(Set* set, size_type total_k) {
     for (int tid = 0; tid < NUM_THREADS; tid++) {
         float_type p = float_type(remaining_k) / remaining_n;
         size_type k_max = set->thread_max_size();
-
         remaining_n -= k_max;
+
+        if (k_max > remaining_k) {
+            k_max = remaining_k;
+        }
 
         size_type k_min = 0;
         if (remaining_n < remaining_k) {
             k_min = remaining_k - remaining_n;
         }
+        assert(k_min <= k_max);
 
-        std::binomial_distribution<size_type> sampler(k_max, p);
-        size_type tid_k = sampler(*THREAD_RND_STATE);
-        if (tid_k < k_min) {
-            tid_k = k_min;
-        }
+        size_type samp_space = k_max - k_min;
+        std::binomial_distribution<size_type> sampler(samp_space, p);
+        size_type tid_k = sampler(*THREAD_RND_STATE) + k_min;
 
         set->thread_k[tid] = tid_k;
         remaining_k -= tid_k;
     }
+
+    size_type assigned_k = 0;
+    for (int tid = 0; tid < NUM_THREADS; tid++) {
+        assigned_k += set->thread_k[tid];
+        assert(set->thread_k[tid] <= set->thread_max_size());
+    }
+    assert(assigned_k == total_k);
 }
 
 static void par_sample_abs(Set* set, size_type total_k) {
@@ -625,6 +634,7 @@ static void par_sample_abs(Set* set, size_type total_k) {
     size_type size = 0;
     size_type remaining_n = set->thread_max_size();
     size_type remaining_k = set->thread_k[THREAD_IDX];
+    assert(remaining_k <= remaining_n);
     for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
         set->is_in[x] = 0;
         float_type p = float_type(remaining_k) / remaining_n;
@@ -635,6 +645,10 @@ static void par_sample_abs(Set* set, size_type total_k) {
         }
         remaining_n -= 1;
     }
+
+    assert(remaining_k == 0);
+    assert(remaining_n == 0);
+    assert(size == set->thread_k[THREAD_IDX]);
 
     set->thread_size[THREAD_IDX] = size;
 
@@ -654,23 +668,32 @@ static void allocate_k(Set* set, Set* parent, size_type total_k) {
     for (int tid = 0; tid < NUM_THREADS; tid++) {
         float_type p = float_type(remaining_k) / remaining_n;
         size_type k_max = parent->thread_size[tid];
-
         remaining_n -= k_max;
+
+        if (k_max > remaining_k) {
+            k_max = remaining_k;
+        }
 
         size_type k_min = 0;
         if (remaining_n < remaining_k) {
             k_min = remaining_k - remaining_n;
         }
+        assert(k_min <= k_max);
 
-        std::binomial_distribution<size_type> sampler(k_max, p);
-        size_type tid_k = sampler(*THREAD_RND_STATE);
-        if (tid_k < k_min) {
-            tid_k = k_min;
-        }
+        size_type samp_space = k_max - k_min;
+        std::binomial_distribution<size_type> sampler(samp_space, p);
+        size_type tid_k = sampler(*THREAD_RND_STATE) + k_min;
 
         set->thread_k[tid] = tid_k;
         remaining_k -= tid_k;
     }
+
+    size_type assigned_k = 0;
+    for (int tid = 0; tid < NUM_THREADS; tid++) {
+        assigned_k += set->thread_k[tid];
+        assert(set->thread_k[tid] <= parent->thread_size[tid]);
+    }
+    assert(assigned_k == total_k);
 }
 
 static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
@@ -682,6 +705,7 @@ static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
     size_type size = 0;
     size_type remaining_n = parent->thread_size[THREAD_IDX];
     size_type remaining_k = set->thread_k[THREAD_IDX];
+    assert(remaining_k <= remaining_n);
     for (size_type x = set->thread_start(); x < set->thread_end(); x++) {
         set->is_in[x] = 0;
         if (parent->is_in[x]) {
@@ -691,9 +715,13 @@ static void par_sample_abs(Set* set, Set* parent, size_type total_k) {
                 size += 1;
                 remaining_k -= 1;
             }
-	    remaining_n -= 1;
+            remaining_n -= 1;
         }
     }
+
+    assert(remaining_k == 0);
+    assert(remaining_n == 0);
+    assert(size == set->thread_k[THREAD_IDX]);
 
     set->thread_size[THREAD_IDX] = size;
 
