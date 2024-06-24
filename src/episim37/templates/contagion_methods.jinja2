@@ -11,6 +11,11 @@ void {{ name | mangle }}_transition_node(const node_index_type v, const float_ty
             return;
         }
 
+        // No time has passed
+        if (elapsed == 0.0) {
+            return;
+        }
+
         dwell_time -= elapsed;
         // Nothing will change this tick
         if (dwell_time > 0.0) {
