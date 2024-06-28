@@ -1425,6 +1425,70 @@ def add_builtins(scope: Scope):
             rtype="size",
         ),
     )
+    scope.define(
+        "abs",
+        BuiltinFunction(
+            name="abs",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "min",
+        BuiltinFunction(
+            name="min",
+            params=[BuiltinParam(name="x", type="float"), BuiltinParam(name="y", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "max",
+        BuiltinFunction(
+            name="max",
+            params=[BuiltinParam(name="x", type="float"), BuiltinParam(name="y", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "exp",
+        BuiltinFunction(
+            name="exp",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "exp2",
+        BuiltinFunction(
+            name="exp2",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "log",
+        BuiltinFunction(
+            name="log",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "log2",
+        BuiltinFunction(
+            name="log2",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "pow",
+        BuiltinFunction(
+            name="pow",
+            params=[BuiltinParam(name="base", type="float"), BuiltinParam(name="exp", type="float")],
+            rtype="float",
+        ),
+    )
 
 
 class Source(BaseModel):

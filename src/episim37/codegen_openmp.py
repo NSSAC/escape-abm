@@ -112,6 +112,20 @@ TYPE_TO_CTYPE = {
 }
 # fmt: on
 
+# fmt: off
+BUILTIN_FN_TO_CFN = {
+    "len": "len",
+    "abs": "std::abs",
+    "min": "std::fmin",
+    "max": "std::fmax",
+    "exp": "std::exp",
+    "exp2": "std::exp2",
+    "log": "std::log",
+    "log2": "std::log2",
+    "pow": "std::pow",
+}
+# fmt: on
+
 
 @register_filter("mangle")
 def mangle(*args: str) -> str:
@@ -134,7 +148,7 @@ def tref_str(x: ast.TValueRef) -> str:
 def cref_str(x: ast.CValueRef) -> str:
     match x:
         case ast.BuiltinFunction():
-            return x.name
+            return BUILTIN_FN_TO_CFN[x.name]
         case ast.Function():
             return mangle(x.name)
         case ast.NormalDist():
