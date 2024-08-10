@@ -1489,6 +1489,22 @@ def add_builtins(scope: Scope):
             rtype="float",
         ),
     )
+    scope.define(
+        "sin",
+        BuiltinFunction(
+            name="sin",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
+    scope.define(
+        "cos",
+        BuiltinFunction(
+            name="cos",
+            params=[BuiltinParam(name="x", type="float")],
+            rtype="float",
+        ),
+    )
 
 
 class Source(BaseModel):

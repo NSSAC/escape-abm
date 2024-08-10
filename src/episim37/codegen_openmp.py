@@ -123,6 +123,8 @@ BUILTIN_FN_TO_CFN = {
     "log": "std::log",
     "log2": "std::log2",
     "pow": "std::pow",
+    "sin": "std::sin",
+    "cos": "std::cos",
 }
 # fmt: on
 
