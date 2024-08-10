@@ -539,7 +539,7 @@ struct Set {
 const static Set* ALL_NODES = static_cast<Set*>((void*)1);
 const static Set* ALL_EDGES = static_cast<Set*>((void*)2);
 
-static size_type len(Set* set) {
+static size_type len(const Set* set) {
     if (set == ALL_NODES) {
         return NUM_NODES;
     } else if (set == ALL_EDGES) {
