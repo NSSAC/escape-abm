@@ -110,7 +110,7 @@ def do_extract_transitions(
         part = {"node_index": node_index, "state": state}
         part = pl.DataFrame(part)
         part = part.with_columns(
-            pl.lit(tick).alias("tick"), pl.col("state").replace(states)
+            pl.lit(tick).alias("tick"), pl.col("state").replace_strict(states)
         )
         parts.append(part)
 
@@ -171,7 +171,7 @@ def do_extract_transmissions(
         part = {"edge_index": edge_index, "state": state}
         part = pl.DataFrame(part)
         part = part.with_columns(
-            pl.lit(tick).alias("tick"), pl.col("state").replace(states)
+            pl.lit(tick).alias("tick"), pl.col("state").replace_strict(states)
         )
 
         parts.append(part)

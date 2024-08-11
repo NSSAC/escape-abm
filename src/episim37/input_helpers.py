@@ -160,7 +160,7 @@ def make_source(simulation_file: Path) -> Source:
 def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
     node_table = read_table(node_file, ntm.columns)
     for col, encoder in ntm.enum_encoders.items():
-        node_table = node_table.with_columns(node_table[col].replace(encoder))
+        node_table = node_table.with_columns(node_table[col].replace_strict(encoder))
     check_null(node_table, "node table")
     return node_table
 
@@ -168,12 +168,12 @@ def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
 def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pl.DataFrame:
     edge_table = read_table(edge_file, etm.columns)
     for col, encoder in etm.enum_encoders.items():
-        edge_table = edge_table.with_columns(edge_table[col].replace(encoder))
+        edge_table = edge_table.with_columns(edge_table[col].replace_strict(encoder))
     check_null(edge_table, "edge table")
 
     edge_table = edge_table.with_columns(
-        edge_table[etm.target_node_key].replace(key_idx).alias("_target_node_index"),
-        edge_table[etm.source_node_key].replace(key_idx).alias("_source_node_index"),
+        edge_table[etm.target_node_key].replace_strict(key_idx).alias("_target_node_index"),
+        edge_table[etm.source_node_key].replace_strict(key_idx).alias("_source_node_index"),
     )
     return edge_table
 
@@ -224,7 +224,7 @@ def do_read_nodes_df(data_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
 
     for col, encoder in ntm.enum_encoders.items():
         decoder = {v: k for k, v in encoder.items()}
-        df[col] = df[col].replace(decoder)
+        df[col] = df[col].replace_strict(decoder)
 
     return pl.DataFrame(df)
 
