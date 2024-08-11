@@ -62,6 +62,10 @@ void {{ name | mangle }}_transition_node(const node_index_type v, const float_ty
             {% endfor %}
         }
     {% endfor %}
+    default:
+        next_state = state;
+        dwell_time = 0.0;
+        break;
     }
 
     NODE_TABLE->{{ name | mangle }}_state[v] = state;
