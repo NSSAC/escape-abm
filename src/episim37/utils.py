@@ -206,3 +206,21 @@ class OpenMPSimulator:
         assert output_file.exists(), "Output file doesn't exist"
         with h5.File(output_file, "r") as fobj:
             return fobj.attrs["num_ticks"].item()  # type: ignore
+
+    def mem_use_gb(self, output_file: str | Path) -> float:
+        output_file = Path(output_file)
+        assert output_file.exists(), "Output file doesn't exist"
+        with h5.File(output_file, "r") as fobj:
+            return fobj.attrs["mem_use_gb"].item()  # type: ignore
+
+    def init_time_s(self, output_file: str | Path) -> float:
+        output_file = Path(output_file)
+        assert output_file.exists(), "Output file doesn't exist"
+        with h5.File(output_file, "r") as fobj:
+            return fobj.attrs["init_time_s"].item()  # type: ignore
+
+    def main_time_s(self, output_file: str | Path) -> float:
+        output_file = Path(output_file)
+        assert output_file.exists(), "Output file doesn't exist"
+        with h5.File(output_file, "r") as fobj:
+            return fobj.attrs["main_time_s"].item()  # type: ignore
