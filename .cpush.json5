@@ -2,5 +2,6 @@
     project: "episim37",
     remotes: {
         rivanna: "rivanna:episim37",
+        anvil: "anvil:episim37",
     }
 }
