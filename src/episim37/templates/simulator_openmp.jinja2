@@ -265,6 +265,10 @@ int main() {
 
     const auto main_end = omp_get_wtime();
 
+    write_attribute(output_file, "mem_use_gb", double(TOTAL_ALLOC) / 1e9);
+    write_attribute(output_file, "init_time_s", init_end - init_start);
+    write_attribute(output_file, "main_time_s", main_end - main_start);
+
     output_file.close();
     OUTPUT_FILE = nullptr;
 
