@@ -50,13 +50,20 @@ class OpenMPSimulator:
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
-        self.rendered_simulation_file = self.work_dir / "simulator.esl37"
         if template_kwargs:
             sim_template = ENVIRONMENT.from_string(self.simulation_file.read_text())
             sim_rendered = sim_template.render(**template_kwargs)
-            self.rendered_simulation_file.write_text(sim_rendered)
         else:
-            self.rendered_simulation_file.write_text(self.simulation_file.read_text())
+            sim_rendered = self.simulation_file.read_text()
+
+        self.rendered_simulation_file = self.work_dir / "simulator.esl37"
+        if self.rendered_simulation_file.exists():
+            exisiting_sim_rendered = self.rendered_simulation_file.read_text()
+        else:
+            exisiting_sim_rendered = ""
+
+        if exisiting_sim_rendered != sim_rendered:
+            self.rendered_simulation_file.write_text(sim_rendered)
 
         self.pt = mk_pt(
             str(self.rendered_simulation_file),
