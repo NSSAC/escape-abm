@@ -222,10 +222,11 @@ class OpenMPSimulator:
             stats = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
         return stats
 
-    @staticmethod
     def compute_state_tick_cum_counts(
-        transitions: pl.DataFrame, num_ticks: int
+        self, transitions: pl.DataFrame, num_ticks: int, contagion_name: str = ""
     ) -> pl.DataFrame:
+        contagion = find_contagion(contagion_name, self.ast)
+
         transitions = transitions.unique(subset=["node_index", "state"])
         transitions = transitions.group_by(["state", "tick"]).agg(
             pl.len().alias("count")
@@ -236,7 +237,9 @@ class OpenMPSimulator:
         tick = state_tick_count["tick"]
         count = state_tick_count["count"]
 
-        state_counts = {state: np.zeros(num_ticks) for state in set(state)}
+        state_counts = {
+            state: np.zeros(num_ticks) for state in contagion.state_type.value.consts
+        }
         for s, t, c in zip(state, tick, count):
             state_counts[s][t] = c
 
