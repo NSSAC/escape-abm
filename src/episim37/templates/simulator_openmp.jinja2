@@ -210,6 +210,9 @@ int main() {
     OUTPUT_FILE = &output_file;
 
     write_attribute(output_file, "num_ticks", NUM_TICKS);
+    {% for var in globals if var.is_config %}
+    write_attribute(output_file, "{{ var.name }}", {{ var.name | mangle }});
+    {% endfor %}
 
     StaticArray<size_type> thread_node_count(NUM_THREADS);
     #pragma omp parallel

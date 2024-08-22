@@ -155,6 +155,10 @@ class OpenMPSimulator:
 
         output_file = Path(output_file)
 
+        known_configs = set(var.name for var in self.ast.globals)
+        for key in configs:
+            assert key in known_configs, f"Unknown config '{key}'"
+
         do_simulate_openmp(
             self.work_dir,
             input_file=input_file,
@@ -221,6 +225,16 @@ class OpenMPSimulator:
         with h5.File(output_file, "r") as fobj:
             stats = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
         return stats
+
+    def extract_configs(self, output_file: str | Path) -> dict:
+        output_file = Path(output_file)
+        assert output_file.exists(), "Output file doesn't exist"
+
+        keys = [var.name for var in self.ast.globals]
+        configs = {}
+        with h5.File(output_file, "r") as fobj:
+            configs = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
+        return configs
 
     def compute_state_tick_cum_counts(
         self, transitions: pl.DataFrame, num_ticks: int, contagion_name: str = ""
