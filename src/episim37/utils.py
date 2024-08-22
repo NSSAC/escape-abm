@@ -5,6 +5,7 @@ from typing import Any
 
 import h5py as h5
 import polars as pl
+import numpy as np
 import jinja2
 
 from .parse_tree import mk_pt
@@ -127,13 +128,15 @@ class OpenMPSimulator:
         assert input_file.exists(), "Input file doesn't exist"
         return do_read_edges_df(input_file, self.etm)
 
-    def num_nodes(self, input_file: str | Path) -> int:
+    @staticmethod
+    def num_nodes(input_file: str | Path) -> int:
         input_file = Path(input_file)
         assert input_file.exists(), "Input file doesn't exist"
         with h5.File(input_file, "r") as fobj:
             return fobj.attrs["num_nodes"].item()  # type: ignore
 
-    def num_edges(self, input_file: str | Path) -> int:
+    @staticmethod
+    def num_edges(input_file: str | Path) -> int:
         input_file = Path(input_file)
         assert input_file.exists(), "Input file doesn't exist"
         with h5.File(input_file, "r") as fobj:
@@ -201,26 +204,54 @@ class OpenMPSimulator:
             df = do_extract_transmissions(sim_output, contagion)
         return df
 
-    def num_ticks(self, output_file: str | Path) -> int:
+    @staticmethod
+    def num_ticks(output_file: str | Path) -> int:
         output_file = Path(output_file)
         assert output_file.exists(), "Output file doesn't exist"
         with h5.File(output_file, "r") as fobj:
             return fobj.attrs["num_ticks"].item()  # type: ignore
 
-    def mem_use_gb(self, output_file: str | Path) -> float:
+    @staticmethod
+    def runtime_stats(output_file: str | Path) -> dict:
         output_file = Path(output_file)
         assert output_file.exists(), "Output file doesn't exist"
-        with h5.File(output_file, "r") as fobj:
-            return fobj.attrs["mem_use_gb"].item()  # type: ignore
 
-    def init_time_s(self, output_file: str | Path) -> float:
-        output_file = Path(output_file)
-        assert output_file.exists(), "Output file doesn't exist"
+        keys = ["mem_use_gb", "init_time_s", "main_time_s"]
+        stats = {}
         with h5.File(output_file, "r") as fobj:
-            return fobj.attrs["init_time_s"].item()  # type: ignore
+            stats = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
+        return stats
 
-    def main_time_s(self, output_file: str | Path) -> float:
-        output_file = Path(output_file)
-        assert output_file.exists(), "Output file doesn't exist"
-        with h5.File(output_file, "r") as fobj:
-            return fobj.attrs["main_time_s"].item()  # type: ignore
+    @staticmethod
+    def compute_state_tick_cum_counts(
+        transitions: pl.DataFrame, num_ticks: int
+    ) -> pl.DataFrame:
+        transitions = transitions.unique(subset=["node_index", "state"])
+        transitions = transitions.group_by(["state", "tick"]).agg(
+            pl.len().alias("count")
+        )
+
+        state_tick_count = transitions.to_dict(as_series=False)
+        state = state_tick_count["state"]
+        tick = state_tick_count["tick"]
+        count = state_tick_count["count"]
+
+        state_counts = {state: np.zeros(num_ticks) for state in set(state)}
+        for s, t, c in zip(state, tick, count):
+            state_counts[s][t] = c
+
+        state_cum_counts = {k: np.cumsum(v) for k, v in state_counts.items()}
+        state_cum_counts = pl.DataFrame(state_cum_counts)
+        state_cum_counts = state_cum_counts.with_columns(
+            pl.Series(name="tick", values=np.arange(num_ticks))
+        )
+
+        return state_cum_counts
+
+    @staticmethod
+    def compute_cum_count(
+        transitions: pl.DataFrame,
+        states: list[str],
+    ) -> float:
+        transitions = transitions.filter(pl.col("state").is_in(states))
+        return len(transitions["node_index"].unique())
