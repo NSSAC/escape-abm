@@ -156,8 +156,7 @@ class OpenMPSimulator:
         output_file = Path(output_file)
 
         known_configs = set(var.name for var in self.ast.globals)
-        for key in configs:
-            assert key in known_configs, f"Unknown config '{key}'"
+        configs = {k: v for k, v in configs.items() if k in known_configs}
 
         do_simulate_openmp(
             self.work_dir,
