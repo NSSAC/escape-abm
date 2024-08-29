@@ -235,7 +235,7 @@ class OpenMPSimulator:
             configs = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
         return configs
 
-    def compute_state_tick_cum_counts(
+    def compute_state_tick_unique_counts(
         self, transitions: pl.DataFrame, num_ticks: int, contagion_name: str = ""
     ) -> pl.DataFrame:
         contagion = find_contagion(contagion_name, self.ast)
@@ -256,13 +256,12 @@ class OpenMPSimulator:
         for s, t, c in zip(state, tick, count):
             state_counts[s][t] = c
 
-        state_cum_counts = {k: np.cumsum(v) for k, v in state_counts.items()}
-        state_cum_counts = pl.DataFrame(state_cum_counts)
-        state_cum_counts = state_cum_counts.with_columns(
+        state_counts = pl.DataFrame(state_counts)
+        state_counts = state_counts.with_columns(
             pl.Series(name="tick", values=np.arange(num_ticks))
         )
 
-        return state_cum_counts
+        return state_counts
 
     @staticmethod
     def compute_cum_count(
