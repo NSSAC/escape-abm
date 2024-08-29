@@ -6,10 +6,8 @@ Bugfix
 
 * Upgrade to latest tree-sitter parser
 * Allow negative constants for config and globals
-* Use dirty bit instead of preivous state
-  for managing intervention related state changes
-* Write config values to output file
 * Add support to save specific global/config values each tick
+* Compress datasets when writing
 
 Base features
 ..............
