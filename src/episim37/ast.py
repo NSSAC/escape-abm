@@ -578,7 +578,7 @@ class Transition(BaseModel):
     def make(cls, node: PTNode, scope: Scope) -> Transition:
         entry = parse(node.field("entry"), scope)
         exit = parse(node.field("exit"), scope)
-        pexpr = node.maybe_field("pexpr")
+        pexpr = node.maybe_field("p")
         if pexpr is not None:
             pexpr = parse(pexpr, scope)
             pexpr = if_fn_make_ref(pexpr, scope)
