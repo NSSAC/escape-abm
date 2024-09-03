@@ -187,11 +187,17 @@ template <typename Type> struct StaticArray {
     void save(const H5::H5File& file, const std::string& dataset_name) {
         hsize_t dims[1] = {_size};
         H5::DataSpace dataspace(1, dims);
+        H5::DSetCreatPropList prop;
+	if (_size > 0) {
+	    prop.setChunk(1, dims);
+	    prop.setDeflate(9);
+	}
 
-        H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), dataspace);
+        H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), dataspace, prop);
         dataset.write(_data, h5_type);
 
         dataset.close();
+        prop.close();
         dataspace.close();
     }
 };
@@ -276,8 +282,13 @@ template <typename Type> struct PerThreadDynamicArray {
 
         hsize_t dims[] = {dataset_size};
         H5::DataSpace file_space(1, dims);
+        H5::DSetCreatPropList prop;
+	if (dataset_size > 0) {
+	    prop.setChunk(1, dims);
+	    prop.setDeflate(9);
+	}
 
-        H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), file_space);
+        H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), file_space, prop);
 
         std::size_t write_offset = 0;
         for (std::size_t i = 0; i < NUM_THREADS; i++) {
@@ -295,6 +306,7 @@ template <typename Type> struct PerThreadDynamicArray {
         }
 
         dataset.close();
+	prop.close();
         file_space.close();
     }
 };
