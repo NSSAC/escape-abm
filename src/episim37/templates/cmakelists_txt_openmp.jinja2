@@ -29,8 +29,10 @@ add_custom_command(
     VERBATIM
 )
 
-SET(SIMULATOR_COMPILE_FLAGS -O3 -march=native)
-# SET(SIMULATOR_COMPILE_FLAGS -g -fno-omit-frame-pointer -O3 -march=native)
+
+
+SET(SIMULATOR_COMPILE_FLAGS -Wall -Wextra -Wno-unused-function -Wno-unused-parameter)
+# SET(SIMULATOR_COMPILE_FLAGS -Wall -Wextra -g -fno-omit-frame-pointer -O3)
 
 add_executable(simulator_openmp
     ${CMAKE_CURRENT_BINARY_DIR}/simulator_openmp.cpp)
