@@ -382,6 +382,17 @@ template <typename Type> void write_attribute(const H5::H5File& file, const char
     attr_dataspace.close();
 }
 
+template <typename Type>
+void write_attribute(const H5::Group& group, const char* attr_name, Type value) {
+    H5::DataSpace attr_dataspace(H5S_SCALAR);
+    H5::Attribute attribute = group.createAttribute(attr_name, h5_type<Type>(), attr_dataspace);
+
+    attribute.write(h5_type<Type>(), &value);
+
+    attribute.close();
+    attr_dataspace.close();
+}
+
 static void create_group(H5::H5File& output_file, const std::string& group_name) {
     H5::Group group = output_file.createGroup(group_name);
     group.close();

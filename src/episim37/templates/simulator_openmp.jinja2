@@ -210,9 +210,14 @@ int main() {
     OUTPUT_FILE = &output_file;
 
     write_attribute(output_file, "num_ticks", NUM_TICKS);
-    {% for var in globals if var.is_config %}
-    write_attribute(output_file, "{{ var.name }}", {{ var.name | mangle }});
-    {% endfor %}
+
+    {
+        H5::Group group = output_file.createGroup("config");
+        {% for var in globals if var.is_config %}
+        write_attribute(group, "{{ var.name }}", {{ var.name | mangle }});
+        {% endfor %}
+        group.close();
+    }
 
     StaticArray<size_type> thread_node_count(NUM_THREADS);
     #pragma omp parallel
@@ -268,9 +273,16 @@ int main() {
 
     const auto main_end = omp_get_wtime();
 
-    write_attribute(output_file, "mem_use_gb", double(TOTAL_ALLOC) / 1e9);
-    write_attribute(output_file, "init_time_s", init_end - init_start);
-    write_attribute(output_file, "main_time_s", main_end - main_start);
+
+    {
+        H5::Group group = output_file.createGroup("runtime_stat");
+        write_attribute(group, "num_threads", NUM_THREADS);
+        write_attribute(group, "mem_use_gb", double(TOTAL_ALLOC) / 1e9);
+        write_attribute(group, "init_time_s", init_end - init_start);
+        write_attribute(group, "main_time_s", main_end - main_start);
+        group.close();
+    }
+
 
     output_file.close();
     OUTPUT_FILE = nullptr;

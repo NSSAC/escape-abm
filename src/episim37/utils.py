@@ -219,20 +219,19 @@ class OpenMPSimulator:
         output_file = Path(output_file)
         assert output_file.exists(), "Output file doesn't exist"
 
-        keys = ["mem_use_gb", "init_time_s", "main_time_s"]
         stats = {}
         with h5.File(output_file, "r") as fobj:
-            stats = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
+            stats = dict(fobj["runtime_stat"].attrs.items())
         return stats
 
-    def extract_configs(self, output_file: str | Path) -> dict:
+    @staticmethod
+    def extract_configs(output_file: str | Path) -> dict:
         output_file = Path(output_file)
         assert output_file.exists(), "Output file doesn't exist"
 
-        keys = [var.name for var in self.ast.globals]
         configs = {}
         with h5.File(output_file, "r") as fobj:
-            configs = {k: fobj.attrs[k].item() for k in keys}  # type: ignore
+            configs = dict(fobj["config"].attrs.items())
         return configs
 
     def compute_state_tick_unique_counts(
