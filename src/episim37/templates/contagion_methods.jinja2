@@ -60,6 +60,8 @@ void {{ name | mangle }}_transition_node(const node_index_type v, const float_ty
                 break;
             }
             {% endfor %}
+
+            break;
         }
     {% endfor %}
     default:
