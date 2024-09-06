@@ -33,7 +33,7 @@ TYPE_TO_DTYPE = {
     "uint": np.uint64,
     "float": np.float32,
     "bool": np.uint8,
-    "size": np.uint64,
+    "size": np.int64,
 
     "u8":  np.uint8,
     "u16": np.uint16,
@@ -48,8 +48,8 @@ TYPE_TO_DTYPE = {
     "f32":  np.float32,
     "f64": np.float64,
 
-    "node": np.uint32,
-    "edge": np.uint64,
+    "node": np.int32,
+    "edge": np.int64,
 }
 # fmt: on
 

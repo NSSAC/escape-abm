@@ -7,6 +7,7 @@
 // thread_* and par_* methods / functions should be called from within parallel section
 
 #include <H5Cpp.h>
+#include <H5public.h>
 #include <cassert>
 #include <cinttypes>
 #include <cstdlib>
@@ -23,9 +24,9 @@ typedef int64_t int_type;
 typedef uint64_t uint_type;
 typedef float float_type;
 typedef uint8_t bool_type;
-typedef uint64_t size_type;
-typedef uint32_t node_index_type;
-typedef uint64_t edge_index_type;
+typedef int64_t size_type;
+typedef int32_t node_index_type;
+typedef int64_t edge_index_type;
 
 // ----------------------------------------------------------------------------
 // HDF5 Pred Type from common types
@@ -100,9 +101,9 @@ template <typename IntType> IntType aligned_size(IntType n) {
     return n;
 }
 
-static std::size_t TOTAL_ALLOC = 0;
+static size_type TOTAL_ALLOC = 0;
 
-template <typename Type> Type* alloc_mem(const std::size_t n) {
+template <typename Type> Type* alloc_mem(const size_type n) {
     auto alloc_size = sizeof(Type) * n;
     alloc_size = aligned_size(alloc_size);
     auto* ret = std::aligned_alloc(L1_CACHE_SIZE, alloc_size);
@@ -119,9 +120,9 @@ template <typename Type> Type* alloc_mem(const std::size_t n) {
 
 template <typename Type> struct StaticArray {
     Type* _data;
-    std::size_t _size;
+    size_type _size;
 
-    explicit StaticArray(std::size_t size)
+    explicit StaticArray(size_type size)
         : _data{nullptr}
         , _size{0} {
         _data = alloc_mem<Type>(size);
@@ -134,8 +135,8 @@ template <typename Type> struct StaticArray {
         _size = 0;
     }
 
-    void range_init(std::size_t start, std::size_t stop) {
-        for (std::size_t i = start; i < stop; i++) {
+    void range_init(size_type start, size_type stop) {
+        for (size_type i = start; i < stop; i++) {
             _data[i] = 0;
         }
     }
@@ -146,21 +147,21 @@ template <typename Type> struct StaticArray {
     StaticArray& operator=(const StaticArray&) = delete; // copy assignment
     StaticArray& operator=(StaticArray&&) = delete;      // move assignment
 
-    [[nodiscard]] Type& operator[](std::size_t i) { return _data[i]; }
-    [[nodiscard]] Type operator[](std::size_t i) const { return _data[i]; }
+    [[nodiscard]] Type& operator[](size_type i) { return _data[i]; }
+    [[nodiscard]] Type operator[](size_type i) const { return _data[i]; }
 
     [[nodiscard]] Type* begin() const { return _data; }
     [[nodiscard]] Type* end() const { return _data + _size; }
-    [[nodiscard]] std::size_t size() const { return _size; }
+    [[nodiscard]] size_type size() const { return _size; }
     [[nodiscard]] Type* data() const { return _data; }
 
-    Type get(std::size_t i) const { return _data[i]; }
+    Type get(size_type i) const { return _data[i]; }
 
-    void set(std::size_t i, Type x) { _data[i] = x; }
-    void set_plus(std::size_t i, Type x) { _data[i] += x; }
-    void set_minus(std::size_t i, Type x) { _data[i] -= x; }
-    void set_times(std::size_t i, Type x) { _data[i] *= x; }
-    void set_div(std::size_t i, Type x) { _data[i] /= x; }
+    void set(size_type i, Type x) { _data[i] = x; }
+    void set_plus(size_type i, Type x) { _data[i] += x; }
+    void set_minus(size_type i, Type x) { _data[i] -= x; }
+    void set_times(size_type i, Type x) { _data[i] *= x; }
+    void set_div(size_type i, Type x) { _data[i] /= x; }
 
     void load(const H5::H5File& file, const char* dataset_name) {
         H5::DataSet dataset = file.openDataSet(dataset_name);
@@ -185,13 +186,13 @@ template <typename Type> struct StaticArray {
     }
 
     void save(const H5::H5File& file, const std::string& dataset_name) {
-        hsize_t dims[1] = {_size};
+        hsize_t dims[1] = {static_cast<hsize_t>(_size)};
         H5::DataSpace dataspace(1, dims);
         H5::DSetCreatPropList prop;
-	if (_size > 0) {
-	    prop.setChunk(1, dims);
-	    prop.setDeflate(9);
-	}
+        if (_size > 0) {
+            prop.setChunk(1, dims);
+            prop.setDeflate(9);
+        }
 
         H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), dataspace, prop);
         dataset.write(_data, h5_type);
@@ -204,8 +205,8 @@ template <typename Type> struct StaticArray {
 
 template <typename Type> struct PerThreadDynamicArray {
     Type** _data;
-    std::size_t* _size; // size of each array
-    std::size_t* _cap;  // capacity of each array
+    size_type* _size; // size of each array
+    size_type* _cap;  // capacity of each array
 
     template <typename SizeType>
     PerThreadDynamicArray(const StaticArray<SizeType>& caps)
@@ -216,23 +217,23 @@ template <typename Type> struct PerThreadDynamicArray {
         assert(caps.size() == NUM_THREADS);
 
         _data = alloc_mem<Type*>(NUM_THREADS);
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        for (size_type i = 0; i < NUM_THREADS; i++) {
             _data[i] = alloc_mem<Type>(caps[i]);
         }
 
-        _size = alloc_mem<std::size_t>(NUM_THREADS);
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        _size = alloc_mem<size_type>(NUM_THREADS);
+        for (size_type i = 0; i < NUM_THREADS; i++) {
             _size[i] = 0;
         }
 
-        _cap = alloc_mem<std::size_t>(NUM_THREADS);
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        _cap = alloc_mem<size_type>(NUM_THREADS);
+        for (size_type i = 0; i < NUM_THREADS; i++) {
             _cap[i] = caps[i];
         }
     }
 
     ~PerThreadDynamicArray() {
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        for (size_type i = 0; i < NUM_THREADS; i++) {
             std::free(_data[i]);
             _data[i] = nullptr;
         }
@@ -249,7 +250,7 @@ template <typename Type> struct PerThreadDynamicArray {
     void par_init() {
         const auto a = _data[THREAD_IDX];
         const auto cap = _cap[THREAD_IDX];
-        for (std::size_t j = 0; j < cap; j++) {
+        for (size_type j = 0; j < cap; j++) {
             a[j] = 0;
         }
     }
@@ -260,10 +261,10 @@ template <typename Type> struct PerThreadDynamicArray {
     PerThreadDynamicArray& operator=(const PerThreadDynamicArray&) = delete; // copy assignment
     PerThreadDynamicArray& operator=(PerThreadDynamicArray&&) = delete;      // move assignment
 
-    [[nodiscard]] Type* begin(std::size_t i) const { return _data[i]; }
-    [[nodiscard]] Type* end(std::size_t i) const { return _data[i] + _size[i]; }
-    [[nodiscard]] std::size_t size(std::size_t i) const { return _size[i]; }
-    [[nodiscard]] Type* data(std::size_t i) const { return _data[i]; }
+    [[nodiscard]] Type* begin(size_type i) const { return _data[i]; }
+    [[nodiscard]] Type* end(size_type i) const { return _data[i] + _size[i]; }
+    [[nodiscard]] size_type size(size_type i) const { return _size[i]; }
+    [[nodiscard]] Type* data(size_type i) const { return _data[i]; }
 
     void thread_append(const Type& v) {
         auto i = _size[THREAD_IDX];
@@ -275,28 +276,28 @@ template <typename Type> struct PerThreadDynamicArray {
     void thread_clear() { _size[THREAD_IDX] = 0; }
 
     void save(const H5::H5File& file, const std::string& dataset_name) {
-        std::size_t dataset_size = 0;
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
+        size_type dataset_size = 0;
+        for (size_type i = 0; i < NUM_THREADS; i++) {
             dataset_size += _size[i];
         }
 
-        hsize_t dims[] = {dataset_size};
+        hsize_t dims[] = {static_cast<hsize_t>(dataset_size)};
         H5::DataSpace file_space(1, dims);
         H5::DSetCreatPropList prop;
-	if (dataset_size > 0) {
-	    prop.setChunk(1, dims);
-	    prop.setDeflate(9);
-	}
+        if (dataset_size > 0) {
+            prop.setChunk(1, dims);
+            prop.setDeflate(9);
+        }
 
         H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), file_space, prop);
 
-        std::size_t write_offset = 0;
-        for (std::size_t i = 0; i < NUM_THREADS; i++) {
-            hsize_t dims[] = {_size[i]};
+        size_type write_offset = 0;
+        for (size_type i = 0; i < NUM_THREADS; i++) {
+            hsize_t dims[] = {static_cast<hsize_t>(_size[i])};
             H5::DataSpace mem_space(1, dims);
 
-            hsize_t count[] = {_size[i]};
-            hsize_t offset[] = {write_offset};
+            hsize_t count[] = {static_cast<hsize_t>(_size[i])};
+            hsize_t offset[] = {static_cast<hsize_t>(write_offset)};
             file_space.selectHyperslab(H5S_SELECT_SET, count, offset);
 
             dataset.write(_data[i], h5_type<Type>(), mem_space, file_space);
@@ -306,7 +307,7 @@ template <typename Type> struct PerThreadDynamicArray {
         }
 
         dataset.close();
-	prop.close();
+        prop.close();
         file_space.close();
     }
 };
@@ -452,7 +453,7 @@ static void init_thread_node_range() {
         assert(ptr[i] <= ptr[i + 1]);
     }
 
-    // for (std::size_t i = 0; i < NUM_THREADS; i++) {
+    // for (size_type i = 0; i < NUM_THREADS; i++) {
     //    std::cout << "thread node count: " << i << " " << ptr[i+1] - ptr[i] << "\n";
     // }
 
@@ -495,7 +496,7 @@ static void init_thread_edge_range() {
         assert(ptr[i] <= ptr[i + 1]);
     }
 
-    // for (std::size_t i = 0; i < NUM_THREADS; i++) {
+    // for (size_type i = 0; i < NUM_THREADS; i++) {
     //    std::cout << "thread edge count: " << i << " " << ptr[i+1] - ptr[i] << "\n";
     // }
 
@@ -520,8 +521,8 @@ struct Set {
     explicit Set(bool_type is_node_set_)
         : is_node_set{is_node_set_}
         , is_in{is_node_set ? NUM_NODES : NUM_EDGES}
-        , thread_k{std::size_t(NUM_THREADS)}
-        , thread_size{std::size_t(NUM_THREADS)}
+        , thread_k{size_type(NUM_THREADS)}
+        , thread_size{size_type(NUM_THREADS)}
         , size{0} {}
 
     void par_init() {
