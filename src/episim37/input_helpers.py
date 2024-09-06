@@ -54,21 +54,17 @@ TYPE_TO_DTYPE = {
 # fmt: on
 
 
-def enum_encoder(enum: EnumType) -> dict[str, int]:
-    return {c: i for i, c in enumerate(enum.consts)}
-
-
 @dataclass
 class NodeTableMeta:
     columns: list[str]
-    enum_encoders: dict[str, dict[str, int]]
+    enum_dtypes: dict[str, pl.Enum]
     out_dtypes: dict[str, type]
     key: str
 
     @classmethod
     def from_source(cls, node_table: NodeTable) -> NodeTableMeta:
         columns = []
-        enum_encoders = {}
+        enum_dtypes = {}
         out_dtypes = {}
 
         for field in node_table.fields:
@@ -78,7 +74,7 @@ class NodeTableMeta:
             columns.append(field.name)
             match field.type.value:
                 case EnumType() as t:
-                    enum_encoders[field.name] = enum_encoder(t)
+                    enum_dtypes[field.name] = pl.Enum(t.consts)
                     out_dtypes[field.name] = TYPE_TO_DTYPE[enum_base_type(t)]
                 case BuiltinType() as t:
                     out_dtypes[field.name] = TYPE_TO_DTYPE[t.name]
@@ -86,13 +82,13 @@ class NodeTableMeta:
                     raise RuntimeError(f"Expected type: {unexpected!r}")
 
         key = node_table.key.name
-        return cls(columns, enum_encoders, out_dtypes, key)
+        return cls(columns, enum_dtypes, out_dtypes, key)
 
 
 @dataclass
 class EdgeTableMeta:
     columns: list[str]
-    enum_encoders: dict[str, dict[str, int]]
+    enum_dtypes: dict[str, pl.Enum]
     out_dtypes: dict[str, type]
     target_node_key: str
     source_node_key: str
@@ -100,7 +96,7 @@ class EdgeTableMeta:
     @classmethod
     def from_source(cls, edge_table: EdgeTable) -> EdgeTableMeta:
         columns = []
-        enum_encoders = {}
+        enum_dtypes = {}
         out_dtypes = {}
 
         for field in edge_table.fields:
@@ -110,7 +106,7 @@ class EdgeTableMeta:
             columns.append(field.name)
             match field.type.value:
                 case EnumType() as t:
-                    enum_encoders[field.name] = enum_encoder(t)
+                    enum_dtypes[field.name] = pl.Enum(t.consts)
                     out_dtypes[field.name] = TYPE_TO_DTYPE[enum_base_type(t)]
                 case BuiltinType() as t:
                     out_dtypes[field.name] = TYPE_TO_DTYPE[t.name]
@@ -125,7 +121,7 @@ class EdgeTableMeta:
 
         return cls(
             columns,
-            enum_encoders,
+            enum_dtypes,
             out_dtypes,
             target_node_key,
             source_node_key,
@@ -159,21 +155,25 @@ def make_source(simulation_file: Path) -> Source:
 
 def make_node_table(node_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
     node_table = read_table(node_file, ntm.columns)
-    for col, encoder in ntm.enum_encoders.items():
-        node_table = node_table.with_columns(node_table[col].replace_strict(encoder))
+    for col, dtype in ntm.enum_dtypes.items():
+        node_table = node_table.with_columns(node_table[col].cast(dtype).to_physical())
     check_null(node_table, "node table")
     return node_table
 
 
 def make_edge_table(edge_file: Path, etm: EdgeTableMeta, key_idx: dict) -> pl.DataFrame:
     edge_table = read_table(edge_file, etm.columns)
-    for col, encoder in etm.enum_encoders.items():
-        edge_table = edge_table.with_columns(edge_table[col].replace_strict(encoder))
+    for col, dtype in etm.enum_dtypes.items():
+        edge_table = edge_table.with_columns(edge_table[col].cast(dtype).to_physical())
     check_null(edge_table, "edge table")
 
     edge_table = edge_table.with_columns(
-        edge_table[etm.target_node_key].replace_strict(key_idx).alias("_target_node_index"),
-        edge_table[etm.source_node_key].replace_strict(key_idx).alias("_source_node_index"),
+        edge_table[etm.target_node_key]
+        .replace_strict(key_idx)
+        .alias("_target_node_index"),
+        edge_table[etm.source_node_key]
+        .replace_strict(key_idx)
+        .alias("_source_node_index"),
     )
     return edge_table
 
@@ -222,9 +222,8 @@ def do_read_nodes_df(data_file: Path, ntm: NodeTableMeta) -> pl.DataFrame:
             s = pl.Series(s)
             df[col] = s
 
-    for col, encoder in ntm.enum_encoders.items():
-        decoder = {v: k for k, v in encoder.items()}
-        df[col] = df[col].replace_strict(decoder)
+    for col, dtype in ntm.enum_dtypes.items():
+        df[col] = df[col].cast(dtype)
 
     return pl.DataFrame(df)
 
@@ -243,9 +242,8 @@ def do_read_edges_df(data_file: Path, etm: EdgeTableMeta) -> pl.DataFrame:
             s = pl.Series(s)
             df[col] = s
 
-    for col, encoder in etm.enum_encoders.items():
-        decoder = {v: k for k, v in encoder.items()}
-        df[col] = [decoder[v] for v in df[col]]
+    for col, dtype in etm.enum_dtypes.items():
+        df[col] = df[col].cast(dtype)
 
     return pl.DataFrame(df)
 

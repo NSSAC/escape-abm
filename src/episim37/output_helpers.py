@@ -95,7 +95,7 @@ def do_extract_transitions(
     gkey: str = "transitions",
 ) -> pl.DataFrame:
     states = [const for const in contagion.state_type.value.consts]
-    states = {i: n for i, n in enumerate(states)}
+    states = pl.Enum(states)
 
     group = sim_output[contagion.name][gkey]  # type: ignore
     num_ticks = sim_output.attrs["num_ticks"]
@@ -110,7 +110,7 @@ def do_extract_transitions(
         part = {"node_index": node_index, "state": state}
         part = pl.DataFrame(part)
         part = part.with_columns(
-            pl.lit(tick).alias("tick"), pl.col("state").replace_strict(states)
+            pl.lit(tick).alias("tick"), pl.col("state").cast(states)
         )
         parts.append(part)
 
@@ -155,7 +155,7 @@ def do_extract_transmissions(
     contagion: Contagion,
 ) -> pl.DataFrame:
     states = [const for const in contagion.state_type.value.consts]
-    states = {i: n for i, n in enumerate(states)}
+    states = pl.Enum(states)
 
     group = sim_output[contagion.name]["transmissions"]  # type: ignore
     num_ticks = sim_output.attrs["num_ticks"]
@@ -171,7 +171,7 @@ def do_extract_transmissions(
         part = {"edge_index": edge_index, "state": state}
         part = pl.DataFrame(part)
         part = part.with_columns(
-            pl.lit(tick).alias("tick"), pl.col("state").replace_strict(states)
+            pl.lit(tick).alias("tick"), pl.col("state").cast(states)
         )
 
         parts.append(part)
