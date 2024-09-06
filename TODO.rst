@@ -7,7 +7,6 @@ Bugfix
 * Upgrade to latest tree-sitter parser
 * Allow negative constants for config and globals
 * Add support to save specific global/config values each tick
-* Compress datasets when writing
 * Add more support for templated identifier and expressions
 
 Base features
