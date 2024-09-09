@@ -22,6 +22,7 @@ dependencies = [
     "platformdirs",
     "rich",
     "tree-sitter",
+    "tree-sitter-esl",
     "jinja2",
     "pygls",
     "platformdirs",
