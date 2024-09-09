@@ -176,7 +176,7 @@ template <typename Type> struct StaticArray {
         std::vector<hsize_t> dims(ndims);
         dataspace.getSimpleExtentDims(&dims[0]);
         assert(dims.size() == 1);
-        assert(dims[0] == _size);
+        assert(static_cast<size_type>(dims[0]) == _size);
 
         dataset.read(_data, h5_type<Type>());
 
