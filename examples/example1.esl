@@ -5,6 +5,9 @@ config enable_day_30_antigen_test: bool = True
 config enable_day_30_pcr_test: bool = False
 config transmissibility_scale: float = 0.3
 
+statistic S_or_R: int = 0
+statistic enabled_edge_count: int = 0
+
 node
     pid: int node key
     is_in_school: bool static
@@ -157,4 +160,7 @@ def intervene():
             n.home_isolation_end = CUR_TICK+16
         })
     end
+
+    S_or_R <- reduce(ALL_NODES, [n: node -> int](n.c1.state == S or n.c1.state == R), +)
+    enabled_edge_count <- reduce(ALL_EDGES, c1_enabled, +)
 end

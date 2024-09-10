@@ -144,3 +144,12 @@ transmissions_file_option = click.option(
     show_default=True,
     help="Path to transmissions file.",
 )
+
+statistics_file_option = click.option(
+    "-sto",
+    "--statistics-file",
+    type=File,
+    default="statistics.csv",
+    show_default=True,
+    help="Path to statistics file.",
+)

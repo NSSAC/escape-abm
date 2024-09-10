@@ -20,6 +20,7 @@ from .click_helpers import (
     transmissions_file_option,
     interventions_file_option,
     contagion_name_option,
+    statistics_file_option,
 )
 
 
@@ -194,6 +195,32 @@ def read_transmissions_df(
     return df
 
 
+def do_extract_statistics(
+    sim_output: h5.File,
+    ast: Source,
+) -> pl.DataFrame:
+    statistics = [g.name for g in ast.globals if g.is_statistic]
+    num_ticks = sim_output.attrs["num_ticks"]
+
+    df = {"tick": np.arange(num_ticks, dtype=int)}
+    for stat in statistics:
+        df[stat] = sim_output[f"/statistic/{stat}"][...]  # type: ignore
+    df = pl.DataFrame(df)
+    return df
+
+
+def read_statistics_df(
+    simulation_file: Path,
+    sim_output_file: Path,
+) -> pl.DataFrame:
+    """Extract statistics from simulation output."""
+    ast = make_source(simulation_file)
+
+    with h5.File(sim_output_file, "r") as sim_output:
+        df = do_extract_statistics(sim_output, ast)
+    return df
+
+
 @click.group
 def process_output():
     """Process output file."""
@@ -281,12 +308,31 @@ def extract_transmissions(
 
 @process_output.command()
 @simulation_file_option
+@existing_output_file_option
+@statistics_file_option
+def extract_statistics(
+    simulation_file: Path,
+    output_file: Path,
+    statistics_file: Path,
+):
+    """Extract statistics from simulation output."""
+    try:
+        df = read_statistics_df(simulation_file, output_file)
+        save_df(df, statistics_file)
+    except RichException as e:
+        e.rich_print()
+        raise SystemExit(1)
+
+
+@process_output.command()
+@simulation_file_option
 @contagion_name_option
 @existing_output_file_option
 @summary_file_option
 @interventions_file_option
 @transitions_file_option
 @transmissions_file_option
+@statistics_file_option
 def extract_all(
     simulation_file: Path,
     contagion_name: str,
@@ -295,6 +341,7 @@ def extract_all(
     interventions_file: Path,
     transitions_file: Path,
     transmissions_file: Path,
+    statistics_file: Path,
 ):
     """Extract summary,interventions,transitions,transmissions from simulation output."""
     try:
@@ -317,6 +364,10 @@ def extract_all(
             rich.print("[yellow]Extracting transmissions.[/yellow]")
             df = do_extract_transmissions(sim_output, contagion)
             save_df(df, transmissions_file)
+
+            rich.print("[yellow]Extracting statistics.[/yellow]")
+            df = read_statistics_df(simulation_file, output_file)
+            save_df(df, statistics_file)
     except RichException as e:
         e.rich_print()
         raise SystemExit(1)

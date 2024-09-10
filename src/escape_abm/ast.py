@@ -133,6 +133,7 @@ def parse_number(node: PTNode, scope: Scope) -> int | float:
     else:
         return value
 
+
 register_parser("number", parse_number)
 
 
@@ -277,6 +278,7 @@ class Global(BaseModel):
     name: str
     type: Reference
     is_config: bool
+    is_statistic: bool
     default: int | float | bool
     pos: SourcePosition | None = Field(default=None, repr=False)
 
@@ -284,10 +286,16 @@ class Global(BaseModel):
     def make(cls, node: PTNode, scope: Scope) -> Global:
         name = node.field("name").text
         is_config = node.field("category").text == "config"
+        is_statistic = node.field("category").text == "statistic"
         type = parse(node.field("type"), scope)
         default = parse(node.field("default"), scope)
         obj = cls(
-            name=name, type=type, is_config=is_config, default=default, pos=node.pos
+            name=name,
+            type=type,
+            is_config=is_config,
+            is_statistic=is_statistic,
+            default=default,
+            pos=node.pos,
         )
         scope.define(name, obj)
         return obj

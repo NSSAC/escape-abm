@@ -195,7 +195,7 @@ template <typename Type> struct StaticArray {
         }
 
         H5::DataSet dataset = file.createDataSet(dataset_name, h5_type<Type>(), dataspace, prop);
-        dataset.write(_data, h5_type);
+        dataset.write(_data, h5_type<Type>());
 
         dataset.close();
         prop.close();

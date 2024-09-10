@@ -1,4 +1,4 @@
-"""EpiSim37 utilities."""
+"""ESCAPE utilities."""
 
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,7 @@ from .output_helpers import (
     do_extract_transitions,
     do_extract_interventions,
     do_extract_transmissions,
+    do_extract_statistics,
     find_contagion,
 )
 
@@ -205,6 +206,13 @@ class OpenMPSimulator:
         contagion = find_contagion(contagion_name, self.ast)
         with h5.File(output_file, "r") as sim_output:
             df = do_extract_transmissions(sim_output, contagion)
+        return df
+
+    def extract_statistics(self, output_file: str | Path) -> pl.DataFrame:
+        output_file = Path(output_file)
+        assert output_file.exists(), "Output file doesn't exist"
+        with h5.File(output_file, "r") as sim_output:
+            df = do_extract_statistics(sim_output, self.ast)
         return df
 
     @staticmethod

@@ -184,6 +184,12 @@ int main() {
         fmt::print("### output_file = {}\n", output_file_name);
     }
 
+    {% for var in globals if var.is_statistic %}
+    StaticArray<{{ var.type | typename }}> statistic_{{ var.name | mangle }}(NUM_TICKS);
+    statistic_{{ var.name | mangle }}.range_init(0, NUM_TICKS);
+
+    {% endfor %}
+
     H5::H5File input_file(input_file_name, H5F_ACC_RDONLY);
 
     NUM_NODES = get_num_nodes(input_file);
@@ -266,13 +272,21 @@ int main() {
         fmt::print("### cur_tick = {}\n", CUR_TICK);
         {{ intervene.name | mangle }}();
 
+        {% for var in globals if var.is_statistic %}
+        statistic_{{ var.name | mangle }}[CUR_TICK] = {{ var.name | mangle }};
+        {% endfor %}
+
         {% for contagion in contagions %}
         {{ contagion.name | mangle }}_step();
         {% endfor %}
     }
 
-    const auto main_end = omp_get_wtime();
+    create_group(output_file, "statistic");
+    {% for var in globals if var.is_statistic %}
+    statistic_{{ var.name | mangle }}.save(output_file, "/statistic/{{ var.name }}");
+    {% endfor %}
 
+    const auto main_end = omp_get_wtime();
 
     {
         H5::Group group = output_file.createGroup("runtime_stat");
