@@ -37,7 +37,7 @@ Type = TypeVar("Type")
 
 
 TEMPLATE_LOADER = jinja2.PackageLoader(
-    package_name="episim37", package_path="templates"
+    package_name="escape_abm", package_path="templates"
 )
 
 ENVIRONMENT = jinja2.Environment(
@@ -63,7 +63,7 @@ def register_filter(name: str):
     return wrapper
 
 
-STATIC_DIR = files("episim37.static")
+STATIC_DIR = files("escape_abm.static")
 
 
 def smallest_uint_type(max_val: int) -> str | None:
@@ -731,7 +731,7 @@ def run(num_ticks: int, output_file: Path, input_file: Path, simulation_file: Pa
     """Build and run simulator."""
     try:
         with TemporaryDirectory(
-            prefix=f"{simulation_file.stem}-", suffix="-episim37"
+            prefix=f"{simulation_file.stem}-", suffix="-escape_abm"
         ) as temp_output_dir:
             gen_src_dir = Path(temp_output_dir).absolute()
             rich.print(f"[cyan]Temp output dir:[/cyan] {gen_src_dir!s}")

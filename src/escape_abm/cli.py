@@ -14,12 +14,12 @@ from .output_helpers import process_output
 
 @click.group()
 def cli():
-    """EpiSim37: Epidemic Simulations on Contact Networks"""
+    """ESCAPE: Epidemic Simulator Compiler and Programming Environment"""
 
 
 @cli.group()
 def debug():
-    """Debug ESL37 code."""
+    """Debug ESL code."""
 
 
 debug.add_command(print_parse_tree)

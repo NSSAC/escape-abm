@@ -24,7 +24,7 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/simulator_openmp.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/simulator_openmp_common.h
     COMMAND
-        episim37 codegen-openmp compile -s {{ input }} -g ${CMAKE_CURRENT_BINARY_DIR}
+        esc codegen-openmp compile -s {{ input }} -g ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS {{ input }}
     VERBATIM
 )

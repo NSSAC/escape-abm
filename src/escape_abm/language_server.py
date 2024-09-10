@@ -17,7 +17,7 @@ from .ast import mk_ast
 from .check_ast import check_ast
 from .codegen_openmp import simulator_str
 
-server = LanguageServer("esl37-server", "v0.1")
+server = LanguageServer("esl-server", "v0.1")
 
 _CURRENT_COMPLETIONS: list[lsp.CompletionItem] = []
 
@@ -39,7 +39,7 @@ def error_to_diagnostic(
         range=range,
         severity=lsp.DiagnosticSeverity.Error,
         message=f"{type}: {explanation}",
-        source="esl37-server",
+        source="esl-server",
     )
 
 
@@ -65,7 +65,7 @@ BUILTIN_TYPE_DOCS = [
     ("f64", "64 bit floating point type"),
 
     # Other types (that users are expected to write)
-    ("size", "Size type (unsigned)"),
+    ("size", "Size type"),
     ("bool", "Boolean type"),
 ]
 
@@ -210,13 +210,13 @@ async def validate(
 
 @click.group()
 def language_server():
-    """ESL37 language server."""
+    """ESL language server."""
 
 
 @language_server.command()
 def io_server():
     """Start standard IO based server."""
-    log_dir = user_log_dir(appname="esl37-language-server", version="0.1")
+    log_dir = user_log_dir(appname="esl-language-server", version="0.1")
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 

@@ -3,13 +3,13 @@ requires = ["setuptools>=60", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "episim37"
-version = "0.1.2"
+name = "escape-abm"
+version = "0.0.1"
 authors = [
   { name="Parantapa Bhattacharya", email="parantapa@virginia.edu" },
 ]
-description = "Epidemic simulations on contact networks"
-readme = "README.rst"
+description = "Epidemic Simulator Compiler and Programming Environment"
+readme = "README.md"
 requires-python = ">=3.11"
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -40,7 +40,7 @@ dependencies = [
 where = ["src"]
 
 [project.urls]
-"Homepage" = "http://github.com/nssac/episim37"
+"Homepage" = "http://github.com/nssac/escape-abm"
 
 [project.scripts]
-episim37 = "episim37.cli:cli"
+esc = "escape_abm.cli:cli"

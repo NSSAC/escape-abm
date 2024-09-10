@@ -57,7 +57,7 @@ class OpenMPSimulator:
         else:
             sim_rendered = self.simulation_file.read_text()
 
-        self.rendered_simulation_file = self.work_dir / "simulator.esl37"
+        self.rendered_simulation_file = self.work_dir / "simulator.esl"
         if self.rendered_simulation_file.exists():
             exisiting_sim_rendered = self.rendered_simulation_file.read_text()
         else:
@@ -82,7 +82,7 @@ class OpenMPSimulator:
     def __setstate__(self, d):
         (self.simulation_file, self.work_dir) = d
 
-        self.rendered_simulation_file = self.work_dir / "simulator.esl37"
+        self.rendered_simulation_file = self.work_dir / "simulator.esl"
 
         self.pt = mk_pt(
             str(self.rendered_simulation_file),
