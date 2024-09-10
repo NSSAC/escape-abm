@@ -1,5 +1,6 @@
 # ESCAPE: Epidemic Simulator Compiler and Programming Environment
 
+![A man running away from a virus](docs/escape-banner.webp "A man running away from a virus")
 
 The *Epidemic Simulator Compiler and Programming Environment* or ESCAPE
 is a framework for efficiently developing
