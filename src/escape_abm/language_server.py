@@ -120,7 +120,7 @@ def builtin_completions() -> list[lsp.CompletionItem]:
 
 def enum_completions(root_node: ts.Node) -> list[lsp.CompletionItem]:
     completions: list[lsp.CompletionItem] = []
-    for node, capture in enum_query().captures(root_node):
+    for node, capture in enum_query().captures(root_node).items():
         match capture:
             case "enum_name":
                 completions.append(
