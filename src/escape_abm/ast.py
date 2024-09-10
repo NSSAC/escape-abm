@@ -126,6 +126,16 @@ register_parser("boolean", lambda node, _: node.text == "True")
 register_parser("string", lambda node, _: node.text)
 
 
+def parse_number(node: PTNode, scope: Scope) -> int | float:
+    value = parse(node.field("value"), scope)
+    if node.maybe_field("negative") is not None:
+        return -value
+    else:
+        return value
+
+register_parser("number", parse_number)
+
+
 _INSTANCE_REGISTRY: dict[type, list[Any]] = defaultdict(list)
 
 
@@ -484,8 +494,13 @@ class DiscreteDist(BaseModel):
         ps = []
         vs = []
         for child in node.fields("pv"):
-            ps.append(parse(child.field("p"), scope))
-            vs.append(parse(child.field("v"), scope))
+            p = parse(child.field("p"), scope)
+            with err_desc("Probability can't be negative.", child.field("p").pos):
+                assert p >= 0
+            ps.append(p)
+
+            v = parse(child.field("v"), scope)
+            vs.append(v)
 
         obj = cls(name=name, ps=ps, vs=vs, pos=node.pos)
         scope.define(name, obj)
@@ -1437,7 +1452,10 @@ def add_builtins(scope: Scope):
         "min",
         BuiltinFunction(
             name="min",
-            params=[BuiltinParam(name="x", type="float"), BuiltinParam(name="y", type="float")],
+            params=[
+                BuiltinParam(name="x", type="float"),
+                BuiltinParam(name="y", type="float"),
+            ],
             rtype="float",
         ),
     )
@@ -1445,7 +1463,10 @@ def add_builtins(scope: Scope):
         "max",
         BuiltinFunction(
             name="max",
-            params=[BuiltinParam(name="x", type="float"), BuiltinParam(name="y", type="float")],
+            params=[
+                BuiltinParam(name="x", type="float"),
+                BuiltinParam(name="y", type="float"),
+            ],
             rtype="float",
         ),
     )
@@ -1485,7 +1506,10 @@ def add_builtins(scope: Scope):
         "pow",
         BuiltinFunction(
             name="pow",
-            params=[BuiltinParam(name="base", type="float"), BuiltinParam(name="exp", type="float")],
+            params=[
+                BuiltinParam(name="base", type="float"),
+                BuiltinParam(name="exp", type="float"),
+            ],
             rtype="float",
         ),
     )
