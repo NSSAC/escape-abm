@@ -14,9 +14,9 @@ to define compartmental disease models
 and the structure of the contact networks
 on top of which the disease propagate.
 Additionally, ESL also includes general purpose programming constructs
---- conditionals, loops, functions, variables, etc. ---
+&mdash; conditionals, loops, functions, variables, etc. &mdash;
 and parallel constructs
---- select, sample, apply, and reduce ---
+&mdash; select, sample, apply, and reduce &mdash;
 for describing interventions.
 
 ESCAPE provides a compiler that converts
