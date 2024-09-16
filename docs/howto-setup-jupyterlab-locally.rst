@@ -88,7 +88,7 @@ Known Issues
 ------------
 
 If your Jupyter kernel keeps crashing on a Apple Mac
-it maybe due to incompatibility with `polars'.
+it maybe due to incompatibility with `polars`.
 You can try using the long term release version of polars.
 
 .. code::
