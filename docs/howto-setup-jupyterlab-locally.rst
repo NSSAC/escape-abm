@@ -1,5 +1,5 @@
-Howto setup Jupyter Lab for local EpiSim37 development
-======================================================
+Howto setup Jupyter Lab for local ESCAPE development
+====================================================
 
 For this setup we shall use the Conda package manager.
 
@@ -22,25 +22,25 @@ Create and activate a conda environment.
 
 .. code::
 
-  $ conda create -n episim37 python=3.11 nodejs=20 jupyterlab=4.1.8 gxx_impl_linux-64 cmake ninja hdf5
-  $ conda activate episim37
+  $ conda create -n escape python=3.12 nodejs=20 jupyterlab=4 gxx_impl_linux-64 cmake ninja hdf5
+  $ conda activate escape
 
-Install jupyterlab_esl37 (for ESL37 file type support),
-episim37 (for ESL37 language server),
+Install jupyterlab_esl (for ESL file type support),
+escape_abm (for ESL language server),
 and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
 
 
 .. code::
 
-  $ pip install jupyterlab_esl37 episim37 jupyterlab-lsp
+  $ pip install jupyterlab_esl escape_abm jupyterlab-lsp
 
 Configure jupyterlab-lsp.
 
 .. code::
 
-  # Locate episim37 executable
-  $ which episim37
-  /path/to/miniconda3/envs/episim37/bin/episim37
+  # Locate ESCAPE command line frontend
+  $ which esc
+  /path/to/miniconda3/envs/escape/bin/esc
 
   # Ensure config directory exits
   $ mkdir -p $HOME/.jupyter/jupyter_server_config.d
@@ -49,33 +49,33 @@ Create the jupyterlab-lsp config file with the following contents:
 
 .. code::
 
-  # $HOME/.jupyter/jupyter_server_config.d/esl37-ls.json
+  # $HOME/.jupyter/jupyter_server_config.d/esl-ls.json
 
   {
       "LanguageServerManager": {
           "language_servers": {
-              "episim37": {
+              "escape": {
                   "version": 2,
                   "argv": [
-                      "/path/to/miniconda3/envs/episim37/bin/episim37",
+                      "/path/to/miniconda3/envs/escape/bin/esc",
                       "language-server",
                       "io-server"
                   ],
                   "languages": [
-                      "esl37"
+                      "esl"
                   ],
                   "mime_types": [
-                      "text/esl37"
+                      "text/esl"
                   ]
               }
           }
       }
   }
 
-Replace `/path/to/miniconda3/envs/episim37/bin/episim37` with
-the real path of the episim37 executable.
+Replace `/path/to/miniconda3/envs/escape/bin/esc` with
+the real path of the `esc` executable.
 
-Jupyter Lab should now be configured for opening ESL37 files.
+Jupyter Lab should now be configured for opening ESL files.
 Start Jupyter Lab using the following command:
 
 .. code::
