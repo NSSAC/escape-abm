@@ -25,3 +25,8 @@ Simulators created with ESCAPE are high performance
 parallel programs that run on multi-core CPU systems
 or GPU based systems.
 The ESCAPE compiler itself is written in Python.
+
+## Documentation
+
+* [Howto setup Jupyter Lab for local ESCAPE development](docs/howto-setup-jupyterlab-locally.rst)
+* [Example 1: In-school NPIs](examples/run-example1.ipynb)
