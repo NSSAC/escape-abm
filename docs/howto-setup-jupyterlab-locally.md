@@ -27,9 +27,18 @@ conda activate escape
 
 ESCAPE requires a C++ compiler to work.
 If you do not have a C++ compiler installed,
-you can install `gcc` in your conda environment using the following command:
+you can install `gcc` or `clang` in your conda environment using the following commands:
+
+For Linux systems:
 ```sh
 conda install gxx_linux-64
+conda deactivate
+conda activate escape
+```
+
+For MacOS systems:
+```sh
+conda install clangxx_osx-64
 conda deactivate
 conda activate escape
 ```
