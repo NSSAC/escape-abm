@@ -39,7 +39,7 @@ Locate ESCAPE command line frontend and note it down.
 which esc
 ```
 ```
-/path/to/miniconda3/envs/escape/bin/esc
+/path/to/miniforge3/envs/escape/bin/esc
 ```
 
 Ensure config directory exits
@@ -55,7 +55,7 @@ Create the jupyterlab-lsp config file `$HOME/.jupyter/jupyter_server_config.d/es
             "escape": {
                 "version": 2,
                 "argv": [
-                    "/path/to/miniconda3/envs/escape/bin/esc",
+                    "/path/to/miniforge3/envs/escape/bin/esc",
                     "language-server",
                     "io-server"
                 ],
@@ -71,7 +71,7 @@ Create the jupyterlab-lsp config file `$HOME/.jupyter/jupyter_server_config.d/es
 }
 ```
 
-Replace `/path/to/miniconda3/envs/escape/bin/esc` with
+Replace `/path/to/miniforge3/envs/escape/bin/esc` with
 the real path of the `esc` executable.
 
 Jupyter Lab should now be configured for opening ESL files.
