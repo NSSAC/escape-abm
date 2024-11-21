@@ -2,9 +2,9 @@
 
 For this setup we shall use the Conda package manager from Miniforge.
 
-```
-$ wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
-$ bash Miniforge3-$(uname)-$(uname -m).sh
+```sh
+wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash Miniforge3-$(uname)-$(uname -m).sh
 ```
 
 Once setup is done, please ensure that your conda config contains the following:
