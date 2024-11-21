@@ -1,5 +1,6 @@
 # Howto setup Jupyter Lab for local ESCAPE development
 
+The following commands should work on relatively new Linux and MacOS systems.
 For this setup we shall use the Conda package manager from Miniforge.
 
 ```sh
@@ -20,7 +21,16 @@ auto_activate_base: false
 Create and activate a conda environment.
 
 ```sh
-conda create -n escape python=3.12 nodejs=20 jupyterlab=4 gxx_impl_linux-64 cmake ninja hdf5
+conda create -n escape python=3.12 nodejs=20 jupyterlab=4 cmake ninja hdf5
+conda activate escape
+```
+
+ESCAPE requires a C++ compiler to work.
+If you do not have a C++ compiler installed,
+you can install `gcc` in your conda environment using the following command:
+```sh
+conda install gxx_linux-64
+conda deactivate
 conda activate escape
 ```
 
