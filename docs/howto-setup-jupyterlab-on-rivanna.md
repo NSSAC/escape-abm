@@ -11,10 +11,9 @@ As part of the process you will install Jupyter Lab for which we can install ext
 ## Install ESCAPE and Jupyter Lab extensions
 
 
-If you already have a jupyter lab session running (check using squeue command)
-you need to first stop it (using scancel).
-Please ensure that you do not have a jupyter lab session running
-before proceeding.
+If you already have a jupyter lab session running (check using `squeue` command)
+you need to first stop it (using `scancel`).
+Please ensure that you do not have a jupyter lab session running before proceeding.
 
 We will install jupyterlab_esl (for ESL file type support),
 escape_abm (for ESL language server),
@@ -22,26 +21,31 @@ and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
 
 Ensure you are logged into Rivanna via ssh. Also ensure that myenv is still activated.
 
-```
-$ pip install jupyterlab_esl escape_abm jupyterlab-lsp
+```sh
+pip install jupyterlab_esl escape_abm jupyterlab-lsp
 ```
 
 ## Configure jupyterlab-lsp
 
 Note the location of the ESCAPE command line frontend
 
+```sh
+which esc
 ```
-$ which esc
+```
 /path/to/envs/escape/bin/esc
 ```
 
 Create jupyterlab-lsp config file for ESL.
+Ensure config directory exits.
 
+```sh
+mkdir -p $HOME/.jupyter/jupyter_server_config.d
 ```
-# Ensure config directory exits
-$ mkdir -p $HOME/.jupyter/jupyter_server_config.d
 
-# Create $HOME/.jupyter/jupyter_server_config.d/esl-ls.json with the following contents
+Create `$HOME/.jupyter/jupyter_server_config.d/esl-ls.json` with the following contents
+
+```json
 {
     "LanguageServerManager": {
         "language_servers": {

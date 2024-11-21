@@ -7,11 +7,8 @@ wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforg
 bash Miniforge3-$(uname)-$(uname -m).sh
 ```
 
-Once setup is done, please ensure that your conda config contains the following:
+Once setup is done, please ensure that your conda config `$HOME/.condarc` contains the following:
 
-```sh
-cat $HOME/.condarc
-```
 ```
 channels:
     - conda-forge
@@ -36,20 +33,21 @@ pip install jupyterlab_esl escape_abm jupyterlab-lsp
 ```
 
 Configure jupyterlab-lsp.
+Locate ESCAPE command line frontend and note it down.
 
 ```sh
-# Locate ESCAPE command line frontend and note it down
 which esc
+```
+```
 /path/to/miniconda3/envs/escape/bin/esc
+```
 
-# Ensure config directory exits
+Ensure config directory exits
+```sh
 mkdir -p $HOME/.jupyter/jupyter_server_config.d
 ```
 
-Create the jupyterlab-lsp config file with the following contents:
-```sh
-cat $HOME/.jupyter/jupyter_server_config.d/esl-ls.json
-```
+Create the jupyterlab-lsp config file `$HOME/.jupyter/jupyter_server_config.d/esl-ls.json`  with the following contents:
 ```json
 {
     "LanguageServerManager": {
