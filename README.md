@@ -31,3 +31,4 @@ The ESCAPE compiler itself is written in Python.
 * [Howto setup Jupyter Lab for local ESCAPE development](docs/howto-setup-jupyterlab-locally.md)
 * [Howto setup Jupyter Lab for ESCAPE development on Rivanna](docs/howto-setup-jupyterlab-on-rivanna.md)
 * [Example 1: In-school NPIs](examples/run-example1.ipynb)
+* [ESCAPE model repository](https://github.com/NSSAC/escape-abm-models)
