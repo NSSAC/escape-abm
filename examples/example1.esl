@@ -1,12 +1,12 @@
 # Example 1: In-school NPIs
 
-config enable_hybrid_learning: bool = True
-config enable_day_30_antigen_test: bool = True
-config enable_day_30_pcr_test: bool = False
-config transmissibility_scale: float = 0.3
+config enable_hybrid_learning = True
+config enable_day_30_antigen_test = True
+config enable_day_30_pcr_test = False
+config transmissibility_scale = 0.3
 
-statistic S_or_R: int = 0
-statistic enabled_edge_count: int = 0
+statistic S_or_R = 0
+statistic enabled_edge_count = 0
 
 node
     pid: int node key
@@ -44,13 +44,12 @@ contagion c1
         Iasymp => S -> E
     end
 
-    susceptibility c1_susceptibility
-    infectivity c1_infectivity
-    transmissibility c1_transmissibility
-    enabled c1_enabled
+    susceptibility = c1_susceptibility
+    infectivity = c1_infectivity
+    transmissibility = c1_transmissibility
 end
 
-def c1_susceptibility(v: node) -> float:
+def c1_susceptibility(v):
     if v.c1.state == S:
         return 1.0
     else:
@@ -58,7 +57,7 @@ def c1_susceptibility(v: node) -> float:
     end
 end
 
-def c1_infectivity(v: node) -> float:
+def c1_infectivity(v):
     if v.c1.state == Ipresymp:
         return 0.8
     elif v.c1.state == Isymp or v.c1.state == Iasymp:
@@ -68,21 +67,17 @@ def c1_infectivity(v: node) -> float:
     end
 end
 
-def c1_transmissibility(e: edge) -> float:
-    return transmissibility_scale * e.duration / 86400
-end
-
-def c1_enabled(e: edge) -> bool:
+def c1_transmissibility(e):
     if e.is_non_home_edge and (is_isolating(e.source_node) or is_isolating(e.target_node)):
-        return False
+        return 0.0
     elif e.is_school_edge and not is_school_day():
-        return False
+        return 0.0
     else:
-        return True
+        return transmissibility_scale * e.duration / 86400
     end
 end
 
-def is_isolating(n: node) -> bool:
+def is_isolating(n):
     if CUR_TICK <= n.home_isolation_start and n.home_isolation_end < CUR_TICK:
         return True
     else:
@@ -92,8 +87,8 @@ end
 
 # Sunday = 0, Monday = 1, Tuesday = 2, Wednesday = 3
 # Thursday = 4, Friday = 5
-def is_school_day() -> bool:
-    var day_of_week : int = CUR_TICK % 7
+def is_school_day():
+    day_of_week = CUR_TICK % 7
 
     if enable_hybrid_learning and 1 <= day_of_week and day_of_week <= 3:
         return True
@@ -123,44 +118,49 @@ distribution
     end
 end
 
-nodeset susceptibles
-nodeset seed_nodes
-nodeset positive_inschool_nodes
-nodeset will_start_isolation
+def is_positive_in_school_nodes(n):
+    return (
+        n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
+        and n.is_in_school
+        and not is_isolating(n)
+    )
+end
 
 def intervene():
     if CUR_TICK < 10:
-        select(susceptibles, [n: node -> bool](n.c1.state == S))
-        sample(seed_nodes, susceptibles, 5, ABSOLUTE)
-        apply(seed_nodes, [n: node]{ n.c1.state = E ; })
-    end
-
-    select(susceptibles, [n: node -> bool](n.c1.state == S))
-
-    if (enable_day_30_antigen_test or enable_day_30_pcr_test) and CUR_TICK >= 30:
-        select(positive_inschool_nodes, [n: node -> bool](
-            (n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp)
-            and n.is_in_school
-            and not is_isolating(n)
-        ))
+        from node
+        filter lambda (n) { return n.c1.state == S }
+        sample ABSOLUTE 5
+        apply lambda (n) { n.c1.state = E }
     end
 
     if enable_day_30_antigen_test and CUR_TICK >= 30:
-        sample(will_start_isolation, positive_inschool_nodes, 0.8, RELATIVE)
-        apply(will_start_isolation, [n: node]{
+        from node
+        filter is_positive_in_school_node
+        sample RELATIVE 0.8
+        apply lambda(n) {
             n.home_isolation_start = CUR_TICK+1
             n.home_isolation_end = CUR_TICK+15
-        })
+        }
     end
 
     if enable_day_30_pcr_test and CUR_TICK >= 30:
-        sample(will_start_isolation, positive_inschool_nodes, 0.95, RELATIVE)
-        apply(will_start_isolation, [n: node]{
+        from node
+        filter is_positive_in_school_node
+        sample RELATIVE 0.95
+        apply lambda (n) {
             n.home_isolation_start = CUR_TICK+2
             n.home_isolation_end = CUR_TICK+16
-        })
+        }
     end
 
-    S_or_R <- reduce(ALL_NODES, [n: node -> int](n.c1.state == S or n.c1.state == R), +)
-    enabled_edge_count <- reduce(ALL_EDGES, c1_enabled, +)
+    global S_or_R, c1_enabled
+
+    from node
+    filter lambda (n) { return n.c1.state == S or n.c1.state == R }
+    reduce S_or_R += 1
+
+    from edge
+    filter c1_enabled
+    reduce enabled_edge_count += 1
 end
