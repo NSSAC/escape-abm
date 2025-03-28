@@ -8,11 +8,10 @@ import click
 from tree_sitter import Node as TSNode
 
 import rich
-import rich.markup
 from rich.tree import Tree
 from rich.pretty import Pretty
 
-from .misc import SourcePosition, EslError, EslErrorList
+from .misc import SourcePosition, CodeError, CodeErrorList, RichException
 from .tree_sitter_bindings import get_parser
 from .click_helpers import simulation_file_option
 
@@ -30,7 +29,7 @@ def tsnode_to_pos(node: TSNode, source: str, source_bytes: bytes) -> SourcePosit
     )
 
 
-FILTERED_NODES = ["comment", "template_block"]
+FILTERED_NODES = ["comment"]
 
 
 class PTNode:
@@ -46,7 +45,9 @@ class PTNode:
 
     @property
     def text(self) -> str:
-        return self.node.text.decode()
+        text = self.node.text
+        assert text is not None
+        return text.decode()
 
     @property
     def pos(self) -> SourcePosition:
@@ -112,14 +113,17 @@ class PTNode:
 
 
 def check_parse_errors(
-    source: str, source_bytes: bytes, node: TSNode, errors: list[EslError] | None = None
-) -> list[EslError]:
+    source: str,
+    source_bytes: bytes,
+    node: TSNode,
+    errors: list[CodeError] | None = None,
+) -> list[CodeError]:
     if errors is None:
         errors = []
 
     if node.type == "ERROR":
         errors.append(
-            EslError(
+            CodeError(
                 "Parse error",
                 "Failed to parse",
                 tsnode_to_pos(node, source, source_bytes),
@@ -127,7 +131,7 @@ def check_parse_errors(
         )
     elif node.is_missing:
         errors.append(
-            EslError(
+            CodeError(
                 "Missing token",
                 f"Expected token of type {node.type}",
                 tsnode_to_pos(node, source, source_bytes),
@@ -147,7 +151,7 @@ def mk_pt(source: str, source_bytes: bytes) -> PTNode:
     root_node = parse_tree.root_node
     errors = check_parse_errors(source, source_bytes, root_node)
     if errors:
-        raise EslErrorList("Failed to construct parse tree", errors)
+        raise CodeErrorList("Failed to construct parse tree", errors)
     root_node = PTNode(source, source_bytes, root_node)
     return root_node
 
@@ -160,6 +164,6 @@ def print_parse_tree(simulation_file: Path):
     try:
         pt = mk_pt(str(simulation_file), file_bytes)
         rich.print(pt.rich_tree())
-    except EslErrorList as e:
+    except RichException as e:
         e.rich_print()
         raise SystemExit(1)

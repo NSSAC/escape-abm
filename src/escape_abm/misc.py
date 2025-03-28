@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import override
+
 from pydantic import BaseModel
 import rich
 import rich.markup
@@ -39,7 +41,7 @@ class RichException(Exception):
         rich.print(f"[red]{self!s}[/red]")
 
 
-class EslError(RichException):
+class CodeError(RichException):
     """Error attributable to a section of the code."""
 
     def __init__(self, type: str, description: str, pos: SourcePosition | None):
@@ -59,6 +61,7 @@ class EslError(RichException):
     def __str__(self):
         return f"{self.type}: {self.description}"
 
+    @override
     def rich_print(self):
         if self.pos is not None:
             etype = f"[red]{self.type}[/red]"
@@ -75,10 +78,10 @@ class EslError(RichException):
             rich.print(f"{etype}: {expl}")
 
 
-class EslErrorList(RichException):
+class CodeErrorList(RichException):
     """List of errors."""
 
-    def __init__(self, description: str, errors: list[EslError]):
+    def __init__(self, description: str, errors: list[CodeError]):
         super().__init__()
         self.description = description
         self.errors = errors
@@ -86,6 +89,7 @@ class EslErrorList(RichException):
     def __str__(self):
         return self.description
 
+    @override
     def rich_print(self):
         rich.print(f"[red]{self}[/red]")
         for error in self.errors:
