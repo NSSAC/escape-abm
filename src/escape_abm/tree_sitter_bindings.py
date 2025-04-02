@@ -2,8 +2,7 @@
 
 from functools import cache
 
-# from tree_sitter import Language, Parser, Query
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, Query
 
 import tree_sitter_esl as esl
 
@@ -19,13 +18,6 @@ def get_parser() -> Parser:
     return parser
 
 
-# @cache
-# def enum_query() -> Query:
-#     query = """
-#     (enum
-#         name: (identifier) @enum_name
-#         const: (identifier) @enum_const
-#      )
-#     """
-#     language = get_language()
-#     return language.query(query)
+def get_query(q: str) -> Query:
+    language = get_language()
+    return language.query(q)

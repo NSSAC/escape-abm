@@ -12,7 +12,7 @@ from rich.tree import Tree
 from rich.pretty import Pretty
 
 from .misc import SourcePosition, CodeError, CodeErrorList, RichException
-from .tree_sitter_bindings import get_parser
+from .tree_sitter_bindings import get_parser, get_query
 from .click_helpers import simulation_file_option
 
 
@@ -52,6 +52,20 @@ class PTNode:
     @property
     def pos(self) -> SourcePosition:
         return tsnode_to_pos(self.node, self.source, self.source_bytes)
+
+    def query(self, q: str) -> dict[str, list[PTNode]]:
+        return {
+            k: [PTNode(self.source, self.source_bytes, v) for v in vs]
+            for k, vs in get_query(q).captures(self.node).items()
+        }
+
+    def simple_query(self, type: str) -> list[PTNode]:
+        q = f"({type}) @x"
+        captures = get_query(q).captures(self.node)
+        if captures:
+            return [PTNode(self.source, self.source_bytes, v) for v in captures["x"]]
+        else:
+            return []
 
     def field(self, name: str) -> PTNode:
         child = self.node.child_by_field_name(name)
