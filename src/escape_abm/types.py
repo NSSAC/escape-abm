@@ -7,7 +7,7 @@ from functools import cached_property
 from pydantic import BaseModel, Field
 from typing import Self
 
-from .misc import Scope
+from .misc import Scope, CodeError
 
 
 class BuiltinType(BaseModel):
@@ -47,6 +47,28 @@ class ExistentialType(BaseModel):
         global _EXISTENTIAL_TYPE_COUNTER
         _EXISTENTIAL_TYPE_COUNTER = 0
 
+    def root(self) -> Type:
+        if self.parent is None:
+            return self
+        elif isinstance(self.parent, ExistentialType):
+            return self.parent.root()
+        else:
+            return self.parent
+
+    def is_known(self) -> bool:
+        if isinstance(self.root(), ExistentialType):
+            return False
+        else:
+            return True
+
+    def unify(self, type: Type) -> Type:
+        rt = self.root()
+        if isinstance(rt, ExistentialType):
+            rt.parent = type
+            return type
+        else:
+            raise CodeError("Type error", f"Type mismatch: {rt!r} != {type!r}", None)
+
 
 class FunctionType(BaseModel):
     params: list[Type]
@@ -70,6 +92,7 @@ def make_type_graph() -> nx.DiGraph:
     nx.add_path(G, ("edge", "type"))
     nx.add_path(G, ("str", "type"))
     nx.add_path(G, ("void", "type"))
+    nx.add_path(G, ("_enum", "type"))
     return G
 
 

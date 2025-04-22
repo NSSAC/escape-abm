@@ -1,4 +1,6 @@
-config YOUTH_IMMUNITY : float = 0.8
+config IMMUNITY_LE18: float = 0.8
+config TRANSMISSIBILITY: float = 0.5
+config MAX_DURATION: float = 86400.0
 
 node
   pid: int node key
@@ -6,24 +8,27 @@ node
 end
 
 edge
-  targetPID: int target node key
-  sourcePID: int source node key
+  target_pid: int target node key
+  source_pid: int source node key
+  duration: int static
 end
 
 enum state_t
-  S, E, Isymp, Iasymp, R
+  S, E, I, A, R
 end
 
-contagion c1
+contagion cntg
   state type state_t
 
   transition
-    E -> Isymp, p = symp_prob, dwell = 3.0
-    E -> Iasymp,
-        p = lambda (n) { return 1.0 - symp_prob(n) },
+    E -> I, p = symp_prob, dwell = 3.0
+    E -> A,
+        p = lambda (n) {
+            return 1.0 - symp_prob(n)
+        },
         dwell = 3.0
-    Isymp -> R, dwell = recovery_time
-    Iasymp -> R, dwell = recovery_time
+    Isymp -> R, dwell = normal(5.0, 1.0)
+    Iasymp -> R, dwell = normal(5.0, 1.0)
   end
 
   transmission
@@ -31,20 +36,16 @@ contagion c1
     Iasymp => S -> E
   end
 
-  susceptibility = c1_susceptibility
+  susceptibility = 1.0
   infectivity = 1.0
-  transmissibility = 0.5
-end
-
-distribution
-  normal recovery_time
-    mean = 5.0, std = 1.0, min = 0.0, max = 10.0
-  end
+  transmissibility = lambda (e) {
+    return TRANSMISSIBILITY * e.duration / MAX_DURATION
+  }
 end
 
 def symp_prob(n: node) -> float:
   if n.age <= 18:
-    return YOUTH_IMMUNITY
+    return 1.0 - IMMUNITY_LE18
   else:
     return 1.0
   end
@@ -53,10 +54,9 @@ end
 def intervene():
   if CUR_TICK < 10:
     from node
-    filter lambda (n) { return n.c1.state == S }
+    filter lambda (n) { return n.cntg.state == S }
     sample ABSOLUTE 5
-    apply lambda (n) { n.c1.state = E }
+    apply lambda (n) { n.cntg.state = E }
   end
 end
-
 

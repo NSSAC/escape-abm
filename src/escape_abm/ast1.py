@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from collections import defaultdict
 from contextlib import contextmanager
+from types import FunctionType
 from typing import Any, Callable, Self
 from functools import cached_property
 from enum import Enum
@@ -17,11 +18,9 @@ from .misc import SourcePosition, CodeError, RichException, Scope
 from .types import (
     BuiltinType,
     EnumType,
-    ExistentialType,
     FunctionType,
     Type,
     add_base_types,
-    make_type_graph,
 )
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
@@ -32,11 +31,12 @@ def err_desc(description: str, pos: SourcePosition | None):
     try:
         yield
     except AssertionError:
-        raise CodeError("AST Error", description, pos)
+        raise CodeError("Semantic error", description, pos)
 
 
 class AstNode(BaseModel):
-    pos: SourcePosition = Field(repr=False)
+    id_: str | None = Field(default=None, repr=False)
+    pos_: SourcePosition | None = Field(default=None, repr=False)
 
 
 NodeParser = Callable[[PTNode, Scope], Any]
@@ -49,13 +49,19 @@ def parse(node: PTNode, scope: Scope) -> Any:
         node_parser = _NODE_PARSER[node.type]
     except KeyError:
         raise CodeError(
-            "System Error",
+            "AST Error",
             f"Parser for node type '{node.type}' is not defined",
             node.pos,
         )
 
     try:
-        return node_parser(node, scope)
+        ast_node = node_parser(node, scope)
+        if isinstance(ast_node, AstNode):
+            if ast_node.id_ is None:
+                ast_node.id_ = f"_{node.type}_{node.pos.line}_{node.pos.col}"
+            if ast_node.pos_ is None:
+                ast_node.pos_ = node.pos
+        return ast_node
     except CodeError:
         raise
     except Exception as e:
@@ -69,6 +75,64 @@ def register_parser(type: str, parser: NodeParser):
     if type in _NODE_PARSER:
         raise ValueError(f"Parser for '{type}' is already defined")
     _NODE_PARSER[type] = parser
+
+
+register_parser("integer", lambda node, _: int(node.text))
+register_parser("float", lambda node, _: float(node.text))
+register_parser("boolean", lambda node, _: node.text == "True")
+register_parser("string", lambda node, _: node.text)
+
+
+class Reference(AstNode):
+    names: list[str]
+    scope: Scope = Field(repr=False)
+
+    @classmethod
+    def make(cls, node: PTNode, scope: Scope) -> Self:
+        names = [s.text for s in node.named_children]
+        obj = cls(names=names, scope=scope)
+        return obj
+
+    @cached_property
+    def name(self) -> str:
+        return ".".join(self.names)
+
+    @cached_property
+    def value(self) -> Any:
+        head, tail = self.names[0], self.names[1:]
+        refs = []
+        try:
+            v = self.scope.resolve(head)
+            refs.append(v)
+
+            for part in tail:
+                if hasattr(v, "scope"):
+                    v = v.scope.resolve(part)
+                    refs.append(v)
+                elif hasattr(v, "type"):
+                    v = v.type
+                    # FIXME: !!!
+                    v = v.scope.resolve(part)
+                    refs.append(v)
+                else:
+                    raise
+
+        except Exception as e:
+            raise CodeError(
+                "Reference error",
+                f"Failed to resolve '{self.name}'; ({e!s})",
+                self.pos_,
+            )
+
+        if len(refs) == 1:
+            value = refs[0]
+        else:
+            value = tuple(refs)
+
+        return value
+
+
+register_parser("reference", Reference.make)
 
 
 class BuiltinGlobal(BaseModel):
@@ -109,7 +173,7 @@ class EnumTypeDefn(AstNode):
         consts = [child.text for child in node.fields("constant")]
         type = EnumType(name=name, consts=consts)
 
-        obj = cls(type=type, pos=node.pos)
+        obj = cls(type=type)
         for child in node.fields("constant"):
             enum_const = EnumConstant(name=child.text, type=type)
             scope.define(enum_const.name, enum_const)
@@ -119,63 +183,6 @@ class EnumTypeDefn(AstNode):
 
 
 register_parser("enum", EnumTypeDefn.make)
-
-
-class Literal(AstNode):
-    value: int | float | bool | str
-
-
-register_parser("integer", lambda node, _: Literal(value=int(node.text), pos=node.pos))
-register_parser("float", lambda node, _: Literal(value=float(node.text), pos=node.pos))
-register_parser(
-    "boolean", lambda node, _: Literal(value=(node.text == "True"), pos=node.pos)
-)
-register_parser("string", lambda node, _: Literal(value=node.text, pos=node.pos))
-
-
-class Reference(AstNode):
-    names: list[str]
-    scope: Scope = Field(repr=False)
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
-        names = [s.text for s in node.named_children]
-        obj = cls(names=names, scope=scope, pos=node.pos)
-        return obj
-
-    @cached_property
-    def name(self) -> str:
-        return ".".join(self.names)
-
-    @cached_property
-    def value(self) -> Any:
-        head, tail = self.names[0], self.names[1:]
-        refs = []
-        try:
-            v = self.scope.resolve(head)
-            refs.append(v)
-            for part in tail:
-                if hasattr(v, "scope"):
-                    v = v.scope.resolve(part)
-                else:
-                    v = v.type.scope.resolve(part)
-                refs.append(v)
-        except Exception as e:
-            raise CodeError(
-                "Reference error",
-                f"Failed to resolve '{self.name}'; ({e!s})",
-                self.pos,
-            )
-
-        if len(refs) == 1:
-            value = refs[0]
-        else:
-            value = tuple(refs)
-
-        return value
-
-
-register_parser("reference", Reference.make)
 
 
 class GlobalCategory(Enum):
@@ -194,10 +201,17 @@ class GlobalVariable(AstNode):
     def make(cls, node: PTNode, scope: Scope) -> Self:
         name = node.field("name").text
         category = GlobalCategory(node.field("category").text)
-        type = scope.resolve(node.field("type").text)
+        type = node.maybe_field("type")
+        if type is None:
+            type = ExistentialType.create()
+        else:
+            type = parse(type, scope).value
         default = parse(node.field("default"), scope)
         obj = cls(
-            name=name, type=type, category=category, default=default, pos=node.pos
+            name=name,
+            type=type,
+            category=category,
+            default=default,
         )
         scope.define(name, obj)
         return obj
@@ -216,7 +230,7 @@ class NodeField(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         name = node.field("name").text
-        type = scope.resolve(node.field("type").text)
+        type = parse(node.field("type"), scope).value
 
         annotations = [c.text for c in node.fields("annotation")]
         is_node_key = "node key" in annotations
@@ -232,7 +246,6 @@ class NodeField(AstNode):
             is_node_key=is_node_key,
             is_static=is_static,
             save_to_output=save_to_output,
-            pos=node.pos,
         )
         if not is_node_key:
             scope.define(name, obj)
@@ -261,7 +274,7 @@ class NodeTable(AstNode):
             assert len(key) == 1
         key = key[0]
 
-        obj = cls(fields=fields, key=key, scope=scope, pos=node.pos)
+        obj = cls(fields=fields, key=key, scope=scope)
         return obj
 
 
@@ -279,7 +292,7 @@ class EdgeField(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         name = node.field("name").text
-        type = scope.resolve(node.field("type").text)
+        type = parse(node.field("type"), scope).value
 
         annotations = [c.text for c in node.fields("annotation")]
         is_source_node_key = "source node key" in annotations
@@ -297,7 +310,6 @@ class EdgeField(AstNode):
             is_source_node_key=is_source_node_key,
             is_static=is_static,
             save_to_output=save_to_output,
-            pos=node.pos,
         )
         if not (is_target_node_key or is_source_node_key):
             scope.define(name, obj)
@@ -323,7 +335,9 @@ class EdgeTable(AstNode):
     fields: list[EdgeField]
     target_node_key: EdgeField
     source_node_key: EdgeField
-    scope: Scope = Field(repr=False)
+    source_node: SourceNodeAccessor
+    target_node: TargetNodeAccessor
+    scope: Scope | None = Field(default=None, repr=False)
 
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> Self:
@@ -354,8 +368,9 @@ class EdgeTable(AstNode):
             fields=fields,
             target_node_key=target_key,
             source_node_key=source_key,
+            source_node=source_node,
+            target_node=target_node,
             scope=scope,
-            pos=node.pos,
         )
         return obj
 
@@ -382,7 +397,7 @@ class DiscreteDist(AstNode):
             vs.append(v)
 
         type = FunctionType(params=[], return_=scope.resolve("float"))
-        obj = cls(name=name, ps=ps, vs=vs, type=type, pos=node.pos)
+        obj = cls(name=name, ps=ps, vs=vs, type=type)
         scope.define(name, obj)
         return obj
 
@@ -405,27 +420,13 @@ class NormalDist(AstNode):
         std = parse(node.field("std"), scope)
 
         min = node.maybe_field("min")
-        if min is None:
-            min = Literal(
-                value=-1e300,
-                pos=node.pos,
-            )
-        else:
-            min = parse(min, scope)
+        min = -1e300 if min is None else parse(min, scope)
 
         max = node.maybe_field("max")
-        if max is None:
-            max = Literal(
-                value=1e300,
-                pos=node.pos,
-            )
-        else:
-            max = parse(max, scope)
+        max = 1e300 if max is None else parse(max, scope)
 
         type = FunctionType(params=[], return_=scope.resolve("float"))
-        obj = cls(
-            name=name, mean=mean, std=std, min=min, max=max, type=type, pos=node.pos
-        )
+        obj = cls(name=name, mean=mean, std=std, min=min, max=max, type=type)
         scope.define(name, obj)
         return obj
 
@@ -445,7 +446,7 @@ class UniformDist(AstNode):
         low = parse(node.field("low"), scope)
         high = parse(node.field("high"), scope)
         type = FunctionType(params=[], return_=scope.resolve("float"))
-        obj = cls(name=name, low=low, high=high, type=type, pos=node.pos)
+        obj = cls(name=name, low=low, high=high, type=type)
         scope.define(name, obj)
         return obj
 
@@ -466,24 +467,20 @@ register_parser("distributions", parse_distributions)
 class Transition(AstNode):
     entry: Reference
     exit: Reference
-    p: Expression | LambdaFunction
-    dwell: Expression | LambdaFunction
+    p: Expression
+    dwell: Expression
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
-
         entry = parse(node.field("entry"), scope)
         exit = parse(node.field("exit"), scope)
         p = node.maybe_field("p")
         if p is None:
-            p = Literal(
-                value=1.0,
-                pos=node.pos,
-            )
+            p = 1
         else:
             p = parse(p, scope)
         dwell = parse(node.field("dwell"), scope)
-        return cls(entry=entry, exit=exit, p=p, dwell=dwell, pos=node.pos)
+        return cls(entry=entry, exit=exit, p=p, dwell=dwell)
 
 
 register_parser("transition", Transition.make)
@@ -506,7 +503,7 @@ class Transmission(AstNode):
         contact = parse(node.field("contact"), scope)
         entry = parse(node.field("entry"), scope)
         exit = parse(node.field("exit"), scope)
-        return cls(contact=contact, entry=entry, exit=exit, pos=node.pos)
+        return cls(contact=contact, entry=entry, exit=exit)
 
 
 register_parser("transmission", Transmission.make)
@@ -519,8 +516,8 @@ def parse_transmissions(node: PTNode, scope: Scope) -> list[Transmission]:
 register_parser("transmissions", parse_transmissions)
 
 
-def parse_contagion_state_type(node: PTNode, scope: Scope) -> EnumType:
-    return scope.resolve(node.field("type").text)
+def parse_contagion_state_type(node: PTNode, scope: Scope) -> Reference:
+    return parse(node.field("type"), scope)
 
 
 register_parser("contagion_state_type", parse_contagion_state_type)
@@ -534,7 +531,7 @@ class ContagionFuncton(Enum):
 
 def parse_contagion_function(
     node: PTNode, scope: Scope
-) -> tuple[ContagionFuncton, Expression | LambdaFunction]:
+) -> tuple[ContagionFuncton, Reference]:
     type = ContagionFuncton(node.field("type").text)
     function = parse(node.field("function"), scope)
     return type, function
@@ -549,13 +546,13 @@ class StateAccessor(BaseModel):
 
 class Contagion(AstNode):
     name: str
-    state_type: EnumType
     transitions: list[Transition]
     transmissions: list[Transmission]
-    susceptibility: Expression | LambdaFunction
-    infectivity: Expression | LambdaFunction
-    transmissibility: Expression | LambdaFunction
-    scope: Scope = Field(repr=False)
+    susceptibility: Expression
+    infectivity: Expression
+    transmissibility: Expression
+    state: StateAccessor
+    scope: Scope | None = Field(default=None, repr=False)
 
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> Self:
@@ -566,17 +563,18 @@ class Contagion(AstNode):
         for child in node.fields("body"):
             children[child.type].append(parse(child, scope))
 
+        state_type = children["contagion_state_type"]
         with err_desc("State type must defined once for each contagion.", node.pos):
-            assert len(children["contagion_state_type"]) == 1
-        state_type = children["contagion_state_type"][0]
+            assert len(state_type) == 1
+        state_type = state_type[0].value
 
         state = StateAccessor(type=state_type)
         scope.define("state", state)
 
         transitions = [t for ts in children["transitions"] for t in ts]
         transmissions = [t for ts in children["transmissions"] for t in ts]
-
         contagion_functions = children["contagion_function"]
+
         susceptibility = [
             f for k, f in contagion_functions if k == ContagionFuncton.Susceptibility
         ]
@@ -602,14 +600,13 @@ class Contagion(AstNode):
 
         obj = cls(
             name=name,
-            state_type=state_type,
             transitions=transitions,
             transmissions=transmissions,
             susceptibility=susceptibility,
             infectivity=infectivity,
             transmissibility=transmissibility,
+            state=state,
             scope=scope,
-            pos=node.pos,
         )
         parent_scope.define(name, obj)
         return obj
@@ -630,8 +627,8 @@ class Variable(AstNode):
         if type is None:
             type = ExistentialType.create()
         else:
-            type = scope.resolve(type.text)
-        obj = cls(name=name, type=type, scope=None, pos=node.pos)
+            type = parse(type, scope).value
+        obj = cls(name=name, type=type, scope=None)
         scope.define(name, obj)
         return obj
 
@@ -639,25 +636,30 @@ class Variable(AstNode):
     def make_from_assignment(cls, node: PTNode, scope: Scope) -> Self:
         name = node.field("lvalue").named_children[0].text
         type = node.maybe_field("type")
-        type = scope.resolve(node.field("type").text)
-        obj = cls(name=name, type=type, scope=None, pos=node.pos)
+        if type is None:
+            type = ExistentialType.create()
+        else:
+            type = parse(type, scope).value
+        obj = cls(name=name, type=type, scope=None)
         scope.define(name, obj)
+
+        # This method is not called via parse
+        # So we need to do this here
+        obj.id_ = f"_variable_{node.pos.line}_{node.pos.col}"
+        obj.pos_ = node.pos
+
         return obj
 
 
 register_parser("parameter", Variable.make)
-register_parser("lambda_parameter", Variable.make)
 
 
 class Function(AstNode):
     name: str
     params: list[Variable]
     type: FunctionType
-    variables: list[Variable]
     body: list[Statement]
-    is_kernel: bool
-    calls: list[Reference]
-    scope: Scope = Field(repr=False)
+    scope: Scope | None = Field(default=None, repr=False)
 
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> Self:
@@ -670,29 +672,17 @@ class Function(AstNode):
 
         return_type = node.maybe_field("type")
         if return_type is None:
-            return_type = scope.resolve("_void")
+            return_type = ExistentialType.create()
         else:
-            return_type = scope.resolve(return_type.text)
+            return_type = parse(return_type, scope).value
         type = FunctionType(params=[p.type for p in params], return_=return_type)
 
         body = []
-        obj = cls(
-            name=name,
-            params=params,
-            type=type,
-            variables=[],
-            body=body,
-            is_kernel=True,
-            calls=[],
-            scope=scope,
-            pos=node.pos,
-        )
-        scope.define("_function", obj)
-
         for child in node.fields("body"):
             stmt = parse(child, scope)
             body.append(stmt)
 
+        obj = cls(name=name, params=params, type=type, body=body, scope=scope)
         parent_scope.define(name, obj)
         return obj
 
@@ -704,15 +694,12 @@ class LambdaFunction(AstNode):
     name: str
     params: list[Variable]
     type: FunctionType
-    variables: list[Variable]
     body: list[Statement]
-    is_kernel: bool
-    calls: list[Reference]
-    scope: Scope = Field(repr=False)
+    scope: Scope | None = Field(default=None, repr=False)
 
     @classmethod
     def make(cls, node: PTNode, parent_scope: Scope) -> Self:
-        name = f"_lambda_{node.pos.line}_{node.pos.col}"
+        name = f"lambda_function_{node.pos.line}_{node.pos.col}"
         scope = Scope(name=name, parent=parent_scope)
 
         params = []
@@ -723,27 +710,15 @@ class LambdaFunction(AstNode):
         if return_type is None:
             return_type = ExistentialType.create()
         else:
-            return_type = scope.resolve(return_type.text)
+            return_type = parse(return_type, scope).value
         type = FunctionType(params=[p.type for p in params], return_=return_type)
 
         body = []
-        obj = cls(
-            name=name,
-            params=params,
-            type=type,
-            variables=[],
-            body=body,
-            is_kernel=True,
-            calls=[],
-            scope=scope,
-            pos=node.pos,
-        )
-        scope.define("_function", obj)
-
         for child in node.fields("body"):
             stmt = parse(child, scope)
             body.append(stmt)
 
+        obj = cls(name=name, params=params, type=type, body=body, scope=scope)
         parent_scope.define(name, obj)
         return obj
 
@@ -769,7 +744,7 @@ class UnaryExpression(AstNode):
     def make(cls, node: PTNode, scope: Scope) -> Self:
         operator = UnaryOperator(node.field("operator").text)
         argument = parse(node.field("argument"), scope)
-        return cls(operator=operator, argument=argument, pos=node.pos)
+        return cls(operator=operator, argument=argument)
 
 
 register_parser("unary_expression", UnaryExpression.make)
@@ -822,7 +797,7 @@ class BinaryExpression(AstNode):
         left = parse(node.field("left"), scope)
         operator = BinaryOperator(node.field("operator").text)
         right = parse(node.field("right"), scope)
-        return cls(left=left, operator=operator, right=right, pos=node.pos)
+        return cls(left=left, operator=operator, right=right)
 
 
 register_parser("binary_expression", BinaryExpression.make)
@@ -834,7 +809,7 @@ class ParenthesizedExpression(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         expression = parse(node.field("expression"), scope)
-        return cls(expression=expression, pos=node.pos)
+        return cls(expression=expression)
 
 
 register_parser("parenthesized_expression", ParenthesizedExpression.make)
@@ -848,15 +823,10 @@ class FunctionCall(AstNode):
     def make(cls, node: PTNode, scope: Scope) -> Self:
         function = parse(node.field("function"), scope)
         args = [parse(c, scope) for c in node.fields("arg")]
-        obj = cls(function=function, args=args, pos=node.pos)
-
-        try:
-            caller = scope.resolve("_function")
-            assert isinstance(caller, Function | LambdaFunction)
-            caller.calls.append(function)
-        except KeyError:
-            pass
-
+        obj = cls(
+            function=function,
+            args=args,
+        )
         return obj
 
 
@@ -867,7 +837,7 @@ class PassStatement(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         _, _ = node, scope
-        return cls(pos=node.pos)
+        return cls()
 
 
 register_parser("pass_statement", PassStatement.make)
@@ -879,7 +849,7 @@ class CallStatement(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         call = parse(node.named_children[0], scope)
-        return cls(call=call, pos=node.pos)
+        return cls(call=call)
 
 
 register_parser("call_statement", CallStatement.make)
@@ -887,15 +857,12 @@ register_parser("call_statement", CallStatement.make)
 
 class ReturnStatement(AstNode):
     expression: Expression
-    function: Function | LambdaFunction = Field(repr=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         expression = node.named_children[0]
         expression = parse(expression, scope)
-
-        function = scope.resolve("_function")
-        return cls(expression=expression, function=function, pos=node.pos)
+        return cls(expression=expression)
 
 
 register_parser("return_statement", ReturnStatement.make)
@@ -911,7 +878,7 @@ class ElifSection(AstNode):
         body = []
         for child in node.fields("body"):
             body.append(parse(child, scope))
-        return cls(condition=condition, body=body, pos=node.pos)
+        return cls(condition=condition, body=body)
 
 
 register_parser("elif_section", ElifSection.make)
@@ -925,7 +892,7 @@ class ElseSection(AstNode):
         body = []
         for child in node.fields("body"):
             body.append(parse(child, scope))
-        return cls(body=body, pos=node.pos)
+        return cls(body=body)
 
 
 register_parser("else_section", ElseSection.make)
@@ -951,7 +918,10 @@ class IfStatement(AstNode):
             else_ = parse(else_, scope)
 
         obj = cls(
-            condition=condition, body=body, elifs=elifs, else_=else_, pos=node.pos
+            condition=condition,
+            body=body,
+            elifs=elifs,
+            else_=else_,
         )
         return obj
 
@@ -969,7 +939,7 @@ class CaseSection(AstNode):
         body = []
         for child in node.fields("body"):
             body.append(parse(child, scope))
-        return cls(match=match, body=body, pos=node.pos)
+        return cls(match=match, body=body)
 
 
 register_parser("case_section", CaseSection.make)
@@ -983,7 +953,7 @@ class DefaultSection(AstNode):
         body = []
         for child in node.fields("body"):
             body.append(parse(child, scope))
-        return cls(body=body, pos=node.pos)
+        return cls(body=body)
 
 
 register_parser("default_section", DefaultSection.make)
@@ -1004,7 +974,7 @@ class SwitchStatement(AstNode):
         if default is not None:
             default = parse(default, scope)
 
-        obj = cls(condition=condition, cases=cases, default=default, pos=node.pos)
+        obj = cls(condition=condition, cases=cases, default=default)
         return obj
 
 
@@ -1021,7 +991,7 @@ class WhileLoop(AstNode):
         body = []
         for child in node.fields("body"):
             body.append(parse(child, scope))
-        return cls(condition=condition, body=body, pos=node.pos)
+        return cls(condition=condition, body=body)
 
 
 register_parser("while_loop", WhileLoop.make)
@@ -1030,37 +1000,23 @@ register_parser("while_loop", WhileLoop.make)
 class AssignmentStatement(AstNode):
     lvalue: Reference
     rvalue: Expression
-    function: Function | LambdaFunction = Field(repr=False)
+    variable: Variable | None
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         lvalue = parse(node.field("lvalue"), scope)
         rvalue = parse(node.field("rvalue"), scope)
-        function = scope.resolve("_function")
 
         assert isinstance(lvalue, Reference)
-        assert isinstance(function, Function | LambdaFunction)
 
+        variable = None
         if len(lvalue.names) == 1:
             try:
                 scope.resolve(lvalue.names[0])
             except KeyError:
-                try:
-                    variable = Variable.make_from_assignment(node, scope)
-                    function.variables.append(variable)
-                except Exception as e:
-                    raise CodeError(
-                        "AST Error",
-                        f"Failed to create variable '{lvalue.names[0]}': {e}",
-                        node.pos,
-                    )
+                variable = Variable.make_from_assignment(node, scope)
 
-        obj = cls(
-            lvalue=lvalue,
-            rvalue=rvalue,
-            function=function,
-            pos=node.pos,
-        )
+        obj = cls(lvalue=lvalue, rvalue=rvalue, variable=variable)
         return obj
 
 
@@ -1088,22 +1044,13 @@ class UpdateStatement(AstNode):
     lvalue: Reference
     operator: UpdateOperator
     rvalue: Expression
-    function: Function | LambdaFunction = Field(repr=False)
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         lvalue = parse(node.field("lvalue"), scope)
         operator = UpdateOperator(node.field("operator").text)
         rvalue = parse(node.field("rvalue"), scope)
-        function = scope.resolve("_function")
-
-        obj = cls(
-            lvalue=lvalue,
-            operator=operator,
-            rvalue=rvalue,
-            function=function,
-            pos=node.pos,
-        )
+        obj = cls(lvalue=lvalue, operator=operator, rvalue=rvalue)
         return obj
 
 
@@ -1124,10 +1071,6 @@ class ParallelStatement(AstNode):
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
-        function = scope.resolve("_function")
-        assert isinstance(function, Function | LambdaFunction)
-        function.is_kernel = False
-
         table = ParallelStatementTable(node.field("table").text)
 
         children = defaultdict(list)
@@ -1159,14 +1102,14 @@ class ParallelStatement(AstNode):
 
         if reduce_clauses and apply_clause is not None:
             raise CodeError(
-                "AST Error",
+                "Ast Error",
                 "A parallel statement may not have both apply and reduce clauses.",
                 node.pos,
             )
 
         if not reduce_clauses and apply_clause is None:
             raise CodeError(
-                "AST Error",
+                "Ast Error",
                 "A parallel statement must have a apply or reduce clause.",
                 node.pos,
             )
@@ -1177,7 +1120,6 @@ class ParallelStatement(AstNode):
             sample_clause=sample_clause,
             apply_clause=apply_clause,
             reduce_clauses=reduce_clauses,
-            pos=node.pos,
         )
         return obj
 
@@ -1186,12 +1128,12 @@ register_parser("parallel_statement", ParallelStatement.make)
 
 
 class FilterClause(AstNode):
-    function: Expression | LambdaFunction
+    function: Expression
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         function = parse(node.field("function"), scope)
-        obj = cls(function=function, pos=node.pos)
+        obj = cls(function=function)
         return obj
 
 
@@ -1206,7 +1148,10 @@ class SampleClause(AstNode):
     def make(cls, node: PTNode, scope: Scope) -> Self:
         is_absolute = node.field("type").text == "ABSOLUTE"
         amount = parse(node.field("amount"), scope)
-        obj = cls(is_absolute=is_absolute, amount=amount, pos=node.pos)
+        obj = cls(
+            is_absolute=is_absolute,
+            amount=amount,
+        )
         return obj
 
 
@@ -1214,12 +1159,12 @@ register_parser("sample_clause", SampleClause.make)
 
 
 class ApplyClause(AstNode):
-    function: Expression | LambdaFunction
+    function: Expression
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         function = parse(node.field("function"), scope)
-        obj = cls(function=function, pos=node.pos)
+        obj = cls(function=function)
         return obj
 
 
@@ -1239,10 +1184,9 @@ class ReduceClause(AstNode):
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         lvalue = parse(node.field("lvalue"), scope)
-
         operator = ReduceOperator(node.field("operator").text)
         function = parse(node.field("function"), scope)
-        obj = cls(lvalue=lvalue, operator=operator, function=function, pos=node.pos)
+        obj = cls(lvalue=lvalue, operator=operator, function=function)
         return obj
 
 
@@ -1250,12 +1194,16 @@ register_parser("reduce_clause", ReduceClause.make)
 
 
 Expression = (
-    Literal
+    int
+    | float
+    | bool
+    | str
     | Reference
     | UnaryExpression
     | BinaryExpression
     | ParenthesizedExpression
     | FunctionCall
+    | LambdaFunction
 )
 
 Statement = (
@@ -1270,73 +1218,57 @@ Statement = (
     | ParallelStatement
 )
 
-TypeCheckable = (
-    GlobalVariable
-    | Distribution
-    | Contagion
-    | Function
-    | LambdaFunction
-    | Statement
-    | ElifSection
-    | ElseSection
-    | CaseSection
-    | DefaultSection
-    | FilterClause
-    | SampleClause
-    | ApplyClause
-    | ReduceClause
-)
+# References which can be assigned to
+# LValueRef = (
+#     GlobalVariable
+#     | Variable
+#     | tuple[Parameter | Variable, NodeField | EdgeField]
+#     | tuple[Parameter | Variable, Contagion, StateAccessor]
+#     | tuple[Parameter | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+#     | tuple[
+#         Parameter | Variable,
+#         SourceNodeAccessor | TargetNodeAccessor,
+#         Contagion,
+#         StateAccessor,
+#     ]
+# )
 
-# References which can be assigned to from device code
-DeviceLValueRef = (
-    Variable
-    | tuple[Variable, NodeField | EdgeField]
-    | tuple[Variable, Contagion, StateAccessor]
-    | tuple[Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
-    | tuple[
-        Variable,
-        SourceNodeAccessor | TargetNodeAccessor,
-        Contagion,
-        StateAccessor,
-    ]
-)
+# References which can be evaluated to get a value
+# RValueRef = (
+#     BuiltinGlobal
+#     | EnumConstant
+#     | GlobalVariable
+#     | Parameter
+#     | Variable
+#     | NodeSet
+#     | BuiltinNodeset
+#     | EdgeSet
+#     | BuiltinEdgeset
+#     | tuple[Parameter | Variable, NodeField | EdgeField]
+#     | tuple[Parameter | Variable, Contagion, StateAccessor]
+#     | tuple[Parameter | Variable, SourceNodeAccessor | TargetNodeAccessor]
+#     | tuple[Parameter | Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
+#     | tuple[
+#         Parameter | Variable,
+#         SourceNodeAccessor | TargetNodeAccessor,
+#         Contagion,
+#         StateAccessor,
+#     ]
+# )
 
-# References which can be assigned to from host code
-HostLValueRef = GlobalVariable | Variable
+# References which are valid types
+# TValueRef = BuiltinType | EnumType
 
-LValueRef = DeviceLValueRef | HostLValueRef
-
-# References which can be evaluated from device code
-DeviceRValueRef = (
-    BuiltinGlobal
-    | EnumConstant
-    | GlobalVariable
-    | Variable
-    | tuple[Variable, NodeField | EdgeField]
-    | tuple[Variable, Contagion, StateAccessor]
-    | tuple[Variable, SourceNodeAccessor | TargetNodeAccessor]
-    | tuple[Variable, SourceNodeAccessor | TargetNodeAccessor, NodeField]
-    | tuple[
-        Variable,
-        SourceNodeAccessor | TargetNodeAccessor,
-        Contagion,
-        StateAccessor,
-    ]
-)
-
-# References which can be evaluated from host code
-HostRValueRef = BuiltinGlobal | EnumConstant | GlobalVariable | Variable
-
-RValueRef = DeviceRValueRef | DeviceLValueRef
-
-# References to things that can be called
-CValueRef = BuiltinFunction | Function | Distribution
-
-# All referenceable things
-AllRef = LValueRef | RValueRef | CValueRef
+# Things that can be called
+# CValueRef = BuiltinFunction | Function | Distribution
 
 
 def add_builtins(scope: Scope):
+    add_base_types(scope)
+
+    scope.define("node", BuiltinType(name="node"))
+    scope.define("edge", BuiltinType(name="edge"))
+
     BuiltinGlobal.make("NUM_TICKS", "int", scope)
     BuiltinGlobal.make("CUR_TICK", "int", scope)
     BuiltinGlobal.make("NUM_NODES", "int", scope)
@@ -1356,7 +1288,7 @@ def add_builtins(scope: Scope):
 
 class Source(AstNode):
     module: str
-    enums: list[EnumTypeDefn]
+    enums: list[EnumType]
     globals: list[GlobalVariable]
     node_table: NodeTable
     edge_table: EdgeTable
@@ -1372,34 +1304,29 @@ class Source(AstNode):
     def make(cls, module: str, node: PTNode) -> Self:
         scope = Scope(name="source")
 
-        add_base_types(scope)
         add_builtins(scope)
-        type_graph = make_type_graph()
-
-        enums: list[EnumTypeDefn] = []
-        for child in node.simple_query("enum"):
-            enum = parse(child, scope)
-            type_graph.add_edge(enum.type.name, "_enum")
-            enums.append(enum)
 
         children = defaultdict(list)
         for child in node.named_children:
-            if child.type != "enum":
-                children[child.type].append(parse(child, scope))
+            children[child.type].append(parse(child, scope))
 
+        enums = children["enum"]
         globals = children["global"]
 
+        node_tables = children["node"]
         with err_desc("One and only one node table must be defined", node.pos):
-            assert len(children["node"]) == 1
-        node_table = children["node"][0]
+            assert len(node_tables) == 1
+        node_table = node_tables[0]
+
         node_type = scope.resolve("node")
         assert isinstance(node_type, BuiltinType)
         node_type.scope = node_table.scope
-        assert isinstance(node_type.scope, Scope)
 
+        edge_tables = children["edge"]
         with err_desc("One and only one edge table must be defined", node.pos):
-            assert len(children["edge"]) == 1
-        edge_table = children["edge"][0]
+            assert len(edge_tables) == 1
+        edge_table = edge_tables[0]
+
         edge_type = scope.resolve("edge")
         assert isinstance(edge_type, BuiltinType)
         edge_type.scope = edge_table.scope
@@ -1410,15 +1337,36 @@ class Source(AstNode):
         discrete_dists = [d for d in distributions if isinstance(d, DiscreteDist)]
 
         contagions = children["contagion"]
-        for contagion in contagions:
-            node_type.scope.define(contagion.name, contagion)
 
         functions = children["function"]
 
-        intervene = [f for f in functions if f.name == "intervene"]
+        intervenes = [f for f in functions if f.name == "intervene"]
         with err_desc("One and only one intervene function must be defined", node.pos):
-            assert len(intervene) == 1
-        intervene = intervene[0]
+            assert len(intervenes) == 1
+        intervene = intervenes[0]
+
+        # function_calls: list[FunctionCall] = get_instances(FunctionCall)
+        # select_statements: list[SelectStatement] = get_instances(SelectStatement)
+        # sample_statements: list[SampleStatement] = get_instances(SampleStatement)
+        # apply_statements: list[ApplyStatement] = get_instances(ApplyStatement)
+        # reduce_statements: list[ReduceStatement] = get_instances(ReduceStatement)
+
+        # add_builtins(scope)
+
+        # node_table.link_contagions(contagions)
+        # edge_table.link_contagions(contagions)
+        # edge_table.link_node_table(node_table)
+        # Parameter.link_tables(node_table, edge_table)
+        # Variable.link_tables(node_table, edge_table)
+
+        # template_variables: list[TemplateVariable] = get_instances(TemplateVariable)
+
+        # rich.print(scope.rich_tree())
+
+        # At this point all references should be resolve without errors
+        # ref: Reference
+        # for ref in get_instances(Reference):
+        #     _ = ref.value
 
         return cls(
             module=module,
@@ -1433,7 +1381,6 @@ class Source(AstNode):
             functions=functions,
             intervene=intervene,
             scope=scope,
-            pos=node.pos,
         )
 
 
