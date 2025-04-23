@@ -92,7 +92,9 @@ and the target node $v$ is in state $j \in S$.
 This edge is active for transmission if $(i, j) \in C$.
 The probability of successful transmission
 on an active edge is then given by:
+
 $$P(u, v) = \iota(u) \cdot \sigma(v) \cdot \tau(u, v)$$
+
 Note that, in ESCAPE's contagion model,
 the contagion state of source and target nodes of an edge
 determine activation.
