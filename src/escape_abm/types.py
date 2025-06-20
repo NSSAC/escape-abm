@@ -3,28 +3,25 @@
 from __future__ import annotations
 
 import networkx as nx
-from dataclasses import dataclass, field
-
-from .scope import Scope
-from . import environ
+from typing import TypeGuard
+from dataclasses import dataclass
 
 
 @dataclass
 class BuiltinType:
     name: str
-    scope: Scope | None = field(default=None, repr=False)
 
 
 @dataclass
 class EnumType:
     name: str
-    consts: list[str]
+    consts: tuple[str]
 
 
 @dataclass
 class FunctionType:
-    params: list[DataType]
-    return_: DataType
+    params: tuple[Type]
+    return_: Type
 
     @property
     def name(self) -> str:
@@ -34,61 +31,75 @@ class FunctionType:
         return f"{ps} -> {ret}"
 
 
-DataType = BuiltinType | EnumType
+Type = BuiltinType | EnumType | FunctionType
+
+_TYPE_GRAPH = nx.DiGraph()
+_TYPE_OBJECT: dict[str, Type] = {}
 
 
-def is_sub_type(child: str, ancestor: str, type_graph: nx.DiGraph) -> bool:
-    if child == ancestor:
+def is_sub_type(child: Type, ancestor: Type) -> bool:
+    if child.name == ancestor.name:
         return True
 
-    return nx.has_path(type_graph, child, ancestor)
+    if child.name in _TYPE_GRAPH and ancestor.name in _TYPE_GRAPH:
+        return nx.has_path(_TYPE_GRAPH, child.name, ancestor.name)
+    else:
+        return False
 
 
-def lub_type(type1: str, type2: str, type_graph: nx.DiGraph) -> str | None:
-    return nx.lowest_common_ancestor(type_graph, type1, type2)
+def lub_type(type1: Type, type2: Type) -> Type | None:
+    if type1.name in _TYPE_GRAPH and type2.name in _TYPE_GRAPH:
+        ltype_name = nx.lowest_common_ancestor(_TYPE_GRAPH, type1.name, type2.name)
+        return _TYPE_OBJECT.get(ltype_name, None)
+    else:
+        return None
 
 
-def do_setup_base_types():
-    type_graph = nx.DiGraph()
+def setup_type_system():
+    _TYPE_GRAPH.clear()
+    _TYPE_OBJECT.clear()
 
-    nx.add_path(type_graph, ("bool", "uint", "int", "float"))
-    nx.add_path(type_graph, ("i8", "i16", "i32", "i64", "int"))
-    nx.add_path(type_graph, ("u8", "u16", "u32", "u64", "uint"))
-    nx.add_path(type_graph, ("f32", "f64", "float"))
+    nx.add_path(_TYPE_GRAPH, ("bool", "uint", "int", "float"))
+    nx.add_path(_TYPE_GRAPH, ("i8", "i16", "i32", "i64", "int"))
+    nx.add_path(_TYPE_GRAPH, ("u8", "u16", "u32", "u64", "uint"))
+    nx.add_path(_TYPE_GRAPH, ("f32", "f64", "float"))
 
-    type_graph.add_node("node")
-    type_graph.add_node("edge")
-    type_graph.add_node("str")
+    _TYPE_GRAPH.add_node("node")
+    _TYPE_GRAPH.add_node("edge")
+    _TYPE_GRAPH.add_node("str")
 
-    type_graph.add_node("_void")
-    type_graph.add_node("_cdist")
+    _TYPE_GRAPH.add_node("_void")
+    _TYPE_GRAPH.add_node("_cdist")
 
-    environ.set("type_graph", type_graph)
+    for type_name in _TYPE_GRAPH.nodes:
+        _TYPE_OBJECT[type_name] = BuiltinType(type_name)
 
-    scope = environ.get("global_scope")
-    assert isinstance(scope, Scope)
 
-    scope.define("int", BuiltinType(name="int"))
-    scope.define("i8", BuiltinType(name="i8"))
-    scope.define("i16", BuiltinType(name="i16"))
-    scope.define("i32", BuiltinType(name="i32"))
-    scope.define("i64", BuiltinType(name="i64"))
+def new_type(type: Type) -> Type:
+    if type.name in _TYPE_GRAPH:
+        return _TYPE_OBJECT[type.name]
 
-    scope.define("uint", BuiltinType(name="uint"))
-    scope.define("u8", BuiltinType(name="u8"))
-    scope.define("u16", BuiltinType(name="u16"))
-    scope.define("u32", BuiltinType(name="u32"))
-    scope.define("u64", BuiltinType(name="u64"))
+    else:
+        _TYPE_GRAPH.add_node(type.name)
+        _TYPE_OBJECT[type.name] = type
+        return type
 
-    scope.define("float", BuiltinType(name="float"))
-    scope.define("f32", BuiltinType(name="f32"))
-    scope.define("f64", BuiltinType(name="f64"))
 
-    scope.define("bool", BuiltinType(name="bool"))
-    scope.define("str", BuiltinType(name="str"))
+def is_numeric_type(type: Type) -> bool:
+    return is_sub_type(type, _TYPE_OBJECT["float"])
 
-    scope.define("node", BuiltinType(name="node"))
-    scope.define("edge", BuiltinType(name="edge"))
 
-    scope.define("_void", BuiltinType(name="_void"))
-    scope.define("_cdist", BuiltinType(name="_cdist"))
+def is_integral_type(type: Type) -> bool:
+    return is_sub_type(type, _TYPE_OBJECT["int"])
+
+
+def is_boolean_type(type: Type) -> bool:
+    return type.name == "bool"
+
+
+def is_enum_type(type: Type) -> TypeGuard[EnumType]:
+    return isinstance(type, EnumType)
+
+
+def is_function_type(type: Type) -> TypeGuard[FunctionType]:
+    return isinstance(type, FunctionType)
