@@ -3,76 +3,28 @@
 from __future__ import annotations
 
 import networkx as nx
-from functools import cached_property
-from pydantic import BaseModel, Field
-from typing import Self
+from dataclasses import dataclass, field
 
-from .misc import Scope, CodeError
+from .scope import Scope
+from . import environ
 
 
-class BuiltinType(BaseModel):
+@dataclass
+class BuiltinType:
     name: str
-    width: int | None = Field(default=None, repr=False)
-    scope: Scope | None = Field(default=None, repr=False)
+    scope: Scope | None = field(default=None, repr=False)
 
 
-class EnumType(BaseModel):
+@dataclass
+class EnumType:
     name: str
     consts: list[str]
 
 
-_EXISTENTIAL_TYPE_COUNTER: int = 0
-
-
-class ExistentialType(BaseModel):
-    index: int
-    parent: Type | None = None
-
-    @cached_property
-    def name(self) -> str:
-        if self.parent is not None:
-            return self.parent.name
-        else:
-            return f"unknown_type:{self.index}"
-
-    @classmethod
-    def create(cls) -> Self:
-        global _EXISTENTIAL_TYPE_COUNTER
-        obj = cls(index=_EXISTENTIAL_TYPE_COUNTER)
-        _EXISTENTIAL_TYPE_COUNTER += 1
-        return obj
-
-    @staticmethod
-    def reset_counter():
-        global _EXISTENTIAL_TYPE_COUNTER
-        _EXISTENTIAL_TYPE_COUNTER = 0
-
-    def root(self) -> Type:
-        if self.parent is None:
-            return self
-        elif isinstance(self.parent, ExistentialType):
-            return self.parent.root()
-        else:
-            return self.parent
-
-    def is_known(self) -> bool:
-        if isinstance(self.root(), ExistentialType):
-            return False
-        else:
-            return True
-
-    def unify(self, type: Type) -> Type:
-        rt = self.root()
-        if isinstance(rt, ExistentialType):
-            rt.parent = type
-            return type
-        else:
-            raise CodeError("Type error", f"Type mismatch: {rt!r} != {type!r}", None)
-
-
-class FunctionType(BaseModel):
-    params: list[Type]
-    return_: Type
+@dataclass
+class FunctionType:
+    params: list[DataType]
+    return_: DataType
 
     @property
     def name(self) -> str:
@@ -82,47 +34,55 @@ class FunctionType(BaseModel):
         return f"{ps} -> {ret}"
 
 
-Type = BuiltinType | EnumType | ExistentialType
+DataType = BuiltinType | EnumType
 
 
-def make_type_graph() -> nx.DiGraph:
-    G = nx.DiGraph()
-    nx.add_path(G, ("bool", "uint", "int", "float", "type"))
-    nx.add_path(G, ("node", "type"))
-    nx.add_path(G, ("edge", "type"))
-    nx.add_path(G, ("str", "type"))
-    nx.add_path(G, ("void", "type"))
-    nx.add_path(G, ("_enum", "type"))
-    return G
-
-
-def is_sub_type(child: str, ancestor: str, G: nx.DiGraph) -> bool:
+def is_sub_type(child: str, ancestor: str, type_graph: nx.DiGraph) -> bool:
     if child == ancestor:
         return True
 
-    return nx.has_path(G, child, ancestor)
+    return nx.has_path(type_graph, child, ancestor)
 
 
-def lub_type(type1: str, type2: str, G: nx.DiGraph) -> str:
-    return nx.lowest_common_ancestor(G, type1, type2)
+def lub_type(type1: str, type2: str, type_graph: nx.DiGraph) -> str | None:
+    return nx.lowest_common_ancestor(type_graph, type1, type2)
 
 
-def add_base_types(scope: Scope):
+def do_setup_base_types():
+    type_graph = nx.DiGraph()
+
+    nx.add_path(type_graph, ("bool", "uint", "int", "float"))
+    nx.add_path(type_graph, ("i8", "i16", "i32", "i64", "int"))
+    nx.add_path(type_graph, ("u8", "u16", "u32", "u64", "uint"))
+    nx.add_path(type_graph, ("f32", "f64", "float"))
+
+    type_graph.add_node("node")
+    type_graph.add_node("edge")
+    type_graph.add_node("str")
+
+    type_graph.add_node("_void")
+    type_graph.add_node("_cdist")
+
+    environ.set("type_graph", type_graph)
+
+    scope = environ.get("global_scope")
+    assert isinstance(scope, Scope)
+
     scope.define("int", BuiltinType(name="int"))
-    scope.define("i8", BuiltinType(name="int", width=8))
-    scope.define("i16", BuiltinType(name="int", width=16))
-    scope.define("i32", BuiltinType(name="int", width=32))
-    scope.define("i64", BuiltinType(name="int", width=64))
+    scope.define("i8", BuiltinType(name="i8"))
+    scope.define("i16", BuiltinType(name="i16"))
+    scope.define("i32", BuiltinType(name="i32"))
+    scope.define("i64", BuiltinType(name="i64"))
 
     scope.define("uint", BuiltinType(name="uint"))
-    scope.define("u8", BuiltinType(name="uint", width=8))
-    scope.define("u16", BuiltinType(name="uint", width=16))
-    scope.define("u32", BuiltinType(name="uint", width=32))
-    scope.define("u64", BuiltinType(name="uint", width=64))
+    scope.define("u8", BuiltinType(name="u8"))
+    scope.define("u16", BuiltinType(name="u16"))
+    scope.define("u32", BuiltinType(name="u32"))
+    scope.define("u64", BuiltinType(name="u64"))
 
     scope.define("float", BuiltinType(name="float"))
-    scope.define("f32", BuiltinType(name="float", width=32))
-    scope.define("f64", BuiltinType(name="float", width=64))
+    scope.define("f32", BuiltinType(name="f32"))
+    scope.define("f64", BuiltinType(name="f64"))
 
     scope.define("bool", BuiltinType(name="bool"))
     scope.define("str", BuiltinType(name="str"))
@@ -130,4 +90,5 @@ def add_base_types(scope: Scope):
     scope.define("node", BuiltinType(name="node"))
     scope.define("edge", BuiltinType(name="edge"))
 
-    scope.define("_void", BuiltinType(name="void"))
+    scope.define("_void", BuiltinType(name="_void"))
+    scope.define("_cdist", BuiltinType(name="_cdist"))

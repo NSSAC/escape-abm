@@ -27,15 +27,28 @@ enum c1_state_t
     S, E, Ipresymp, Isymp, Iasymp, R
 end
 
+cdist symp_recov_dist
+    p = 0.175, v = 1
+    p = 0.175, v = 2
+    p = 0.1, v = 3
+    p = 0.1, v = 4
+    p = 0.1, v = 5
+    p = 0.1, v = 6
+    p = 0.1, v = 7
+    p = 0.05, v = 8
+    p = 0.05, v = 9
+    p = 0.05, v = 10
+end
+
 contagion c1
     state type c1_state_t
 
     transition
-        E -> Ipresymp, p = 0.65, dwell = 3.0
-        E -> Iasymp, p = 0.35, dwell = normal5
-        Ipresymp -> Isymp, dwell = 2.0
-        Isymp -> R, dwell = isymp_r_dwell
-        Iasymp -> R, dwell = normal5
+        E -> Ipresymp
+        E -> Iasymp
+        Ipresymp -> Isymp
+        Isymp -> R
+        Iasymp -> R
     end
 
     transmission
@@ -44,9 +57,38 @@ contagion c1
         Iasymp => S -> E
     end
 
+    transition probability = c1_transition_probability
+    dwell time = c1_dwell_time
+
     susceptibility = c1_susceptibility
     infectivity = c1_infectivity
     transmissibility = c1_transmissibility
+end
+
+def c1_transition_probability(v: node, next_state: c1_state_t) -> float:
+    if next_state == Ipresymp:
+        return 0.65
+    elif next_state == Iasymp:
+        return 0.35
+    else:
+        return 1.0
+    end
+end
+
+def c1_dwell_time(v: node, next_state: c1_state_t) -> float:
+    if next_state == Ipresymp:
+        return 3.0
+    elif next_state == Iasymp:
+        return sample_normal(5.0, 1.0)
+    elif next_state == Isymp:
+        return 2.0
+    elif v.c1.state == Isymp and next_state == R:
+        return sample_categorical(symp_recov_dist)
+    elif v.c1.state == Iasymp and next_state == R:
+        return sample_normal(5.0, 1.0)
+    else:
+        return 1.0
+    end
 end
 
 def c1_susceptibility(v: node) -> float:
@@ -99,25 +141,6 @@ def is_school_day():
     end
 end
 
-distribution
-    discrete isymp_r_dwell
-        p = 0.175, v = 1
-        p = 0.175, v = 2
-        p = 0.1, v = 3
-        p = 0.1, v = 4
-        p = 0.1, v = 5
-        p = 0.1, v = 6
-        p = 0.1, v = 7
-        p = 0.05, v = 8
-        p = 0.05, v = 9
-        p = 0.05, v = 10
-    end
-
-    normal normal5
-        mean = 5.0, std = 1.0, min = 0.0
-    end
-end
-
 def is_positive_in_school_nodes(n: node) -> bool:
     return (
         n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp
@@ -129,7 +152,7 @@ end
 def intervene():
     if CUR_TICK < 10:
         from node
-        filter lambda (n) { return n.c1.state == S }
+        filter lambda (n) n.c1.state == S
         sample ABSOLUTE 5
         apply lambda (n) { n.c1.state = E }
     end
@@ -155,7 +178,7 @@ def intervene():
     end
 
     from node
-    filter lambda (n) { return n.c1.state == S or n.c1.state == R }
+    filter lambda (n) n.c1.state == S or n.c1.state == R
     reduce S_or_R += 1
 
     from edge

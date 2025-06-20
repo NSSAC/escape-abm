@@ -13,16 +13,10 @@ import rich
 import click
 from pydantic import BaseModel, Field
 
-from .misc import SourcePosition, CodeError, RichException, Scope
-from .types import (
-    BuiltinType,
-    EnumType,
-    ExistentialType,
-    FunctionType,
-    Type,
-    add_base_types,
-    make_type_graph,
-)
+from . import environ
+from .scope import Scope
+from .misc import SourcePosition, CodeError, RichException
+from .types import BuiltinType, EnumType, DataType, FunctionType, do_setup_base_types
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
 
@@ -35,27 +29,63 @@ def err_desc(description: str, pos: SourcePosition | None):
         raise CodeError("AST Error", description, pos)
 
 
+def get_global_scope() -> Scope:
+    scope = environ.get("global_scope")
+    if isinstance(scope, Scope):
+        return scope
+
+    raise RuntimeError("global scope is not setup")
+
+
+def get_current_scope() -> Scope:
+    scope = environ.get("current_scope")
+    if isinstance(scope, Scope):
+        return scope
+
+    raise RuntimeError("current scope is not setup")
+
+
+@contextmanager
+def set_current_scope(scope: Scope):
+    prev_scope = environ.get("current_scope")
+    environ.set("current_scope", scope)
+    try:
+        yield
+    finally:
+        environ.set("current_scope", prev_scope)
+
+
+def get_builtin_type(name: str) -> BuiltinType:
+    scope = get_global_scope()
+    type = scope.resolve(name)
+
+    if isinstance(type, BuiltinType):
+        return type
+
+    raise RuntimeError(f"type {name} is not defined")
+
+
 class AstNode(BaseModel):
     pos: SourcePosition = Field(repr=False)
 
 
-NodeParser = Callable[[PTNode, Scope], Any]
+NodeParser = Callable[[PTNode], AstNode]
 
 _NODE_PARSER: dict[str, NodeParser] = {}
 
 
-def parse(node: PTNode, scope: Scope) -> Any:
+def parse(node: PTNode) -> AstNode:
     try:
         node_parser = _NODE_PARSER[node.type]
     except KeyError:
         raise CodeError(
-            "System Error",
+            "AST Error",
             f"Parser for node type '{node.type}' is not defined",
             node.pos,
         )
 
     try:
-        return node_parser(node, scope)
+        return node_parser(node)
     except CodeError:
         raise
     except Exception as e:
@@ -76,9 +106,9 @@ class BuiltinGlobal(BaseModel):
     type: BuiltinType
 
     @classmethod
-    def make(cls, name: str, type: str, scope: Scope) -> Self:
-        obj = cls(name=name, type=scope.resolve(type))
-        scope.define(name, obj)
+    def make(cls, name: str, type: str) -> Self:
+        obj = cls(name=name, type=get_builtin_type(type))
+        get_current_scope().define(name, obj)
         return obj
 
 
@@ -87,50 +117,24 @@ class BuiltinFunction(BaseModel):
     type: FunctionType
 
     @classmethod
-    def make(cls, name: str, params: list[str], return_: str, scope: Scope) -> Self:
-        params_t = [scope.resolve(p) for p in params]
-        return_t = scope.resolve(return_)
+    def make(cls, name: str, params: list[str], return_: str) -> Self:
+        params_t: list[DataType] = [get_builtin_type(p) for p in params]
+        return_t = get_builtin_type(return_)
         obj = cls(name=name, type=FunctionType(params=params_t, return_=return_t))
-        scope.define(name, obj)
+        get_current_scope().define(name, obj)
         return obj
-
-
-class EnumConstant(BaseModel):
-    name: str
-    type: EnumType
-
-
-class EnumTypeDefn(AstNode):
-    type: EnumType
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
-        name = node.field("name").text
-        consts = [child.text for child in node.fields("constant")]
-        type = EnumType(name=name, consts=consts)
-
-        obj = cls(type=type, pos=node.pos)
-        for child in node.fields("constant"):
-            enum_const = EnumConstant(name=child.text, type=type)
-            scope.define(enum_const.name, enum_const)
-
-        scope.define(name, type)
-        return obj
-
-
-register_parser("enum", EnumTypeDefn.make)
 
 
 class Literal(AstNode):
     value: int | float | bool | str
 
 
-register_parser("integer", lambda node, _: Literal(value=int(node.text), pos=node.pos))
-register_parser("float", lambda node, _: Literal(value=float(node.text), pos=node.pos))
+register_parser("integer", lambda node: Literal(value=int(node.text), pos=node.pos))
+register_parser("float", lambda node: Literal(value=float(node.text), pos=node.pos))
 register_parser(
-    "boolean", lambda node, _: Literal(value=(node.text == "True"), pos=node.pos)
+    "boolean", lambda node: Literal(value=(node.text == "True"), pos=node.pos)
 )
-register_parser("string", lambda node, _: Literal(value=node.text, pos=node.pos))
+register_parser("string", lambda node: Literal(value=node.text, pos=node.pos))
 
 
 class Reference(AstNode):
@@ -138,9 +142,9 @@ class Reference(AstNode):
     scope: Scope = Field(repr=False)
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
+    def make(cls, node: PTNode) -> Self:
         names = [s.text for s in node.named_children]
-        obj = cls(names=names, scope=scope, pos=node.pos)
+        obj = cls(names=names, scope=get_current_scope(), pos=node.pos)
         return obj
 
     @cached_property
@@ -155,10 +159,7 @@ class Reference(AstNode):
             v = self.scope.resolve(head)
             refs.append(v)
             for part in tail:
-                if hasattr(v, "scope"):
-                    v = v.scope.resolve(part)
-                else:
-                    v = v.type.scope.resolve(part)
+                v = v.type.scope.resolve(part)
                 refs.append(v)
         except Exception as e:
             raise CodeError(
@@ -178,6 +179,33 @@ class Reference(AstNode):
 register_parser("reference", Reference.make)
 
 
+class EnumConstant(AstNode):
+    name: str
+    type: EnumType
+
+
+class EnumTypeDefn(AstNode):
+    type: EnumType
+
+    @classmethod
+    def make(cls, node: PTNode) -> Self:
+        scope = get_current_scope()
+        name = node.field("name").text
+        consts = [child.text for child in node.fields("constant")]
+        type = EnumType(name=name, consts=consts)
+
+        obj = cls(type=type, pos=node.pos)
+        for child in node.fields("constant"):
+            enum_const = EnumConstant(name=child.text, type=type, pos=child.pos)
+            scope.define(enum_const.name, enum_const)
+
+        scope.define(name, type)
+        return obj
+
+
+register_parser("enum", EnumTypeDefn.make)
+
+
 class GlobalCategory(Enum):
     Global = "global"
     Config = "config"
@@ -186,16 +214,17 @@ class GlobalCategory(Enum):
 
 class GlobalVariable(AstNode):
     name: str
-    type: Type
+    type: DataType
     category: GlobalCategory
     default: Expression
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
+    def make(cls, node: PTNode) -> Self:
+        scope = get_current_scope()
         name = node.field("name").text
         category = GlobalCategory(node.field("category").text)
         type = scope.resolve(node.field("type").text)
-        default = parse(node.field("default"), scope)
+        default = parse(node.field("default"))
         obj = cls(
             name=name, type=type, category=category, default=default, pos=node.pos
         )
@@ -208,13 +237,13 @@ register_parser("global", GlobalVariable.make)
 
 class NodeField(AstNode):
     name: str
-    type: Type
+    type: DataType
     is_node_key: bool
     is_static: bool
     save_to_output: bool
 
     @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
+    def make(cls, node: PTNode) -> Self:
         name = node.field("name").text
         type = scope.resolve(node.field("type").text)
 
@@ -270,7 +299,7 @@ register_parser("node", NodeTable.make)
 
 class EdgeField(AstNode):
     name: str
-    type: Type
+    type: DataType
     is_target_node_key: bool
     is_source_node_key: bool
     is_static: bool
@@ -363,127 +392,38 @@ class EdgeTable(AstNode):
 register_parser("edge", EdgeTable.make)
 
 
-class DiscreteDist(AstNode):
+class CategoricalDist(AstNode):
     name: str
     ps: list[Expression]
     vs: list[Expression]
-    type: FunctionType
+    type: BuiltinType
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
         name = node.field("name").text
-        ps = []
-        vs = []
-        for child in node.fields("pv"):
-            p = parse(child.field("p"), scope)
-            ps.append(p)
+        ps = [parse(child, scope) for child in node.fields("probability")]
+        vs = [parse(child, scope) for child in node.fields("value")]
 
-            v = parse(child.field("v"), scope)
-            vs.append(v)
-
-        type = FunctionType(params=[], return_=scope.resolve("float"))
+        type = environ.get("cdist_type")
+        assert isinstance(type, BuiltinType)
         obj = cls(name=name, ps=ps, vs=vs, type=type, pos=node.pos)
+
         scope.define(name, obj)
         return obj
 
 
-register_parser("discrete_dist", DiscreteDist.make)
-
-
-class NormalDist(AstNode):
-    name: str
-    mean: Expression
-    std: Expression
-    min: Expression
-    max: Expression
-    type: FunctionType
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
-        name = node.field("name").text
-        mean = parse(node.field("mean"), scope)
-        std = parse(node.field("std"), scope)
-
-        min = node.maybe_field("min")
-        if min is None:
-            min = Literal(
-                value=-1e300,
-                pos=node.pos,
-            )
-        else:
-            min = parse(min, scope)
-
-        max = node.maybe_field("max")
-        if max is None:
-            max = Literal(
-                value=1e300,
-                pos=node.pos,
-            )
-        else:
-            max = parse(max, scope)
-
-        type = FunctionType(params=[], return_=scope.resolve("float"))
-        obj = cls(
-            name=name, mean=mean, std=std, min=min, max=max, type=type, pos=node.pos
-        )
-        scope.define(name, obj)
-        return obj
-
-
-register_parser("normal_dist", NormalDist.make)
-
-
-class UniformDist(AstNode):
-    name: str
-    low: Expression
-    high: Expression
-    type: FunctionType
-
-    @classmethod
-    def make(cls, node: PTNode, scope: Scope) -> Self:
-        name = node.field("name").text
-        low = parse(node.field("low"), scope)
-        high = parse(node.field("high"), scope)
-        type = FunctionType(params=[], return_=scope.resolve("float"))
-        obj = cls(name=name, low=low, high=high, type=type, pos=node.pos)
-        scope.define(name, obj)
-        return obj
-
-
-register_parser("uniform_dist", UniformDist.make)
-
-
-Distribution = DiscreteDist | NormalDist | UniformDist
-
-
-def parse_distributions(node: PTNode, scope: Scope) -> list[Distribution]:
-    return [parse(child, scope) for child in node.named_children]
-
-
-register_parser("distributions", parse_distributions)
+register_parser("cdist", CategoricalDist.make)
 
 
 class Transition(AstNode):
     entry: Reference
     exit: Reference
-    p: Expression | LambdaFunction
-    dwell: Expression | LambdaFunction
 
     @classmethod
     def make(cls, node: PTNode, scope: Scope) -> Self:
-
         entry = parse(node.field("entry"), scope)
         exit = parse(node.field("exit"), scope)
-        p = node.maybe_field("p")
-        if p is None:
-            p = Literal(
-                value=1.0,
-                pos=node.pos,
-            )
-        else:
-            p = parse(p, scope)
-        dwell = parse(node.field("dwell"), scope)
-        return cls(entry=entry, exit=exit, p=p, dwell=dwell, pos=node.pos)
+        return cls(entry=entry, exit=exit, pos=node.pos)
 
 
 register_parser("transition", Transition.make)
@@ -526,7 +466,9 @@ def parse_contagion_state_type(node: PTNode, scope: Scope) -> EnumType:
 register_parser("contagion_state_type", parse_contagion_state_type)
 
 
-class ContagionFuncton(Enum):
+class ContagionFunctionCategory(Enum):
+    TransitionProbability = "transition probability"
+    DwellTime = "dwell time"
     Susceptibility = "susceptibility"
     Infectivity = "infectivity"
     Transmissibility = "transmissibility"
@@ -534,10 +476,38 @@ class ContagionFuncton(Enum):
 
 def parse_contagion_function(
     node: PTNode, scope: Scope
-) -> tuple[ContagionFuncton, Expression | LambdaFunction]:
-    type = ContagionFuncton(node.field("type").text)
+) -> tuple[ContagionFunctionCategory, Expression | LambdaFunction]:
+    category = ContagionFunctionCategory(node.field("category").text)
+    if category in [
+        ContagionFunctionCategory.TransitionProbability,
+        ContagionFunctionCategory.DwellTime,
+    ]:
+        expected_fn_type = FunctionType(
+            params=[scope.resolve("node"), environ.get("contagion_state_type")],
+            return_=scope.resolve("float"),
+        )
+        environ.set("contagion_function_type", expected_fn_type)
+    elif category in [
+        ContagionFunctionCategory.Susceptibility,
+        ContagionFunctionCategory.Infectivity,
+    ]:
+        expected_fn_type = FunctionType(
+            params=[scope.resolve("node")],
+            return_=scope.resolve("float"),
+        )
+        environ.set("contagion_function_type", expected_fn_type)
+    else:  # category == Transmissibility
+        expected_fn_type = FunctionType(
+            params=[scope.resolve("edge")],
+            return_=scope.resolve("float"),
+        )
+        environ.set("contagion_function_type", expected_fn_type)
+
     function = parse(node.field("function"), scope)
-    return type, function
+
+    environ.remove("contagion_function_type")
+
+    return category, function
 
 
 register_parser("contagion_function", parse_contagion_function)
@@ -547,11 +517,25 @@ class StateAccessor(BaseModel):
     type: EnumType
 
 
+def _get_contagion_fn(
+    functions: list, type: ContagionFunctionCategory, pos: SourcePosition
+):
+    func = [f for k, f in functions if k == type]
+    with err_desc(
+        f"{ContagionFunctionCategory.name} must defined once for each contagion.", pos
+    ):
+        assert len(func) == 1
+    func = func[0]
+    return func
+
+
 class Contagion(AstNode):
     name: str
     state_type: EnumType
     transitions: list[Transition]
     transmissions: list[Transmission]
+    transition_probability: Expression | LambdaFunction
+    dwell_time: Expression | LambdaFunction
     susceptibility: Expression | LambdaFunction
     infectivity: Expression | LambdaFunction
     transmissibility: Expression | LambdaFunction
@@ -577,34 +561,31 @@ class Contagion(AstNode):
         transmissions = [t for ts in children["transmissions"] for t in ts]
 
         contagion_functions = children["contagion_function"]
-        susceptibility = [
-            f for k, f in contagion_functions if k == ContagionFuncton.Susceptibility
-        ]
-        with err_desc("Susceptibility must defined once for each contagion.", node.pos):
-            assert len(susceptibility) == 1
-        susceptibility = susceptibility[0]
-
-        infectivity = [
-            f for k, f in contagion_functions if k == ContagionFuncton.Infectivity
-        ]
-        with err_desc("Infectivity must defined once for each contagion.", node.pos):
-            assert len(infectivity) == 1
-        infectivity = infectivity[0]
-
-        transmissibility = [
-            f for k, f in contagion_functions if k == ContagionFuncton.Transmissibility
-        ]
-        with err_desc(
-            "Transmissibility must defined once for each contagion.", node.pos
-        ):
-            assert len(transmissibility) == 1
-        transmissibility = transmissibility[0]
+        transition_probability = _get_contagion_fn(
+            contagion_functions,
+            ContagionFunctionCategory.TransitionProbability,
+            node.pos,
+        )
+        dwell_time = _get_contagion_fn(
+            contagion_functions, ContagionFunctionCategory.DwellTime, node.pos
+        )
+        susceptibility = _get_contagion_fn(
+            contagion_functions, ContagionFunctionCategory.Susceptibility, node.pos
+        )
+        infectivity = _get_contagion_fn(
+            contagion_functions, ContagionFunctionCategory.Infectivity, node.pos
+        )
+        transmissibility = _get_contagion_fn(
+            contagion_functions, ContagionFunctionCategory.Transmissibility, node.pos
+        )
 
         obj = cls(
             name=name,
             state_type=state_type,
             transitions=transitions,
             transmissions=transmissions,
+            transition_probability=transition_probability,
+            dwell_time=dwell_time,
             susceptibility=susceptibility,
             infectivity=infectivity,
             transmissibility=transmissibility,

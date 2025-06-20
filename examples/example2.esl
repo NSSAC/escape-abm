@@ -21,14 +21,10 @@ contagion cntg
   state type state_t
 
   transition
-    E -> I, p = symp_prob, dwell = 3.0
-    E -> A,
-        p = lambda (n) {
-            return 1.0 - symp_prob(n)
-        },
-        dwell = 3.0
-    Isymp -> R, dwell = normal(5.0, 1.0)
-    Iasymp -> R, dwell = normal(5.0, 1.0)
+    E -> I
+    E -> A
+    Isymp -> R
+    Iasymp -> R
   end
 
   transmission
@@ -36,25 +32,45 @@ contagion cntg
     Iasymp => S -> E
   end
 
+  transition probability = transition_prob
+  dwell time = dwell_time
+
   susceptibility = 1.0
   infectivity = 1.0
-  transmissibility = lambda (e) {
-    return TRANSMISSIBILITY * e.duration / MAX_DURATION
-  }
+  transmissibility = lambda (e) (
+    TRANSMISSIBILITY * e.duration / MAX_DURATION
+  )
+
 end
 
-def symp_prob(n: node) -> float:
-  if n.age <= 18:
-    return 1.0 - IMMUNITY_LE18
-  else:
-    return 1.0
-  end
+def transition_prob(n: node, next_state: state_t) -> float:
+    if n.age <= 18 and next_state == I:
+        return 1.0 - IMMUNITY_LE18
+    elif n.age <= 18 and next_state == A:
+        return IMMUNITY_LE18
+    elif n.age > 18 and next_state == I:
+        return 1.0
+    elif n.age > 18 and next_state == I:
+        return 0.0
+    else:
+        return 1.0
+    end
+end
+
+def dwell_time(n: node, next_state: state_t) -> float:
+    if next_state == I or next_state == A:
+        return 3.0
+    elif next_state == R:
+        return sample_normal(5.0, 1.0)
+    else:
+        return 1.0
+    end
 end
 
 def intervene():
   if CUR_TICK < 10:
     from node
-    filter lambda (n) { return n.cntg.state == S }
+    filter lambda (n) n.cntg.state == S
     sample ABSOLUTE 5
     apply lambda (n) { n.cntg.state = E }
   end
