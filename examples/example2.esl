@@ -17,8 +17,7 @@ enum state_t
   S, E, I, A, R
 end
 
-contagion cntg
-  state type state_t
+contagion cntg: state_t
 
   transition
     E -> I

@@ -40,8 +40,7 @@ cdist symp_recov_dist
     p = 0.05, v = 10
 end
 
-contagion c1
-    state type c1_state_t
+contagion c1: c1_state_t
 
     transition
         E -> Ipresymp

@@ -43,9 +43,9 @@ class RichException(Exception):
 
 
 class CodeError(RichException):
-    """Error attributable to a section of the code."""
+    """Error attributable to user code."""
 
-    def __init__(self, type: str, description: str, pos: SourcePosition | None):
+    def __init__(self, type: str, description: str, pos: SourcePosition | None = None):
         """
         Initialize.
 

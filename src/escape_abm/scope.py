@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Any, Iterator, overload
 from dataclasses import dataclass, field
 
 from rich.tree import Tree
 from rich.pretty import Pretty
+
+from .misc import CodeError
 
 
 @dataclass
@@ -24,21 +26,47 @@ class Scope:
         if self.parent is not None:
             yield "parent", self.parent.name
 
-    def resolve(self, k: str) -> Any:
-        if k in self.names:
-            return self.names[k]
-        elif self.parent is not None:
-            return self.parent.resolve(k)
+    @overload
+    def resolve[T](self, k: str, type: type[T]) -> T: ...
 
-        raise KeyError(f"{k} is not defined.")
+    @overload
+    def resolve[T](self, k: str, type: tuple[type[T], ...]) -> T: ...
+
+    @overload
+    def resolve(self, k: str, type: Any | None) -> Any: ...
+
+    @overload
+    def resolve(self, k: str) -> Any: ...
+
+    def resolve(self, k, type=None):
+        if k in self.names:
+            ret = self.names[k]
+        elif self.parent is not None:
+            ret = self.parent.resolve(k, type)  # type: ignore
+        else:
+            raise CodeError("Scope error", f"{k} is not defined.")
+
+        if type is None:
+            return ret
+
+        if not isinstance(ret, type):
+            raise CodeError(
+                "Type error", f"Expected object of type {type}; got {type(ret)}"
+            )
 
     def define(self, k: str, v: Any):
         if k in self.names:
-            raise ValueError(f"{k} has been already defined.")
+            raise CodeError("Redefinition error", f"{k} has been already defined.")
         self.names[k] = v
 
     def undef(self, k: str):
         del self.names[k]
+
+    def clear(self):
+        self.names.clear()
+        for child in self.children:
+            child.clear()
+        self.children.clear()
 
     def root(self) -> Scope:
         ret = self

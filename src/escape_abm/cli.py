@@ -3,7 +3,7 @@
 import click
 
 from .parse_tree import print_parse_tree
-# from .ast import print_ast
+from .ast import print_ast
 # from .check_ast import print_checked_ast
 
 # from .codegen_openmp import codegen_openmp
@@ -23,7 +23,7 @@ def debug():
 
 
 debug.add_command(print_parse_tree)
-# debug.add_command(print_ast)
+debug.add_command(print_ast)
 # debug.add_command(print_checked_ast)
 
 # cli.add_command(language_server)
