@@ -21,7 +21,7 @@ from .types import (
     get_type,
 )
 from .scope import Scope
-from .misc import SourcePosition, CodeError, RichException
+from .misc import SourcePosition, CodeError
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
 
@@ -148,6 +148,7 @@ class Literal(AstNode):
 class Reference(AstNode):
     names: list[str]
     scope: Scope = field(repr=False)
+    value_: Any = None
 
     @cached_property
     def name(self) -> str:
@@ -159,34 +160,6 @@ class Reference(AstNode):
         names = [s.text for s in node.named_children]
         obj = Reference(names=names, scope=scope(), pos=node.pos)
         return obj
-
-    @cached_property
-    def value(self) -> Any:
-        head, tail = self.names[0], self.names[1:]
-        refs = []
-        try:
-            v = self.scope.resolve(head)
-            refs.append(v)
-
-            for part in tail:
-                assert hasattr(v, "type"), "Object doesn't have a type"
-                assert hasattr(v.type, "fields"), "Object's type doesn't have fields"
-                assert part in v.type.fields, f"Unknown field {part}"
-                v = v.type.fields[part]
-                refs.append(v)
-        except Exception as e:
-            raise CodeError(
-                "Reference error",
-                f"Failed to resolve '{self.name}'; ({e!s})",
-                self.pos,
-            )
-
-        if len(refs) == 1:
-            value = refs[0]
-        else:
-            value = tuple(refs)
-
-        return value
 
 
 @dataclass
@@ -318,39 +291,295 @@ class Variable(AstNode):
         scope().define(name, obj)
         return obj
 
+    @staticmethod
+    def parse_assignment(name: str, node: PTNode) -> Variable:
+        type = node.maybe_field("type")
+        if type is None:
+            raise CodeError(
+                "Type error", f"Type of local variable '{name}' not specified", node.pos
+            )
+        type = get_type(type.text)
+        obj = Variable(name=name, type=type, pos=node.pos)
+
+        scope().define(name, obj)
+        scope().resolve("_local_variables", list).append(obj)
+        return obj
+
+
+@dataclass
+class PassStatement(AstNode):
+    @parser("pass_statement")
+    @staticmethod
+    def parse(node: PTNode) -> PassStatement:
+        return PassStatement(pos=node.pos)
+
+
+@dataclass
+class CallStatement(AstNode):
+    call: FunctionCall
+
+    @parser("call_statement")
+    @staticmethod
+    def parse(node: PTNode) -> CallStatement:
+        call = parse(node.named_children[0], FunctionCall)
+        return CallStatement(call=call, pos=node.pos)
+
+
+@dataclass
+class ReturnStatement(AstNode):
+    expression: Expression
+
+    @parser("return_statement")
+    @staticmethod
+    def parse(node: PTNode) -> ReturnStatement:
+        expression = parse_expression(node.named_children[0])
+        return ReturnStatement(expression=expression, pos=node.pos)
+
+
+@dataclass
+class ElifSection(AstNode):
+    condition: Expression
+    body: list[Statement]
+
+    @parser("elif_section")
+    @staticmethod
+    def parse(node: PTNode) -> ElifSection:
+        condition = parse_expression(node.field("condition"))
+        body = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        return ElifSection(condition=condition, body=body, pos=node.pos)
+
+
+@dataclass
+class ElseSection(AstNode):
+    body: list[Statement]
+
+    @parser("else_section")
+    @staticmethod
+    def parse(node: PTNode) -> ElseSection:
+        body = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        return ElseSection(body=body, pos=node.pos)
+
+
+@dataclass
+class IfStatement(AstNode):
+    condition: Expression
+    body: list[Statement]
+    elifs: list[ElifSection]
+    else_: ElseSection | None
+
+    @parser("if_statement")
+    @staticmethod
+    def parse(node: PTNode) -> IfStatement:
+        condition = parse_expression(node.field("condition"))
+        body: list[Statement] = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        elifs: list[ElifSection] = []
+        for child in node.fields("elif"):
+            elifs.append(parse(child, ElifSection))
+        else_ = node.maybe_field("else")
+        if else_ is not None:
+            else_ = parse(else_, ElseSection)
+
+        obj = IfStatement(
+            condition=condition, body=body, elifs=elifs, else_=else_, pos=node.pos
+        )
+        return obj
+
+
+@dataclass
+class CaseSection(AstNode):
+    match: Expression
+    body: list[Statement]
+
+    @parser("case_section")
+    @staticmethod
+    def parse(node: PTNode) -> CaseSection:
+        match = parse_expression(node.field("match"))
+        body: list[Statement] = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        return CaseSection(match=match, body=body, pos=node.pos)
+
+
+@dataclass
+class DefaultSection(AstNode):
+    body: list[Statement]
+
+    @parser("default_section")
+    @staticmethod
+    def parse(node: PTNode) -> DefaultSection:
+        body: list[Statement] = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        return DefaultSection(body=body, pos=node.pos)
+
+
+@dataclass
+class SwitchStatement(AstNode):
+    condition: Expression
+    cases: list[CaseSection]
+    default: DefaultSection | None
+
+    @parser("switch_statement")
+    @staticmethod
+    def parse(node: PTNode) -> SwitchStatement:
+        condition = parse_expression(node.field("condition"))
+        cases: list[CaseSection] = []
+        for case in node.fields("case"):
+            cases.append(parse(case, CaseSection))
+        default = node.maybe_field("default")
+        if default is not None:
+            default = parse(default, DefaultSection)
+
+        obj = SwitchStatement(
+            condition=condition, cases=cases, default=default, pos=node.pos
+        )
+        return obj
+
+
+@dataclass
+class WhileLoop(AstNode):
+    condition: Expression
+    body: list[Statement]
+
+    @parser("while_loop")
+    @staticmethod
+    def parse(node: PTNode) -> WhileLoop:
+        condition = parse_expression(node.field("condition"))
+        body: list[Statement] = []
+        for child in node.fields("body"):
+            body.append(parse_statement(child))
+        return WhileLoop(condition=condition, body=body, pos=node.pos)
+
+
+@dataclass
+class AssignmentStatement(AstNode):
+    lvalue: Reference
+    rvalue: Expression
+    variable: Variable | None
+
+    @parser("assignment_statement")
+    @staticmethod
+    def parse(node: PTNode) -> AssignmentStatement:
+        lvalue = parse(node.field("lvalue"), Reference)
+        rvalue = parse_expression(node.field("rvalue"))
+
+        variable = None
+        if len(lvalue.names) == 1:
+            name = lvalue.names[0]
+            if not lvalue.scope.is_defined(name):
+                variable = Variable.parse_assignment(name, node)
+
+        obj = AssignmentStatement(
+            lvalue=lvalue, rvalue=rvalue, variable=variable, pos=node.pos
+        )
+        return obj
+
+
+@dataclass
+class UpdateStatement(AstNode):
+    lvalue: Reference
+    operator: str
+    rvalue: Expression
+
+    @parser("update_statement")
+    @staticmethod
+    def parse(node: PTNode) -> UpdateStatement:
+        lvalue = parse(node.field("lvalue"), Reference)
+        operator = node.field("operator").text
+        rvalue = parse_expression(node.field("rvalue"))
+        obj = UpdateStatement(
+            lvalue=lvalue, operator=operator, rvalue=rvalue, pos=node.pos
+        )
+        return obj
+
+
+@dataclass
+class ParallelStatement(AstNode):
+    table: str
+    # filter_clause: FilterClause | None
+    # sample_clause: SampleClause | None
+    # apply_clause: ApplyClause | None
+    # reduce_clauses: list[ReduceClause]
+
+    @parser("parallel_statement")
+    @staticmethod
+    def parse(node: PTNode) -> ParallelStatement:
+        table = node.field("table").text
+        return ParallelStatement(table=table, pos=node.pos)
+
+
+Statement = (
+    PassStatement
+    | CallStatement
+    | ReturnStatement
+    | IfStatement
+    | SwitchStatement
+    | WhileLoop
+    | AssignmentStatement
+    | UpdateStatement
+    | ParallelStatement
+)
+
+
+def parse_statement(node: PTNode) -> Statement:
+    return parse(node, Statement)
+
 
 @dataclass
 class Function(AstNode):
     name: str
     type: FunctionType
+    params: list[Variable]
+    local_variables: list[Variable]
+    body: list[Statement]
+    scope: Scope = field(repr=False)
 
     @parser("function")
     @staticmethod
     def parse(node: PTNode) -> Function:
         name = node.field("name").text
         params: list[Variable] = []
+        local_variables: list[Variable] = []
+
+        return_type = node.maybe_field("type")
+        if return_type is None:
+            return_type = get_type("void")
+        else:
+            return_type = get_type(return_type.text)
 
         with new_scope(name):
+            fn_scope = scope()
+
             for child in node.fields("parameter"):
                 params.append(parse(child, Variable))
-
-            return_type = node.maybe_field("type")
-            if return_type is None:
-                return_type = get_type("void")
-            else:
-                return_type = get_type(return_type.text)
 
             type = FunctionType(
                 params=tuple(p.type for p in params), return_=return_type
             )
 
-            #
-            # body = []
-            # for child in node.fields("body"):
-            #     stmt = parse(child, scope)
-            #     body.append(stmt)
+            fn_scope.define("_local_variables", local_variables)
 
-        obj = Function(name=name, type=type, pos=node.pos)
+            body: list[Statement] = []
+            for child in node.fields("body"):
+                body.append(parse_statement(child))
+
+            fn_scope.undef("_local_variables")
+
+        obj = Function(
+            name=name,
+            type=type,
+            params=params,
+            local_variables=local_variables,
+            body=body,
+            scope=fn_scope,
+            pos=node.pos,
+        )
         scope().define(name, obj)
         return obj
 
@@ -410,10 +639,6 @@ def mk_ast(filename: Path, node: PTNode) -> Source:
 def print_ast(simulation_file: Path):
     """Print the AST."""
     file_bytes = simulation_file.read_bytes()
-    try:
-        pt = mk_pt(str(simulation_file), file_bytes)
-        ast = mk_ast(simulation_file, pt)
-        rich.print(ast)
-    except RichException as e:
-        e.rich_print()
-        raise SystemExit(1)
+    pt = mk_pt(str(simulation_file), file_bytes)
+    ast = mk_ast(simulation_file, pt)
+    rich.print(ast)

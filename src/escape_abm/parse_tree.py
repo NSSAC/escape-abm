@@ -6,12 +6,11 @@ from pathlib import Path
 
 import click
 from tree_sitter import Node as TSNode
-
 import rich
 from rich.tree import Tree
 from rich.pretty import Pretty
 
-from .misc import SourcePosition, CodeError, CodeErrorList, RichException
+from .misc import SourcePosition, CodeError, CodeErrorList
 from .tree_sitter_bindings import get_parser, get_query
 from .click_helpers import simulation_file_option
 
@@ -176,9 +175,5 @@ def mk_pt(source: str, source_bytes: bytes) -> PTNode:
 def print_parse_tree(simulation_file: Path):
     """Print the parse tree."""
     file_bytes = simulation_file.read_bytes()
-    try:
-        pt = mk_pt(str(simulation_file), file_bytes)
-        rich.print(pt.rich_tree())
-    except RichException as e:
-        e.rich_print()
-        raise SystemExit(1)
+    pt = mk_pt(str(simulation_file), file_bytes)
+    rich.print(pt.rich_tree())

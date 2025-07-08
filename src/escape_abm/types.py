@@ -78,9 +78,10 @@ def setup_type_system():
     nx.add_path(_TYPE_GRAPH, ("f32", "f64", "float"))
 
     _TYPE_GRAPH.add_node("str")
-    _TYPE_GRAPH.add_node("void")
     _TYPE_GRAPH.add_node("node")
     _TYPE_GRAPH.add_node("edge")
+
+    _TYPE_GRAPH.add_node("void")
 
     for type_name in _TYPE_GRAPH.nodes:
         _TYPE_OBJECT[type_name] = BuiltinType(type_name)

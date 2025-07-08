@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import override
 from dataclasses import dataclass
 
 import rich
@@ -34,15 +33,14 @@ class SourcePosition:
     def text(self) -> str:
         return self.get_bytes().decode()
 
+    def __str__(self) -> str:
+        return f"{self.source}:{self.line}:{self.col}"
 
-class RichException(Exception):
-    """Exception with a rich_print method."""
-
-    def rich_print(self):
-        rich.print(f"[red]{self!s}[/red]")
+    def __rich__(self) -> str:
+        return f"[yellow]{self.source}[/yellow]:{self.line}:{self.col}"
 
 
-class CodeError(RichException):
+class CodeError(Exception):
     """Error attributable to user code."""
 
     def __init__(self, type: str, description: str, pos: SourcePosition | None = None):
@@ -59,39 +57,32 @@ class CodeError(RichException):
         self.description = description
         self.pos = pos
 
-    def __str__(self):
-        return f"{self.type}: {self.description}"
-
-    @override
-    def rich_print(self):
-        if self.pos is not None:
-            etype = f"[red]{self.type}[/red]"
-            fpath = f"[yellow]{self.pos.source}[/yellow]"
-            line = self.pos.line
-            col = self.pos.col
-            expl = rich.markup.escape(self.description)
-
-            rich.print(f"{etype}:{fpath}:{line}:{col}: {expl}")
-            print(self.pos.text)
+    def __str__(self) -> str:
+        if self.pos is None:
+            return f"{self.type}: {self.description}"
         else:
-            etype = f"[red]{self.type}[/red]"
-            expl = rich.markup.escape(self.description)
-            rich.print(f"{etype}: {expl}")
+            return f"{self.type}:{self.pos}: {self.description}"
+
+    def __rich__(self) -> str:
+        if self.pos is None:
+            return f"[red]{self.type}[/red]: {self.description}"
+        else:
+            return f"[red]{self.type}[/red]:{self.pos.__rich__()}: {rich.markup.escape(self.description)}"
 
 
-class CodeErrorList(RichException):
-    """List of errors."""
+class CodeErrorList(Exception):
+    """List of errors attributable to user code."""
 
     def __init__(self, description: str, errors: list[CodeError]):
         super().__init__()
         self.description = description
         self.errors = errors
 
-    def __str__(self):
-        return self.description
+    def __str__(self) -> str:
+        return self.description + "\n".join(str(e) for e in self.errors)
 
-    @override
-    def rich_print(self):
-        rich.print(f"[red]{self}[/red]")
+    def __rich__(self) -> str:
+        ret = [f"[red]{self.description}[/red]"]
         for error in self.errors:
-            error.rich_print()
+            ret.append(error.__rich__())
+        return "\n".join(ret)

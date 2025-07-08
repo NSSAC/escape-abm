@@ -43,4 +43,4 @@ where = ["src"]
 "Homepage" = "http://github.com/nssac/escape-abm"
 
 [project.scripts]
-esc = "escape_abm.cli:cli"
+esc = "escape_abm.cli:main"

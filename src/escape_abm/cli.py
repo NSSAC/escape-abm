@@ -1,9 +1,13 @@
 """Command line interface."""
 
+import sys
+import rich
 import click
 
+from .misc import CodeError, CodeErrorList
 from .parse_tree import print_parse_tree
 from .ast import print_ast
+
 # from .check_ast import print_checked_ast
 
 # from .codegen_openmp import codegen_openmp
@@ -32,3 +36,12 @@ debug.add_command(print_ast)
 # cli.add_command(prepare_input)
 # cli.add_command(process_input)
 # cli.add_command(process_output)
+
+
+def main():
+    try:
+        cli()
+    except (CodeError, CodeErrorList) as e:
+        rich.print(e)
+        # raise e
+        sys.exit(1)
