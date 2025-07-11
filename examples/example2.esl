@@ -31,8 +31,8 @@ contagion cntg: state_t
     Iasymp => S -> E
   end
 
-  transition probability = transition_prob
-  dwell time = dwell_time
+  transition_rate = transition_prob
+  dwell_time = dwell_time
 
   susceptibility = 1.0
   infectivity = 1.0

@@ -208,7 +208,7 @@ class FunctionCall(AstNode):
 
     @parser("function_call")
     @staticmethod
-    def make(node: PTNode) -> FunctionCall:
+    def parse(node: PTNode) -> FunctionCall:
         function = parse(node.field("function"), Reference)
         args = [parse_expression(c) for c in node.fields("argument")]
         obj = FunctionCall(function=function, args=args, pos=node.pos)
@@ -569,7 +569,7 @@ class ReduceClause(AstNode):
 
     @parser("reduce_clause")
     @staticmethod
-    def make(node: PTNode) -> ReduceClause:
+    def parse(node: PTNode) -> ReduceClause:
         lvalue = parse(node.field("lvalue"), Reference)
         operator = node.field("operator").text
         scope().define("_par_stmt_clause", "reduce")
@@ -792,39 +792,217 @@ def parse_expression_or_lambda(node: PTNode) -> Expression | LambdaFunction:
 
 
 @dataclass
+class NodeField(AstNode):
+    name: str
+    type: Type
+    is_node_key: bool
+    is_static: bool
+    save_to_output: bool
+
+    @parser("node_field")
+    @staticmethod
+    def parse(node: PTNode) -> NodeField:
+        name = node.field("name").text
+        type = get_type(node.field("type").text)
+
+        annotations = [c.text for c in node.fields("annotation")]
+        is_node_key = "node key" in annotations
+        is_static = "static" in annotations or is_node_key
+        save_to_output = "save" in annotations
+
+        if save_to_output and is_static:
+            raise CodeError(
+                "Ast Error", "Static field can't be saved to output.", node.pos
+            )
+
+        obj = NodeField(
+            name=name,
+            type=type,
+            is_node_key=is_node_key,
+            is_static=is_static,
+            save_to_output=save_to_output,
+            pos=node.pos,
+        )
+
+        scope().define(name, obj)
+        return obj
+
+
+@dataclass
+class NodeTable(AstNode):
+    fields: list[NodeField]
+    key: NodeField
+    scope: Scope
+
+    @parser("node")
+    @staticmethod
+    def parse(node: PTNode) -> NodeTable:
+        with new_scope("node_table"):
+            fields = [parse(child, NodeField) for child in node.named_children()]
+            table_scope = scope()
+
+        key = [f for f in fields if f.is_node_key]
+        if len(key) != 1:
+            raise CodeError(
+                "Ast Error",
+                "One and only one node key field must be specified.",
+                node.pos,
+            )
+        key = key[0]
+
+        obj = NodeTable(fields=fields, key=key, scope=table_scope, pos=node.pos)
+        return obj
+
+
+@dataclass
+class EdgeField(AstNode):
+    name: str
+    type: Type
+    is_target_node_key: bool
+    is_source_node_key: bool
+    is_static: bool
+    save_to_output: bool
+
+    @parser("edge_field")
+    @staticmethod
+    def parse(node: PTNode) -> EdgeField:
+        name = node.field("name").text
+        type = get_type(node.field("type").text)
+
+        annotations = [c.text for c in node.fields("annotation")]
+        is_source_node_key = "source node key" in annotations
+        is_target_node_key = "target node key" in annotations
+        is_static = "static" in annotations or is_source_node_key or is_target_node_key
+        save_to_output = "save" in annotations
+
+        if is_static and save_to_output:
+            raise CodeError(
+                "Ast Error", "Static field can't be saved to output.", node.pos
+            )
+
+        obj = EdgeField(
+            name=name,
+            type=type,
+            is_target_node_key=is_target_node_key,
+            is_source_node_key=is_source_node_key,
+            is_static=is_static,
+            save_to_output=save_to_output,
+            pos=node.pos,
+        )
+
+        scope().define(name, obj)
+        return obj
+
+
+@dataclass
+class EdgeTable(AstNode):
+    fields: list[EdgeField]
+    target_node_key: EdgeField
+    source_node_key: EdgeField
+    scope: Scope
+
+    @parser("edge")
+    @staticmethod
+    def parse(node: PTNode) -> EdgeTable:
+        with new_scope("edge_table"):
+            fields = [parse(child, EdgeField) for child in node.named_children()]
+            table_scope = scope()
+
+        target_key = [f for f in fields if f.is_target_node_key]
+        if len(target_key) != 1:
+            raise CodeError(
+                "Ast Error",
+                "One and only one target node key field must be specified.",
+                node.pos,
+            )
+        target_key = target_key[0]
+
+        source_key = [f for f in fields if f.is_source_node_key]
+        if len(source_key) != 1:
+            raise CodeError(
+                "Ast Error",
+                "One and only one source node key field must be specified.",
+                node.pos,
+            )
+        source_key = source_key[0]
+
+        obj = EdgeTable(
+            fields=fields,
+            target_node_key=target_key,
+            source_node_key=source_key,
+            scope=table_scope,
+            pos=node.pos,
+        )
+        return obj
+
+
+@dataclass
 class Source:
     module: str
     enum_type_defns: list[EnumTypeDefn]
     globals: list[GlobalVariable]
     functions: list[Function]
+    node_table: NodeTable
+    edge_table: EdgeTable
 
     @staticmethod
     def parse(module: str, root: PTNode) -> Source:
         clear_scope()
         setup_type_system()
 
-        enum_type_defns = []
-        globals = []
-        functions = []
-
         with new_scope(name="source"):
             for type in visible_types():
                 scope().define(type.name, type)
 
-            for enum in root.named_children("enum"):
-                enum_type_defns.append(parse(enum, EnumTypeDefn))
+            enum_type_defns = [
+                parse(enum, EnumTypeDefn) for enum in root.named_children("enum")
+            ]
 
-            for gvar in root.named_children("global"):
-                globals.append(parse(gvar, GlobalVariable))
+            globals = [
+                parse(gvar, GlobalVariable) for gvar in root.named_children("global")
+            ]
 
-            for func in root.named_children("function"):
-                functions.append(parse(func, Function))
+            functions = [
+                parse(func, Function) for func in root.named_children("function")
+            ]
+
+            node_table_list = [
+                parse(table, NodeTable) for table in root.named_children("node")
+            ]
+            if len(node_table_list) > 1:
+                raise CodeError(
+                    "AstNode",
+                    "One and only one node table must be defined",
+                    node_table_list[-1].pos,
+                )
+            elif len(node_table_list) < 1:
+                raise CodeError(
+                    "AstNode", "One and only one node table must be defined", None
+                )
+            node_table = node_table_list[0]
+
+            edge_table_list = [
+                parse(table, EdgeTable) for table in root.named_children("edge")
+            ]
+            if len(edge_table_list) > 1:
+                raise CodeError(
+                    "AstNode",
+                    "One and only one edge table must be defined",
+                    edge_table_list[-1].pos,
+                )
+            elif len(edge_table_list) < 1:
+                raise CodeError(
+                    "AstNode", "One and only one edge table must be defined", None
+                )
+            edge_table = edge_table_list[0]
 
         return Source(
             module=module,
             enum_type_defns=enum_type_defns,
             globals=globals,
             functions=functions,
+            node_table=node_table,
+            edge_table=edge_table,
         )
 
 
