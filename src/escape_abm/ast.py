@@ -157,7 +157,7 @@ class Reference(AstNode):
     @parser("reference")
     @staticmethod
     def parse(node: PTNode) -> Reference:
-        names = [s.text for s in node.named_children]
+        names = [s.text for s in node.named_children()]
         obj = Reference(names=names, scope=scope(), pos=node.pos)
         return obj
 
@@ -282,11 +282,22 @@ class Variable(AstNode):
     name: str
     type: Type
 
-    @parser("parameter")
     @staticmethod
     def parse_parameter(node: PTNode) -> Variable:
         name = node.field("name").text
         type = get_type(node.field("type").text)
+        obj = Variable(name=name, type=type, pos=node.pos)
+        scope().define(name, obj)
+        return obj
+
+    @staticmethod
+    def parse_lambda_parameter(node: PTNode, expected_type: Type) -> Variable:
+        name = node.field("name").text
+        type = node.maybe_field("type")
+        if type is None:
+            type = expected_type
+        else:
+            type = get_type(node.field("type").text)
         obj = Variable(name=name, type=type, pos=node.pos)
         scope().define(name, obj)
         return obj
@@ -321,7 +332,7 @@ class CallStatement(AstNode):
     @parser("call_statement")
     @staticmethod
     def parse(node: PTNode) -> CallStatement:
-        call = parse(node.named_children[0], FunctionCall)
+        call = parse(node.named_children()[0], FunctionCall)
         return CallStatement(call=call, pos=node.pos)
 
 
@@ -332,7 +343,12 @@ class ReturnStatement(AstNode):
     @parser("return_statement")
     @staticmethod
     def parse(node: PTNode) -> ReturnStatement:
-        expression = parse_expression(node.named_children[0])
+        expression = parse_expression(node.named_children()[0])
+        return ReturnStatement(expression=expression, pos=node.pos)
+
+    @staticmethod
+    def from_expression(node: PTNode) -> ReturnStatement:
+        expression = parse_expression(node)
         return ReturnStatement(expression=expression, pos=node.pos)
 
 
@@ -500,18 +516,130 @@ class UpdateStatement(AstNode):
 
 
 @dataclass
+class FilterClause(AstNode):
+    function: Expression | LambdaFunction
+
+    @parser("filter_clause")
+    @staticmethod
+    def parse(node: PTNode) -> FilterClause:
+        scope().define("_par_stmt_clause", "filter")
+        function = parse_expression_or_lambda(
+            node.field("function"),
+        )
+        scope().undef("_par_stmt_clause")
+        obj = FilterClause(function=function, pos=node.pos)
+        return obj
+
+
+@dataclass
+class SampleClause(AstNode):
+    is_absolute: bool
+    amount: Expression
+
+    @parser("sample_clause")
+    @staticmethod
+    def parse(node: PTNode) -> SampleClause:
+        is_absolute = node.field("type").text == "ABSOLUTE"
+        amount = parse_expression(node.field("amount"))
+        obj = SampleClause(is_absolute=is_absolute, amount=amount, pos=node.pos)
+        return obj
+
+
+@dataclass
+class ApplyClause(AstNode):
+    function: Expression | LambdaFunction
+
+    @parser("apply_clause")
+    @staticmethod
+    def parse(node: PTNode) -> ApplyClause:
+        scope().define("_par_stmt_clause", "apply")
+        function = parse_expression_or_lambda(
+            node.field("function"),
+        )
+        scope().undef("_par_stmt_clause")
+        obj = ApplyClause(function=function, pos=node.pos)
+        return obj
+
+
+@dataclass
+class ReduceClause(AstNode):
+    lvalue: Reference
+    operator: str
+    function: Expression | LambdaFunction
+
+    @parser("reduce_clause")
+    @staticmethod
+    def make(node: PTNode) -> ReduceClause:
+        lvalue = parse(node.field("lvalue"), Reference)
+        operator = node.field("operator").text
+        scope().define("_par_stmt_clause", "reduce")
+        function = parse_expression_or_lambda(
+            node.field("function"),
+        )
+        scope().undef("_par_stmt_clause")
+
+        obj = ReduceClause(
+            lvalue=lvalue, operator=operator, function=function, pos=node.pos
+        )
+        return obj
+
+
+@dataclass
 class ParallelStatement(AstNode):
     table: str
-    # filter_clause: FilterClause | None
-    # sample_clause: SampleClause | None
-    # apply_clause: ApplyClause | None
-    # reduce_clauses: list[ReduceClause]
+    filter_clause: FilterClause | None
+    sample_clause: SampleClause | None
+    apply_clause: ApplyClause | None
+    reduce_clauses: list[ReduceClause]
 
     @parser("parallel_statement")
     @staticmethod
     def parse(node: PTNode) -> ParallelStatement:
         table = node.field("table").text
-        return ParallelStatement(table=table, pos=node.pos)
+
+        scope().define("_par_stmt_table", table)
+
+        filter_clause_list: list[FilterClause] = []
+        for clause in node.named_children("filter_clause"):
+            filter_clause_list.append(parse(clause, FilterClause))
+        assert len(filter_clause_list) <= 1, "Got multiple filter clauses"
+        if len(filter_clause_list) == 1:
+            filter_clause = filter_clause_list[0]
+        else:
+            filter_clause = None
+
+        sample_clause_list: list[SampleClause] = []
+        for clause in node.named_children("sample_clause"):
+            sample_clause_list.append(parse(clause, SampleClause))
+        assert len(sample_clause_list) <= 1, "Got multiple sample clauses"
+        if len(sample_clause_list) == 1:
+            sample_clause = sample_clause_list[0]
+        else:
+            sample_clause = None
+
+        apply_clause_list: list[ApplyClause] = []
+        for clause in node.named_children("apply_clause"):
+            apply_clause_list.append(parse(clause, ApplyClause))
+        assert len(apply_clause_list) <= 1, "Got multiple apply clauses"
+        if len(apply_clause_list) == 1:
+            apply_clause = apply_clause_list[0]
+        else:
+            apply_clause = None
+
+        reduce_clauses: list[ReduceClause] = []
+        for clause in node.named_children("reduce_clause"):
+            reduce_clauses.append(parse(clause, ReduceClause))
+
+        scope().undef("_par_stmt_table")
+
+        return ParallelStatement(
+            table=table,
+            filter_clause=filter_clause,
+            sample_clause=sample_clause,
+            apply_clause=apply_clause,
+            reduce_clauses=reduce_clauses,
+            pos=node.pos,
+        )
 
 
 Statement = (
@@ -557,7 +685,7 @@ class Function(AstNode):
             fn_scope = scope()
 
             for child in node.fields("parameter"):
-                params.append(parse(child, Variable))
+                params.append(Variable.parse_parameter(child))
 
             type = FunctionType(
                 params=tuple(p.type for p in params), return_=return_type
@@ -585,6 +713,85 @@ class Function(AstNode):
 
 
 @dataclass
+class LambdaFunction(AstNode):
+    name: str
+    expected_type: FunctionType
+    type: FunctionType
+    params: list[Variable]
+    local_variables: list[Variable]
+    body: list[Statement]
+    scope: Scope = field(repr=False)
+
+    @parser("lambda_function")
+    @staticmethod
+    def parse(node: PTNode) -> LambdaFunction:
+        name = f"lambda_function_{node.pos.line}_{node.pos.col}"
+        params: list[Variable] = []
+        local_variables: list[Variable] = []
+
+        expected_type: FunctionType | None = None
+        if scope().is_defined("_par_stmt_table"):
+            par_stmt_table = scope().resolve("_par_stmt_table")
+            par_stmt_clause = scope().resolve("_par_stmt_clause")
+            if par_stmt_clause == "filter":
+                expected_type = FunctionType(
+                    params=(get_type(par_stmt_table),), return_=get_type("bool")
+                )
+            elif par_stmt_clause == "apply":
+                expected_type = FunctionType(
+                    params=(get_type(par_stmt_table),), return_=get_type("void")
+                )
+            elif par_stmt_clause == "reduce":
+                expected_type = FunctionType(
+                    params=(get_type(par_stmt_table),), return_=get_type("float")
+                )
+
+        assert expected_type is not None, "Unknown lambda context"
+
+        return_type = node.maybe_field("type")
+        if return_type is None:
+            return_type = expected_type.return_
+        else:
+            return_type = get_type(return_type.text)
+
+        with new_scope(name):
+            fn_scope = scope()
+
+            for child, etype in zip(node.fields("parameter"), expected_type.params):
+                params.append(Variable.parse_lambda_parameter(child, etype))
+
+            type = FunctionType(
+                params=tuple(p.type for p in params), return_=return_type
+            )
+
+            fn_scope.define("_local_variables", local_variables)
+
+            body: list[Statement] = []
+            for child in node.fields("body"):
+                body.append(parse_statement(child))
+            return_expr = node.maybe_field("return_expression")
+            if return_expr:
+                body.append(ReturnStatement.from_expression(return_expr))
+
+            fn_scope.undef("_local_variables")
+
+        return LambdaFunction(
+            name=name,
+            expected_type=expected_type,
+            type=type,
+            params=params,
+            local_variables=local_variables,
+            body=body,
+            scope=fn_scope,
+            pos=node.pos,
+        )
+
+
+def parse_expression_or_lambda(node: PTNode) -> Expression | LambdaFunction:
+    return parse(node, Expression | LambdaFunction)
+
+
+@dataclass
 class Source:
     module: str
     enum_type_defns: list[EnumTypeDefn]
@@ -604,13 +811,13 @@ class Source:
             for type in visible_types():
                 scope().define(type.name, type)
 
-            for enum in root.simple_query("enum"):
+            for enum in root.named_children("enum"):
                 enum_type_defns.append(parse(enum, EnumTypeDefn))
 
-            for gvar in root.simple_query("global"):
+            for gvar in root.named_children("global"):
                 globals.append(parse(gvar, GlobalVariable))
 
-            for func in root.simple_query("function"):
+            for func in root.named_children("function"):
                 functions.append(parse(func, Function))
 
         return Source(

@@ -27,19 +27,6 @@ enum c1_state_t
     S, E, Ipresymp, Isymp, Iasymp, R
 end
 
-cdist symp_recov_dist
-    p = 0.175, v = 1
-    p = 0.175, v = 2
-    p = 0.1, v = 3
-    p = 0.1, v = 4
-    p = 0.1, v = 5
-    p = 0.1, v = 6
-    p = 0.1, v = 7
-    p = 0.05, v = 8
-    p = 0.05, v = 9
-    p = 0.05, v = 10
-end
-
 contagion c1: c1_state_t
 
     transition
@@ -56,8 +43,8 @@ contagion c1: c1_state_t
         Iasymp => S -> E
     end
 
-    transition probability = c1_transition_probability
-    dwell time = c1_dwell_time
+    transition_rate = c1_transition_probability
+    dwell_time = c1_dwell_time
 
     susceptibility = c1_susceptibility
     infectivity = c1_infectivity
@@ -74,6 +61,23 @@ def c1_transition_probability(v: node, next_state: c1_state_t) -> float:
     end
 end
 
+def sample_recov_dist():
+    x: float = sample_uniform(0.0, 1.0)
+
+    if x <= 0.175:  return 1
+    elif x <= 0.35: return 2
+    elif x <= 0.45: return 3
+    elif x <= 0.55: return 4
+    elif x <= 0.65: return 5
+    elif x <= 0.75: return 6
+    elif x <= 0.85: return 7
+    elif x <= 0.90: return 8
+    elif x <= 0.95: return 9
+    else: return 10 # x <= 1.0
+    end
+end
+
+
 def c1_dwell_time(v: node, next_state: c1_state_t) -> float:
     if next_state == Ipresymp:
         return 3.0
@@ -82,7 +86,7 @@ def c1_dwell_time(v: node, next_state: c1_state_t) -> float:
     elif next_state == Isymp:
         return 2.0
     elif v.c1.state == Isymp and next_state == R:
-        return sample_categorical(symp_recov_dist)
+        return sample_recov_dist()
     elif v.c1.state == Iasymp and next_state == R:
         return sample_normal(5.0, 1.0)
     else:

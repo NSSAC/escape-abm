@@ -91,21 +91,33 @@ class PTNode:
         ]
         return children
 
-    @property
-    def children(self) -> list[PTNode]:
-        return [
-            PTNode(self.source, self.source_bytes, child)
-            for child in self.node.children
-            if child.type not in FILTERED_NODES
-        ]
+    def children(self, type: str | None = None) -> list[PTNode]:
+        if type is None:
+            return [
+                PTNode(self.source, self.source_bytes, child)
+                for child in self.node.children
+                if child.type not in FILTERED_NODES
+            ]
+        else:
+            return [
+                PTNode(self.source, self.source_bytes, child)
+                for child in self.node.children
+                if child.type == type
+            ]
 
-    @property
-    def named_children(self) -> list[PTNode]:
-        return [
-            PTNode(self.source, self.source_bytes, child)
-            for child in self.node.named_children
-            if child.type not in FILTERED_NODES
-        ]
+    def named_children(self, type: str | None = None) -> list[PTNode]:
+        if type is None:
+            return [
+                PTNode(self.source, self.source_bytes, child)
+                for child in self.node.named_children
+                if child.type not in FILTERED_NODES
+            ]
+        else:
+            return [
+                PTNode(self.source, self.source_bytes, child)
+                for child in self.node.named_children
+                if child.type == type
+            ]
 
     def __rich_repr__(self):
         yield "type", self.type
@@ -120,7 +132,7 @@ class PTNode:
         else:
             tree = tree.add(Pretty(self))
 
-        for child in self.named_children:
+        for child in self.named_children():
             child.rich_tree(tree)
 
         return tree

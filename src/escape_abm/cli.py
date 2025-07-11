@@ -43,5 +43,5 @@ def main():
         cli()
     except (CodeError, CodeErrorList) as e:
         rich.print(e)
-        # raise e
-        sys.exit(1)
+        raise e
+        # sys.exit(1)
