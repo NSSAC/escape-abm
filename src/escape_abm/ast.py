@@ -522,11 +522,9 @@ class FilterClause(AstNode):
     @parser("filter_clause")
     @staticmethod
     def parse(node: PTNode) -> FilterClause:
-        scope().define("_par_stmt_clause", "filter")
         function = parse_expression_or_lambda(
             node.field("function"),
         )
-        scope().undef("_par_stmt_clause")
         obj = FilterClause(function=function, pos=node.pos)
         return obj
 
@@ -552,11 +550,9 @@ class ApplyClause(AstNode):
     @parser("apply_clause")
     @staticmethod
     def parse(node: PTNode) -> ApplyClause:
-        scope().define("_par_stmt_clause", "apply")
         function = parse_expression_or_lambda(
             node.field("function"),
         )
-        scope().undef("_par_stmt_clause")
         obj = ApplyClause(function=function, pos=node.pos)
         return obj
 
@@ -572,11 +568,9 @@ class ReduceClause(AstNode):
     def parse(node: PTNode) -> ReduceClause:
         lvalue = parse(node.field("lvalue"), Reference)
         operator = node.field("operator").text
-        scope().define("_par_stmt_clause", "reduce")
         function = parse_expression_or_lambda(
             node.field("function"),
         )
-        scope().undef("_par_stmt_clause")
 
         obj = ReduceClause(
             lvalue=lvalue, operator=operator, function=function, pos=node.pos
@@ -597,8 +591,10 @@ class ParallelStatement(AstNode):
     def parse(node: PTNode) -> ParallelStatement:
         table = node.field("table").text
 
-        scope().define("_par_stmt_table", table)
-
+        expected_lambda_type = FunctionType(
+            params=(get_type(table),), return_=get_type("bool")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
         filter_clause_list: list[FilterClause] = []
         for clause in node.named_children("filter_clause"):
             filter_clause_list.append(parse(clause, FilterClause))
@@ -607,6 +603,7 @@ class ParallelStatement(AstNode):
             filter_clause = filter_clause_list[0]
         else:
             filter_clause = None
+        scope().undef("_expected_lambda_type")
 
         sample_clause_list: list[SampleClause] = []
         for clause in node.named_children("sample_clause"):
@@ -617,6 +614,10 @@ class ParallelStatement(AstNode):
         else:
             sample_clause = None
 
+        expected_lambda_type = FunctionType(
+            params=(get_type(table),), return_=get_type("void")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
         apply_clause_list: list[ApplyClause] = []
         for clause in node.named_children("apply_clause"):
             apply_clause_list.append(parse(clause, ApplyClause))
@@ -625,12 +626,16 @@ class ParallelStatement(AstNode):
             apply_clause = apply_clause_list[0]
         else:
             apply_clause = None
+        scope().undef("_expected_lambda_type")
 
+        expected_lambda_type = FunctionType(
+            params=(get_type(table),), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
         reduce_clauses: list[ReduceClause] = []
         for clause in node.named_children("reduce_clause"):
             reduce_clauses.append(parse(clause, ReduceClause))
-
-        scope().undef("_par_stmt_table")
+        scope().undef("_expected_lambda_type")
 
         return ParallelStatement(
             table=table,
@@ -729,24 +734,7 @@ class LambdaFunction(AstNode):
         params: list[Variable] = []
         local_variables: list[Variable] = []
 
-        expected_type: FunctionType | None = None
-        if scope().is_defined("_par_stmt_table"):
-            par_stmt_table = scope().resolve("_par_stmt_table")
-            par_stmt_clause = scope().resolve("_par_stmt_clause")
-            if par_stmt_clause == "filter":
-                expected_type = FunctionType(
-                    params=(get_type(par_stmt_table),), return_=get_type("bool")
-                )
-            elif par_stmt_clause == "apply":
-                expected_type = FunctionType(
-                    params=(get_type(par_stmt_table),), return_=get_type("void")
-                )
-            elif par_stmt_clause == "reduce":
-                expected_type = FunctionType(
-                    params=(get_type(par_stmt_table),), return_=get_type("float")
-                )
-
-        assert expected_type is not None, "Unknown lambda context"
+        expected_type = scope().resolve("_expected_lambda_type", FunctionType)
 
         return_type = node.maybe_field("type")
         if return_type is None:
@@ -937,6 +925,112 @@ class EdgeTable(AstNode):
 
 
 @dataclass
+class Transition(AstNode):
+    entry: Reference
+    exit: Reference
+
+    @parser("transition")
+    @staticmethod
+    def parse(node: PTNode) -> Transition:
+        entry = parse(node.field("entry"), Reference)
+        exit = parse(node.field("exit"), Reference)
+        return Transition(entry=entry, exit=exit, pos=node.pos)
+
+
+@dataclass
+class Transmission(AstNode):
+    contact: Reference
+    entry: Reference
+    exit: Reference
+
+    @parser("transmission")
+    @staticmethod
+    def parse(node: PTNode) -> Transmission:
+        contact = parse(node.field("contact"), Reference)
+        entry = parse(node.field("entry"), Reference)
+        exit = parse(node.field("exit"), Reference)
+        return Transmission(contact=contact, entry=entry, exit=exit, pos=node.pos)
+
+
+@dataclass
+class Contagion(AstNode):
+    name: str
+    type: Type
+    transitions: list[Transition]
+    transmissions: list[Transmission]
+    # susceptibility: Expression | LambdaFunction
+    # infectivity: Expression | LambdaFunction
+    # transmissibility: Expression | LambdaFunction
+    # scope: Scope
+
+    @parser("contagion")
+    @staticmethod
+    def parse(node: PTNode) -> Contagion:
+        name = node.field("name").text
+        type = get_type(node.field("type").text)
+        transitions = [
+            parse(child, Transition) for child in node.named_children("transition")
+        ]
+        transmissions = [
+            parse(child, Transmission) for child in node.named_children("transmission")
+        ]
+
+        # children = defaultdict(list)
+        # for child in node.fields("body"):
+        #     children[child.type].append(parse(child, scope))
+        #
+        # state_type = children["contagion_state_type"]
+        # with err_desc("State type must defined once for each contagion.", node.pos):
+        #     assert len(state_type) == 1
+        # state_type = state_type[0].value
+        #
+        # state = StateAccessor(type=state_type)
+        # scope.define("state", state)
+        #
+        # transitions = [t for ts in children["transitions"] for t in ts]
+        # transmissions = [t for ts in children["transmissions"] for t in ts]
+        # contagion_functions = children["contagion_function"]
+        #
+        # susceptibility = [
+        #     f for k, f in contagion_functions if k == ContagionFuncton.Susceptibility
+        # ]
+        # with err_desc("Susceptibility must defined once for each contagion.", node.pos):
+        #     assert len(susceptibility) == 1
+        # susceptibility = susceptibility[0]
+        #
+        # infectivity = [
+        #     f for k, f in contagion_functions if k == ContagionFuncton.Infectivity
+        # ]
+        # with err_desc("Infectivity must defined once for each contagion.", node.pos):
+        #     assert len(infectivity) == 1
+        # infectivity = infectivity[0]
+        #
+        # transmissibility = [
+        #     f for k, f in contagion_functions if k == ContagionFuncton.Transmissibility
+        # ]
+        # with err_desc(
+        #     "Transmissibility must defined once for each contagion.", node.pos
+        # ):
+        #     assert len(transmissibility) == 1
+        # transmissibility = transmissibility[0]
+        #
+        obj = Contagion(
+            name=name,
+            type=type,
+            transitions=transitions,
+            transmissions=transmissions,
+            # susceptibility=susceptibility,
+            # infectivity=infectivity,
+            # transmissibility=transmissibility,
+            # state=state,
+            # scope=scope,
+            pos=node.pos,
+        )
+        scope().define(name, obj)
+        return obj
+
+
+@dataclass
 class Source:
     module: str
     enum_type_defns: list[EnumTypeDefn]
@@ -944,6 +1038,7 @@ class Source:
     functions: list[Function]
     node_table: NodeTable
     edge_table: EdgeTable
+    contagions: list[Contagion]
 
     @staticmethod
     def parse(module: str, root: PTNode) -> Source:
@@ -996,6 +1091,10 @@ class Source:
                 )
             edge_table = edge_table_list[0]
 
+            contagions = [
+                parse(contg, Contagion) for contg in root.named_children("contagion")
+            ]
+
         return Source(
             module=module,
             enum_type_defns=enum_type_defns,
@@ -1003,6 +1102,7 @@ class Source:
             functions=functions,
             node_table=node_table,
             edge_table=edge_table,
+            contagions=contagions,
         )
 
 
