@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import networkx as nx
-from typing import TypeGuard, Any
+from typing import TypeGuard, Any, overload
 from dataclasses import dataclass, field
 
 from .misc import TypeError
@@ -13,6 +13,42 @@ from .misc import TypeError
 class Type:
     name: str
     symtab: dict[str, Any] = field(repr=False)
+
+    def has(self, k: str) -> bool:
+        return k in self.symtab
+
+    @overload
+    def get[T](self, k: str, type: type[T]) -> T: ...
+
+    @overload
+    def get[T](self, k: str, type: tuple[type[T], ...]) -> T: ...
+
+    @overload
+    def get(self, k: str, type: Any | None) -> Any: ...
+
+    @overload
+    def get(self, k: str) -> Any: ...
+
+    def get(self, k, type=None):
+        if k in self.symtab:
+            ret = self.symtab[k]
+        else:
+            raise TypeError(f"Attribute {k} is not defined for type {self.name}.")
+
+        if type is None:
+            return ret
+
+        if not isinstance(ret, type):
+            raise TypeError(f"Expected object of type {type}; got {type(ret)}")
+
+        return ret
+
+    def add(self, k: str, v: Any):
+        if k in self.symtab:
+            raise TypeError(
+                f"Attribute {k} has been already defined for type {self.name}."
+            )
+        self.symtab[k] = v
 
 
 def make_type(name: str) -> Type:

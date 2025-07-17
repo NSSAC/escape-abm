@@ -38,7 +38,7 @@ class Scope:
     @overload
     def resolve(self, k: str) -> Any: ...
 
-    def resolve(self, k: str, type=None):
+    def resolve(self, k, type=None):
         if k in self.names:
             ret = self.names[k]
         elif self.parent is not None:

@@ -163,7 +163,7 @@ class Literal(AstNode):
 class Reference(AstNode):
     names: list[str]
     scope: Scope = field(repr=False)
-    value_: Any = None
+    ref: Any = None
 
     @cached_property
     def name(self) -> str:
@@ -175,6 +175,27 @@ class Reference(AstNode):
         names = [s.text for s in node.named_children()]
         obj = Reference(names=names, scope=scope(), pos=node.pos)
         return obj
+
+    def resolve(self):
+        if self.ref is not None:
+            return self.ref
+
+        try:
+            refs = []
+            for name in self.names:
+                if not refs:
+                    refs.append(self.scope.resolve(name))
+                else:
+                    type: Type = refs[-1].type
+                    refs.append(type.get(name))
+            if len(refs) == 1:
+                ref = refs[0]
+            else:
+                ref = tuple(refs)
+            self.ref = ref
+            return self.ref
+        except Exception as e:
+            raise ReferenceError(f"Failed to resolve {self.name}", self.pos) from e
 
 
 @dataclass
@@ -824,9 +845,7 @@ class NodeField(AstNode):
         )
 
         node_type = get_type("node")
-        if name in node_type.symtab:
-            raise SemanticError(f"Redefinition of node field: {name}", node.pos)
-        node_type.symtab[name] = obj
+        node_type.add(name, obj)
         return obj
 
 
@@ -885,9 +904,7 @@ class EdgeField(AstNode):
         )
 
         edge_type = get_type("edge")
-        if name in edge_type.symtab:
-            raise SemanticError(f"Redefinition of edge field: {name}", node.pos)
-        edge_type.symtab[name] = obj
+        edge_type.add(name, obj)
 
         return obj
 
@@ -992,7 +1009,7 @@ class Contagion(AstNode):
             save_to_output=False,
             pos=node.pos,
         )
-        type.symtab["state"] = state_field
+        type.add("state", state_field)
 
         transitions = [
             parse(child, Transition) for child in node.named_children("transition")
@@ -1151,13 +1168,7 @@ class Source:
         node_type = get_type("node")
         for contagion in contagions:
             node_table.fields.append(contagion.state_field)
-
-            if contagion.name in node_type.symtab:
-                raise SemanticError(
-                    f"Node type already has an attribute {contagion.name}",
-                    contagion.pos,
-                )
-            node_type.symtab[contagion.name] = contagion
+            node_type.add(contagion.name, contagion)
 
         return Source(
             module=module,
