@@ -13,11 +13,11 @@ import click
 
 from .types import (
     Type,
-    EnumType,
     FunctionType,
-    add_user_defined_type,
+    add_enum_type,
+    add_contagion_type,
+    make_function_type,
     setup_type_system,
-    visible_types,
     get_type,
 )
 from .scope import Scope
@@ -252,15 +252,13 @@ class EnumConstant(AstNode):
 
 @dataclass
 class EnumTypeDefn(AstNode):
-    type: EnumType
+    type: Type
 
     @parser("enum")
     @staticmethod
     def parse(node: PTNode) -> EnumTypeDefn:
         name = node.field("name").text
-        consts = tuple(child.text for child in node.fields("constant"))
-        type = EnumType(name=name, consts=consts)
-        add_user_defined_type(type)
+        type = get_type(name)
 
         obj = EnumTypeDefn(type=type, pos=node.pos)
         for child in node.fields("constant"):
@@ -606,7 +604,7 @@ class ParallelStatement(AstNode):
     def parse(node: PTNode) -> ParallelStatement:
         table = node.field("table").text
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("bool")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -629,7 +627,7 @@ class ParallelStatement(AstNode):
         else:
             sample_clause = None
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("void")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -643,7 +641,7 @@ class ParallelStatement(AstNode):
             apply_clause = None
         scope().undef("_expected_lambda_type")
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -707,7 +705,7 @@ class Function(AstNode):
             for child in node.fields("parameter"):
                 params.append(Variable.parse_parameter(child))
 
-            type = FunctionType(
+            type = make_function_type(
                 params=tuple(p.type for p in params), return_=return_type
             )
 
@@ -763,7 +761,7 @@ class LambdaFunction(AstNode):
             for child, etype in zip(node.fields("parameter"), expected_type.params):
                 params.append(Variable.parse_lambda_parameter(child, etype))
 
-            type = FunctionType(
+            type = make_function_type(
                 params=tuple(p.type for p in params), return_=return_type
             )
 
@@ -825,7 +823,10 @@ class NodeField(AstNode):
             pos=node.pos,
         )
 
-        scope().define(name, obj)
+        node_type = get_type("node")
+        if name in node_type.symtab:
+            raise SemanticError(f"Redefinition of node field: {name}", node.pos)
+        node_type.symtab[name] = obj
         return obj
 
 
@@ -833,14 +834,11 @@ class NodeField(AstNode):
 class NodeTable(AstNode):
     fields: list[NodeField]
     key: NodeField
-    scope: Scope
 
     @parser("node")
     @staticmethod
     def parse(node: PTNode) -> NodeTable:
-        with new_scope("node_table"):
-            fields = [parse(child, NodeField) for child in node.named_children()]
-            table_scope = scope()
+        fields = [parse(child, NodeField) for child in node.named_children()]
 
         key_list = [f for f in fields if f.is_node_key]
         assert_exactly_one(
@@ -848,7 +846,7 @@ class NodeTable(AstNode):
         )
         key = key_list[0]
 
-        obj = NodeTable(fields=fields, key=key, scope=table_scope, pos=node.pos)
+        obj = NodeTable(fields=fields, key=key, pos=node.pos)
         return obj
 
 
@@ -886,8 +884,18 @@ class EdgeField(AstNode):
             pos=node.pos,
         )
 
-        scope().define(name, obj)
+        edge_type = get_type("edge")
+        if name in edge_type.symtab:
+            raise SemanticError(f"Redefinition of edge field: {name}", node.pos)
+        edge_type.symtab[name] = obj
+
         return obj
+
+
+@dataclass
+class NodeAccessor:
+    name: str
+    type: Type
 
 
 @dataclass
@@ -895,14 +903,11 @@ class EdgeTable(AstNode):
     fields: list[EdgeField]
     target_node_key: EdgeField
     source_node_key: EdgeField
-    scope: Scope
 
     @parser("edge")
     @staticmethod
     def parse(node: PTNode) -> EdgeTable:
-        with new_scope("edge_table"):
-            fields = [parse(child, EdgeField) for child in node.named_children()]
-            table_scope = scope()
+        fields = [parse(child, EdgeField) for child in node.named_children()]
 
         target_key_list = [f for f in fields if f.is_target_node_key]
         assert_exactly_one(
@@ -924,9 +929,9 @@ class EdgeTable(AstNode):
             fields=fields,
             target_node_key=target_key,
             source_node_key=source_key,
-            scope=table_scope,
             pos=node.pos,
         )
+
         return obj
 
 
@@ -962,6 +967,8 @@ class Transmission(AstNode):
 class Contagion(AstNode):
     name: str
     type: Type
+    state_type: Type
+    state_field: NodeField
     transitions: list[Transition]
     transmissions: list[Transmission]
     transition_rate: Expression | LambdaFunction
@@ -969,13 +976,24 @@ class Contagion(AstNode):
     susceptibility: Expression | LambdaFunction
     infectivity: Expression | LambdaFunction
     transmissibility: Expression | LambdaFunction
-    # scope: Scope
 
     @parser("contagion")
     @staticmethod
     def parse(node: PTNode) -> Contagion:
         name = node.field("name").text
-        type = get_type(node.field("type").text)
+        type = get_type(name)
+        state_type = get_type(node.field("type").text)
+
+        state_field = NodeField(
+            name=f"_{name}_state",
+            type=state_type,
+            is_node_key=False,
+            is_static=False,
+            save_to_output=False,
+            pos=node.pos,
+        )
+        type.symtab["state"] = state_field
+
         transitions = [
             parse(child, Transition) for child in node.named_children("transition")
         ]
@@ -983,8 +1001,8 @@ class Contagion(AstNode):
             parse(child, Transmission) for child in node.named_children("transmission")
         ]
 
-        expected_lambda_type = FunctionType(
-            params=(get_type("node"), type), return_=get_type("float")
+        expected_lambda_type = make_function_type(
+            params=(get_type("node"), state_type), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
         transition_rate_list: list[Expression | LambdaFunction] = []
@@ -998,8 +1016,8 @@ class Contagion(AstNode):
         transition_rate = transition_rate_list[0]
         scope().undef("_expected_lambda_type")
 
-        expected_lambda_type = FunctionType(
-            params=(get_type("node"), type), return_=get_type("float")
+        expected_lambda_type = make_function_type(
+            params=(get_type("node"), state_type), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
         dwell_time_list: list[Expression | LambdaFunction] = []
@@ -1013,7 +1031,7 @@ class Contagion(AstNode):
         dwell_time = dwell_time_list[0]
         scope().undef("_expected_lambda_type")
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type("node"),), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -1028,7 +1046,7 @@ class Contagion(AstNode):
         susceptibility = susceptibility_list[0]
         scope().undef("_expected_lambda_type")
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type("node"),), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -1043,7 +1061,7 @@ class Contagion(AstNode):
         infectivity = infectivity_list[0]
         scope().undef("_expected_lambda_type")
 
-        expected_lambda_type = FunctionType(
+        expected_lambda_type = make_function_type(
             params=(get_type("edge"),), return_=get_type("float")
         )
         scope().define("_expected_lambda_type", expected_lambda_type)
@@ -1061,6 +1079,8 @@ class Contagion(AstNode):
         obj = Contagion(
             name=name,
             type=type,
+            state_type=state_type,
+            state_field=state_field,
             transition_rate=transition_rate,
             dwell_time=dwell_time,
             transitions=transitions,
@@ -1070,7 +1090,7 @@ class Contagion(AstNode):
             transmissibility=transmissibility,
             pos=node.pos,
         )
-        scope().define(name, obj)
+
         return obj
 
 
@@ -1087,12 +1107,15 @@ class Source:
     @staticmethod
     def parse(module: str, root: PTNode) -> Source:
         clear_scope()
+
         setup_type_system()
+        for child in root.named_children("enum"):
+            add_enum_type(child.field("name").text)
+
+        for child in root.named_children("contagion"):
+            add_contagion_type(child.field("name").text)
 
         with new_scope(name="source"):
-            for type in visible_types():
-                scope().define(type.name, type)
-
             enum_type_defns = [
                 parse(enum, EnumTypeDefn) for enum in root.named_children("enum")
             ]
@@ -1124,6 +1147,17 @@ class Source:
             contagions = [
                 parse(contg, Contagion) for contg in root.named_children("contagion")
             ]
+
+        node_type = get_type("node")
+        for contagion in contagions:
+            node_table.fields.append(contagion.state_field)
+
+            if contagion.name in node_type.symtab:
+                raise SemanticError(
+                    f"Node type already has an attribute {contagion.name}",
+                    contagion.pos,
+                )
+            node_type.symtab[contagion.name] = contagion
 
         return Source(
             module=module,

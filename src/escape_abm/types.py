@@ -3,38 +3,34 @@
 from __future__ import annotations
 
 import networkx as nx
-from typing import Iterable, TypeGuard
-from dataclasses import dataclass
+from typing import TypeGuard, Any
+from dataclasses import dataclass, field
 
-from .misc import CodeError
+from .misc import TypeError
 
 
 @dataclass
-class BuiltinType:
+class Type:
     name: str
+    symtab: dict[str, Any] = field(repr=False)
+
+
+def make_type(name: str) -> Type:
+    return Type(name=name, symtab=dict())
 
 
 @dataclass
-class EnumType:
-    name: str
-    consts: tuple[str, ...]
-
-
-@dataclass
-class FunctionType:
+class FunctionType(Type):
     params: tuple[Type, ...]
     return_: Type
 
-    @property
-    def name(self) -> str:
-        ps = [p.name for p in self.params]
-        ps = " x ".join(ps)
-        ret = self.return_
-        return f"{ps} -> {ret}"
 
+def make_function_type(params: tuple[Type, ...], return_: Type) -> FunctionType:
+    name = [p.name for p in params]
+    name = " x ".join(name)
+    name = name + " -> " + return_.name
+    return FunctionType(name=name, symtab=dict(), params=params, return_=return_)
 
-Type = BuiltinType | EnumType | FunctionType
-UserDefinedType = EnumType
 
 _TYPE_GRAPH = nx.DiGraph()
 _TYPE_OBJECT: dict[str, Type] = {}
@@ -50,22 +46,12 @@ def is_convertable_to(child: Type, ancestor: Type) -> bool:
         return False
 
 
-def lub_type(type1: Type, type2: Type) -> Type | None:
+def lub_type(type1: Type, type2: Type) -> Type:
     if type1.name in _TYPE_GRAPH and type2.name in _TYPE_GRAPH:
         ltype_name = nx.lowest_common_ancestor(_TYPE_GRAPH, type1.name, type2.name)
-        return _TYPE_OBJECT.get(ltype_name, None)
+        return _TYPE_OBJECT[ltype_name]
     else:
-        return None
-
-
-def add_user_defined_type(type: UserDefinedType):
-    if type.name in _TYPE_GRAPH:
-        raise CodeError(
-            "Type redefinition", f"Type '{type.name}' has already been defined"
-        )
-
-    _TYPE_GRAPH.add_node(type.name)
-    _TYPE_OBJECT[type.name] = type
+        return _TYPE_OBJECT["_type"]
 
 
 def setup_type_system():
@@ -77,25 +63,41 @@ def setup_type_system():
     nx.add_path(_TYPE_GRAPH, ("u8", "u16", "u32", "u64", "uint"))
     nx.add_path(_TYPE_GRAPH, ("f32", "f64", "float"))
 
-    _TYPE_GRAPH.add_node("str")
-    _TYPE_GRAPH.add_node("node")
-    _TYPE_GRAPH.add_node("edge")
+    nx.add_path(_TYPE_GRAPH, ("str", "_type"))
+    nx.add_path(_TYPE_GRAPH, ("node", "_table", "_type"))
+    nx.add_path(_TYPE_GRAPH, ("edge", "_table"))
+    nx.add_path(_TYPE_GRAPH, ("void", "_type"))
 
-    _TYPE_GRAPH.add_node("void")
+    nx.add_path(_TYPE_GRAPH, ("_enum", "_type"))
+    nx.add_path(_TYPE_GRAPH, ("_contagion", "_type"))
 
-    for type_name in _TYPE_GRAPH.nodes:
-        _TYPE_OBJECT[type_name] = BuiltinType(type_name)
+    for name in _TYPE_GRAPH.nodes:
+        _TYPE_OBJECT[name] = make_type(name)
 
 
-def visible_types() -> Iterable[Type]:
-    for name, type in _TYPE_OBJECT.items():
-        if not name.startswith("_"):
-            yield type
+def add_enum_type(name: str) -> Type:
+    if name in _TYPE_GRAPH:
+        raise TypeError(f"Type '{name}' has already been defined")
+
+    type = make_type(name)
+    nx.add_path(_TYPE_GRAPH, (name, "_enum"))
+    _TYPE_OBJECT[type.name] = type
+    return type
+
+
+def add_contagion_type(name: str) -> Type:
+    if name in _TYPE_GRAPH:
+        raise TypeError(f"Type '{name}' has already been defined")
+
+    type = make_type(name)
+    nx.add_path(_TYPE_GRAPH, (name, "_contagion"))
+    _TYPE_OBJECT[type.name] = type
+    return type
 
 
 def get_type(name: str) -> Type:
     if name not in _TYPE_OBJECT:
-        raise CodeError("Type error", f"Undefined type {name}")
+        raise TypeError(f"Undefined type {name}")
 
     return _TYPE_OBJECT[name]
 
@@ -112,8 +114,12 @@ def is_boolean_type(type: Type) -> bool:
     return type.name == "bool"
 
 
-def is_enum_type(type: Type) -> TypeGuard[EnumType]:
-    return isinstance(type, EnumType)
+def is_enum_type(type: Type) -> bool:
+    return is_convertable_to(type, _TYPE_OBJECT["_enum"])
+
+
+def is_contagion_type(type: Type) -> bool:
+    return is_convertable_to(type, _TYPE_OBJECT["_contagion"])
 
 
 def is_function_type(type: Type) -> TypeGuard[FunctionType]:
