@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, overload
+from typing import Any, Callable, Iterable, overload
 from pathlib import Path
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -21,9 +21,10 @@ from .types import (
     get_type,
 )
 from .scope import Scope
-from .misc import SourcePosition, CodeError
+from .misc import SourcePosition, CodeError, CodeErrorList, SemanticError
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
+
 
 _SCOPE: Scope | None = None
 
@@ -63,6 +64,24 @@ class AstNode:
     pos: SourcePosition = field(repr=False, compare=False)
 
 
+def assert_exactly_one(
+    parent: PTNode, children: Iterable[PTNode | AstNode], error_desc: str
+):
+    children = list(children)
+
+    if len(children) == 0:
+        raise SemanticError(error_desc, parent.pos)
+
+    elif len(children) == 1:
+        return
+
+    else:
+        errors: list[SemanticError] = []
+        for child in children:
+            errors.append(SemanticError(error_desc, child.pos))
+        raise CodeErrorList(error_desc, errors)
+
+
 NodeParser = Callable[[PTNode], AstNode]
 NodeParserDecorator = Callable[[NodeParser], NodeParser]
 
@@ -95,12 +114,8 @@ def parse(node: PTNode, type: Any) -> Any: ...
 def parse(node, type) -> Any:
     try:
         node_parser = _NODE_PARSER[node.type]
-    except KeyError:
-        raise CodeError(
-            "AST Error",
-            f"Parser for node type '{node.type}' is not defined",
-            node.pos,
-        )
+    except KeyError as e:
+        raise RuntimeError(f"Parser for node type '{node.type}' is not defined") from e
 
     try:
         ret = node_parser(node)
@@ -108,13 +123,13 @@ def parse(node, type) -> Any:
         if e.pos is None:
             e.pos = node.pos
         raise e
+    except CodeErrorList:
+        raise
     except Exception as e:
-        raise CodeError("AST Error", f"Failed to parse '{node.type}'", node.pos) from e
+        raise SemanticError(f"Failed to parse '{node.type}'", node.pos) from e
 
     if not isinstance(ret, type):
-        raise CodeError(
-            "Type Error", f"Expected object of type {type}; got {type(ret)}", node.pos
-        )
+        raise TypeError(f"Expected object of type {type}; got {type(ret)}", node.pos)
 
     return ret
 
@@ -306,8 +321,8 @@ class Variable(AstNode):
     def parse_assignment(name: str, node: PTNode) -> Variable:
         type = node.maybe_field("type")
         if type is None:
-            raise CodeError(
-                "Type error", f"Type of local variable '{name}' not specified", node.pos
+            raise SemanticError(
+                f"Type of local variable '{name}' not specified", node.pos
             )
         type = get_type(type.text)
         obj = Variable(name=name, type=type, pos=node.pos)
@@ -799,9 +814,7 @@ class NodeField(AstNode):
         save_to_output = "save" in annotations
 
         if save_to_output and is_static:
-            raise CodeError(
-                "Ast Error", "Static field can't be saved to output.", node.pos
-            )
+            raise SemanticError("Static field can't be saved to output.", node.pos)
 
         obj = NodeField(
             name=name,
@@ -829,14 +842,11 @@ class NodeTable(AstNode):
             fields = [parse(child, NodeField) for child in node.named_children()]
             table_scope = scope()
 
-        key = [f for f in fields if f.is_node_key]
-        if len(key) != 1:
-            raise CodeError(
-                "Ast Error",
-                "One and only one node key field must be specified.",
-                node.pos,
-            )
-        key = key[0]
+        key_list = [f for f in fields if f.is_node_key]
+        assert_exactly_one(
+            node, key_list, "One and only one node key field must be specified."
+        )
+        key = key_list[0]
 
         obj = NodeTable(fields=fields, key=key, scope=table_scope, pos=node.pos)
         return obj
@@ -864,9 +874,7 @@ class EdgeField(AstNode):
         save_to_output = "save" in annotations
 
         if is_static and save_to_output:
-            raise CodeError(
-                "Ast Error", "Static field can't be saved to output.", node.pos
-            )
+            raise SemanticError("Static field can't be saved to output.", node.pos)
 
         obj = EdgeField(
             name=name,
@@ -896,23 +904,21 @@ class EdgeTable(AstNode):
             fields = [parse(child, EdgeField) for child in node.named_children()]
             table_scope = scope()
 
-        target_key = [f for f in fields if f.is_target_node_key]
-        if len(target_key) != 1:
-            raise CodeError(
-                "Ast Error",
-                "One and only one target node key field must be specified.",
-                node.pos,
-            )
-        target_key = target_key[0]
+        target_key_list = [f for f in fields if f.is_target_node_key]
+        assert_exactly_one(
+            node,
+            target_key_list,
+            "One and only one target node key field must be specified.",
+        )
+        target_key = target_key_list[0]
 
-        source_key = [f for f in fields if f.is_source_node_key]
-        if len(source_key) != 1:
-            raise CodeError(
-                "Ast Error",
-                "One and only one source node key field must be specified.",
-                node.pos,
-            )
-        source_key = source_key[0]
+        source_key_list = [f for f in fields if f.is_source_node_key]
+        assert_exactly_one(
+            node,
+            source_key_list,
+            "One and only one source node key field must be specified.",
+        )
+        source_key = source_key_list[0]
 
         obj = EdgeTable(
             fields=fields,
@@ -958,9 +964,11 @@ class Contagion(AstNode):
     type: Type
     transitions: list[Transition]
     transmissions: list[Transmission]
-    # susceptibility: Expression | LambdaFunction
-    # infectivity: Expression | LambdaFunction
-    # transmissibility: Expression | LambdaFunction
+    transition_rate: Expression | LambdaFunction
+    dwell_time: Expression | LambdaFunction
+    susceptibility: Expression | LambdaFunction
+    infectivity: Expression | LambdaFunction
+    transmissibility: Expression | LambdaFunction
     # scope: Scope
 
     @parser("contagion")
@@ -975,55 +983,91 @@ class Contagion(AstNode):
             parse(child, Transmission) for child in node.named_children("transmission")
         ]
 
-        # children = defaultdict(list)
-        # for child in node.fields("body"):
-        #     children[child.type].append(parse(child, scope))
-        #
-        # state_type = children["contagion_state_type"]
-        # with err_desc("State type must defined once for each contagion.", node.pos):
-        #     assert len(state_type) == 1
-        # state_type = state_type[0].value
-        #
-        # state = StateAccessor(type=state_type)
-        # scope.define("state", state)
-        #
-        # transitions = [t for ts in children["transitions"] for t in ts]
-        # transmissions = [t for ts in children["transmissions"] for t in ts]
-        # contagion_functions = children["contagion_function"]
-        #
-        # susceptibility = [
-        #     f for k, f in contagion_functions if k == ContagionFuncton.Susceptibility
-        # ]
-        # with err_desc("Susceptibility must defined once for each contagion.", node.pos):
-        #     assert len(susceptibility) == 1
-        # susceptibility = susceptibility[0]
-        #
-        # infectivity = [
-        #     f for k, f in contagion_functions if k == ContagionFuncton.Infectivity
-        # ]
-        # with err_desc("Infectivity must defined once for each contagion.", node.pos):
-        #     assert len(infectivity) == 1
-        # infectivity = infectivity[0]
-        #
-        # transmissibility = [
-        #     f for k, f in contagion_functions if k == ContagionFuncton.Transmissibility
-        # ]
-        # with err_desc(
-        #     "Transmissibility must defined once for each contagion.", node.pos
-        # ):
-        #     assert len(transmissibility) == 1
-        # transmissibility = transmissibility[0]
-        #
+        expected_lambda_type = FunctionType(
+            params=(get_type("node"), type), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
+        transition_rate_list: list[Expression | LambdaFunction] = []
+        for child in node.fields("transition_rate"):
+            transition_rate_list.append(parse_expression_or_lambda(child))
+        assert_exactly_one(
+            node,
+            transition_rate_list,
+            "One and only one transition rate function must be provided.",
+        )
+        transition_rate = transition_rate_list[0]
+        scope().undef("_expected_lambda_type")
+
+        expected_lambda_type = FunctionType(
+            params=(get_type("node"), type), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
+        dwell_time_list: list[Expression | LambdaFunction] = []
+        for child in node.fields("dwell_time"):
+            dwell_time_list.append(parse_expression_or_lambda(child))
+        assert_exactly_one(
+            node,
+            dwell_time_list,
+            "One and only one dwell time function must be provided.",
+        )
+        dwell_time = dwell_time_list[0]
+        scope().undef("_expected_lambda_type")
+
+        expected_lambda_type = FunctionType(
+            params=(get_type("node"),), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
+        susceptibility_list: list[Expression | LambdaFunction] = []
+        for child in node.fields("susceptibility"):
+            susceptibility_list.append(parse_expression_or_lambda(child))
+        assert_exactly_one(
+            node,
+            susceptibility_list,
+            "One and only one susceptibility function must be provided.",
+        )
+        susceptibility = susceptibility_list[0]
+        scope().undef("_expected_lambda_type")
+
+        expected_lambda_type = FunctionType(
+            params=(get_type("node"),), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
+        infectivity_list: list[Expression | LambdaFunction] = []
+        for child in node.fields("infectivity"):
+            infectivity_list.append(parse_expression_or_lambda(child))
+        assert_exactly_one(
+            node,
+            infectivity_list,
+            "One and only one infectivity function must be provided.",
+        )
+        infectivity = infectivity_list[0]
+        scope().undef("_expected_lambda_type")
+
+        expected_lambda_type = FunctionType(
+            params=(get_type("edge"),), return_=get_type("float")
+        )
+        scope().define("_expected_lambda_type", expected_lambda_type)
+        transmissibility_list: list[Expression | LambdaFunction] = []
+        for child in node.fields("transmissibility"):
+            transmissibility_list.append(parse_expression_or_lambda(child))
+        assert_exactly_one(
+            node,
+            transmissibility_list,
+            "One and only one transmissibility function must be provided.",
+        )
+        transmissibility = transmissibility_list[0]
+        scope().undef("_expected_lambda_type")
+
         obj = Contagion(
             name=name,
             type=type,
+            transition_rate=transition_rate,
+            dwell_time=dwell_time,
             transitions=transitions,
             transmissions=transmissions,
-            # susceptibility=susceptibility,
-            # infectivity=infectivity,
-            # transmissibility=transmissibility,
-            # state=state,
-            # scope=scope,
+            susceptibility=susceptibility,
+            infectivity=infectivity,
+            transmissibility=transmissibility,
             pos=node.pos,
         )
         scope().define(name, obj)
@@ -1064,31 +1108,17 @@ class Source:
             node_table_list = [
                 parse(table, NodeTable) for table in root.named_children("node")
             ]
-            if len(node_table_list) > 1:
-                raise CodeError(
-                    "AstNode",
-                    "One and only one node table must be defined",
-                    node_table_list[-1].pos,
-                )
-            elif len(node_table_list) < 1:
-                raise CodeError(
-                    "AstNode", "One and only one node table must be defined", None
-                )
+            assert_exactly_one(
+                root, node_table_list, "One and only one node table must be defined"
+            )
             node_table = node_table_list[0]
 
             edge_table_list = [
                 parse(table, EdgeTable) for table in root.named_children("edge")
             ]
-            if len(edge_table_list) > 1:
-                raise CodeError(
-                    "AstNode",
-                    "One and only one edge table must be defined",
-                    edge_table_list[-1].pos,
-                )
-            elif len(edge_table_list) < 1:
-                raise CodeError(
-                    "AstNode", "One and only one edge table must be defined", None
-                )
+            assert_exactly_one(
+                root, edge_table_list, "One and only one edge table must be defined"
+            )
             edge_table = edge_table_list[0]
 
             contagions = [
@@ -1115,8 +1145,10 @@ def mk_ast(filename: Path, node: PTNode) -> Source:
         if e.pos is None:
             e.pos = node.pos
         raise e
+    except CodeErrorList:
+        raise
     except Exception as e:
-        raise CodeError("AST Error", f"Failed to parse '{node.type}'", node.pos) from e
+        raise RuntimeError("Failed create syntax tree") from e
 
 
 @click.command()

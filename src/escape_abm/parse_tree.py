@@ -10,7 +10,7 @@ import rich
 from rich.tree import Tree
 from rich.pretty import Pretty
 
-from .misc import SourcePosition, CodeError, CodeErrorList
+from .misc import SourcePosition, SyntaxError, CodeErrorList
 from .tree_sitter_bindings import get_parser, get_query
 from .click_helpers import simulation_file_option
 
@@ -142,23 +142,21 @@ def check_parse_errors(
     source: str,
     source_bytes: bytes,
     node: TSNode,
-    errors: list[CodeError] | None = None,
-) -> list[CodeError]:
+    errors: list[SyntaxError] | None = None,
+) -> list[SyntaxError]:
     if errors is None:
         errors = []
 
     if node.type == "ERROR":
         errors.append(
-            CodeError(
-                "Parse error",
+            SyntaxError(
                 "Failed to parse",
                 tsnode_to_pos(node, source, source_bytes),
             )
         )
     elif node.is_missing:
         errors.append(
-            CodeError(
-                "Missing token",
+            SyntaxError(
                 f"Expected token of type {node.type}",
                 tsnode_to_pos(node, source, source_bytes),
             )

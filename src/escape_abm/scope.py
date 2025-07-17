@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from rich.tree import Tree
 from rich.pretty import Pretty
 
-from .misc import CodeError
+from .misc import TypeError, ReferenceError
 
 
 @dataclass
@@ -44,21 +44,19 @@ class Scope:
         elif self.parent is not None:
             ret = self.parent.resolve(k, type)  # type: ignore
         else:
-            raise CodeError("Scope error", f"{k} is not defined.")
+            raise ReferenceError(f"{k} is not defined.")
 
         if type is None:
             return ret
 
         if not isinstance(ret, type):
-            raise CodeError(
-                "Type error", f"Expected object of type {type}; got {type(ret)}"
-            )
+            raise TypeError(f"Expected object of type {type}; got {type(ret)}")
 
         return ret
 
     def define(self, k: str, v: Any):
         if k in self.names:
-            raise CodeError("Redefinition error", f"{k} has been already defined.")
+            raise ReferenceError(f"{k} has been already defined.")
         self.names[k] = v
 
     def undef(self, k: str):

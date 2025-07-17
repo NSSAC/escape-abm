@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 import rich
 import rich.markup
@@ -44,14 +45,6 @@ class CodeError(Exception):
     """Error attributable to user code."""
 
     def __init__(self, type: str, description: str, pos: SourcePosition | None = None):
-        """
-        Initialize.
-
-        :param type: type of error.
-        :param description: description of error.
-        :param pos: position in source.
-        """
-
         super().__init__()
         self.type = type
         self.description = description
@@ -70,13 +63,33 @@ class CodeError(Exception):
             return f"[red]{self.type}[/red]:{self.pos.__rich__()}: {rich.markup.escape(self.description)}"
 
 
+class SyntaxError(CodeError):
+    def __init__(self, description: str, pos: SourcePosition | None = None):
+        super().__init__("Syntax Error", description, pos)
+
+
+class SemanticError(CodeError):
+    def __init__(self, description: str, pos: SourcePosition | None = None):
+        super().__init__("Semantic Error", description, pos)
+
+
+class TypeError(CodeError):
+    def __init__(self, description: str, pos: SourcePosition | None = None):
+        super().__init__("Type Error", description, pos)
+
+
+class ReferenceError(CodeError):
+    def __init__(self, description: str, pos: SourcePosition | None = None):
+        super().__init__("Reference Error", description, pos)
+
+
 class CodeErrorList(Exception):
     """List of errors attributable to user code."""
 
-    def __init__(self, description: str, errors: list[CodeError]):
+    def __init__(self, description: str, errors: Iterable[CodeError]):
         super().__init__()
         self.description = description
-        self.errors = errors
+        self.errors = list(errors)
 
     def __str__(self) -> str:
         return self.description + "\n".join(str(e) for e in self.errors)
