@@ -160,3 +160,19 @@ def is_contagion_type(type: Type) -> bool:
 
 def is_function_type(type: Type) -> TypeGuard[FunctionType]:
     return isinstance(type, FunctionType)
+
+
+def is_eq_compareable(type1: Type, type2: Type) -> bool:
+    if is_numeric_type(type1) and is_numeric_type(type2):
+        return True
+
+    if type1.name == type2.name and is_enum_type(type1):
+        return True
+
+    return False
+
+
+def is_ord_compareable(type1: Type, type2: Type) -> bool:
+    if is_numeric_type(type1) and is_numeric_type(type2):
+        return True
+    return False

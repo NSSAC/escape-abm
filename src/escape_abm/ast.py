@@ -16,9 +16,16 @@ from .types import (
     FunctionType,
     add_enum_type,
     add_contagion_type,
+    is_boolean_type,
+    is_eq_compareable,
+    is_function_type,
+    is_integral_type,
+    is_numeric_type,
+    is_ord_compareable,
     make_function_type,
     setup_type_system,
     get_type,
+    lub_type,
 )
 from .scope import Scope
 from .misc import SourcePosition, CodeError, CodeErrorList, SemanticError
@@ -158,6 +165,17 @@ class Literal(AstNode):
     def parse_string(node: PTNode) -> Literal:
         return Literal(value=node.text, pos=node.pos)
 
+    @cached_property
+    def type(self) -> Type:
+        if isinstance(self.value, bool):
+            return get_type("bool")
+        elif isinstance(self.value, int):
+            return get_type("int")
+        elif isinstance(self.value, float):
+            return get_type("float")
+        else:  # isinstance(self.value, str):
+            return get_type("str")
+
 
 @dataclass
 class Reference(AstNode):
@@ -176,7 +194,7 @@ class Reference(AstNode):
         obj = Reference(names=names, scope=scope(), pos=node.pos)
         return obj
 
-    def resolve(self):
+    def deref(self) -> Any | tuple:
         if self.ref is not None:
             return self.ref
 
@@ -189,13 +207,24 @@ class Reference(AstNode):
                     type: Type = refs[-1].type
                     refs.append(type.get(name))
             if len(refs) == 1:
-                ref = refs[0]
+                self.ref = refs[0]
             else:
-                ref = tuple(refs)
-            self.ref = ref
+                self.ref = tuple(refs)
+
             return self.ref
         except Exception as e:
             raise ReferenceError(f"Failed to resolve {self.name}", self.pos) from e
+
+    @cached_property
+    def type(self) -> Type:
+        deref = self.deref()
+        try:
+            if isinstance(deref, tuple):
+                return deref[-1].type
+            else:
+                return deref.type
+        except Exception as e:
+            raise TypeError(f"Failed to get type for {self.name}", self.pos) from e
 
 
 @dataclass
@@ -209,6 +238,18 @@ class UnaryExpression(AstNode):
         operator = node.field("operator").text
         argument = parse_expression(node.field("argument"))
         return UnaryExpression(operator=operator, argument=argument, pos=node.pos)
+
+    @cached_property
+    def type(self) -> Type:
+        if self.operator == "not":
+            return get_type("bool")
+        elif self.operator in ["+", "-"]:
+            type = self.argument.type
+            if not is_numeric_type(type):
+                raise TypeError(f"Unary {self.operator} not defined for {type.name}")
+            return type
+        else:
+            raise RuntimeError(f"Unexpected unary operator {self.operator}")
 
 
 @dataclass
@@ -225,6 +266,47 @@ class BinaryExpression(AstNode):
         right = parse_expression(node.field("right"))
         return BinaryExpression(left=left, operator=operator, right=right, pos=node.pos)
 
+    @cached_property
+    def type(self) -> Type:
+        if self.operator in ["+", "-", "*", "/"]:
+            type1 = self.left.type
+            if not is_numeric_type(type1):
+                raise TypeError("Expected numeric expression", self.left.pos)
+            type2 = self.right.type
+            if not is_numeric_type(type2):
+                raise TypeError("Expected numeric expression", self.right.pos)
+            return lub_type(type1, type2)
+        elif self.operator == "%":
+            type1 = self.left.type
+            if not is_integral_type(type1):
+                raise TypeError("Expected integral expression", self.left.pos)
+            type2 = self.right.type
+            if not is_integral_type(type2):
+                raise TypeError("Expected integral expression", self.right.pos)
+            return lub_type(type1, type2)
+        elif self.operator in ["and", "or"]:
+            type1 = self.left.type
+            if not is_boolean_type(type1):
+                raise TypeError("Expected boolean expression", self.left.pos)
+            type2 = self.right.type
+            if not is_boolean_type(type2):
+                raise TypeError("Expected boolean expression", self.right.pos)
+            return lub_type(type1, type2)
+        elif self.operator in ["==", "!="]:
+            type1 = self.left.type
+            type2 = self.right.type
+            if is_eq_compareable(type1, type2):
+                raise TypeError("Uncompareable types", self.pos)
+            return get_type("bool")
+        elif self.operator in ["<", "<=", ">", ">="]:
+            type1 = self.left.type
+            type2 = self.right.type
+            if is_ord_compareable(type1, type2):
+                raise TypeError("Unorderable types", self.pos)
+            return get_type("bool")
+        else:
+            raise RuntimeError(f"Unexpected binary operator {self.operator}")
+
 
 @dataclass
 class ParenthesizedExpression(AstNode):
@@ -235,6 +317,10 @@ class ParenthesizedExpression(AstNode):
     def parse(node: PTNode) -> ParenthesizedExpression:
         expression = parse_expression(node.field("expression"))
         return ParenthesizedExpression(expression=expression, pos=node.pos)
+
+    @cached_property
+    def type(self) -> Type:
+        return self.expression.type
 
 
 @dataclass
@@ -249,6 +335,13 @@ class FunctionCall(AstNode):
         args = [parse_expression(c) for c in node.fields("argument")]
         obj = FunctionCall(function=function, args=args, pos=node.pos)
         return obj
+
+    @cached_property
+    def type(self) -> Type:
+        fn_type = self.function.type
+        if not is_function_type(fn_type):
+            raise TypeError("Expected function reference", self.function.pos)
+        return fn_type.return_
 
 
 Expression = (
