@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 import networkx as nx
-from typing import TypeGuard, Any, overload
+from typing import TypeGuard, Any, Iterable, overload
 from dataclasses import dataclass, field
 
 from .misc import TypeError
 
 
-@dataclass
+@dataclass(eq=False)
 class Type:
     name: str
     symtab: dict[str, Any] = field(repr=False)
+
+    def __str__(self):
+        return self.name
+
+    def __eq__(self, other):
+        if isinstance(other, Type):
+            return self.name == other.name
+        elif isinstance(other, str):
+            return self.name == other
+        else:
+            return False
 
     def has(self, k: str) -> bool:
         return k in self.symtab
@@ -33,7 +44,7 @@ class Type:
         if k in self.symtab:
             ret = self.symtab[k]
         else:
-            raise TypeError(f"Attribute {k} is not defined for type {self.name}.")
+            raise TypeError(f"Attribute {k} is not defined for type {self}.")
 
         if type is None:
             return ret
@@ -45,9 +56,7 @@ class Type:
 
     def add(self, k: str, v: Any):
         if k in self.symtab:
-            raise TypeError(
-                f"Attribute {k} has been already defined for type {self.name}."
-            )
+            raise TypeError(f"Attribute {k} has been already defined for type {self}.")
         self.symtab[k] = v
 
 
@@ -61,15 +70,26 @@ class FunctionType(Type):
     return_: Type
 
 
-def make_function_type(params: tuple[Type, ...], return_: Type) -> FunctionType:
-    name = [p.name for p in params]
-    name = " x ".join(name)
-    name = name + " -> " + return_.name
-    return FunctionType(name=name, symtab=dict(), params=params, return_=return_)
-
-
 _TYPE_GRAPH = nx.DiGraph()
 _TYPE_OBJECT: dict[str, Type] = {}
+
+
+def get_type(name: str) -> Type:
+    if name not in _TYPE_OBJECT:
+        raise TypeError(f"Undefined type '{name}'")
+
+    return _TYPE_OBJECT[name]
+
+
+def make_fn_type(params: Iterable[str], return_: str) -> FunctionType:
+    params = list(params)
+
+    name = " x ".join(params)
+    name = name + " -> " + return_
+
+    p_types = tuple(get_type(p) for p in params)
+    r_type = get_type(return_)
+    return FunctionType(name=name, symtab=dict(), params=p_types, return_=r_type)
 
 
 def is_convertable_to(child: Type, ancestor: Type) -> bool:
@@ -131,13 +151,6 @@ def add_contagion_type(name: str) -> Type:
     return type
 
 
-def get_type(name: str) -> Type:
-    if name not in _TYPE_OBJECT:
-        raise TypeError(f"Undefined type {name}")
-
-    return _TYPE_OBJECT[name]
-
-
 def is_numeric_type(type: Type) -> bool:
     return is_convertable_to(type, _TYPE_OBJECT["float"])
 
@@ -176,3 +189,20 @@ def is_ord_compareable(type1: Type, type2: Type) -> bool:
     if is_numeric_type(type1) and is_numeric_type(type2):
         return True
     return False
+
+
+def is_compatible_function(given_type: Type, expected_type: Type) -> bool:
+    if is_function_type(given_type) and is_function_type(expected_type):
+        if len(given_type.params) != len(expected_type.params):
+            return False
+
+        for gt, et in zip(given_type.params, expected_type.params):
+            if not is_convertable_to(et, gt):
+                return False
+
+        if not is_convertable_to(given_type.return_, expected_type.return_):
+            return False
+
+        return True
+    else:
+        return False

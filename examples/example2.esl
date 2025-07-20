@@ -22,13 +22,13 @@ contagion cntg: state_t
   transition
     E -> I
     E -> A
-    Isymp -> R
-    Iasymp -> R
+    I -> R
+    A -> R
   end
 
   transmission
-    Isymp => S -> E
-    Iasymp => S -> E
+    I => S -> E
+    A => S -> E
   end
 
   transition_rate = transition_prob

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from .scope import get_scope
-from .types import Type, get_type, make_function_type
+from .types import Type, get_type, make_fn_type
 
 
 @dataclass
@@ -51,7 +51,5 @@ def define_builtin_variables():
 def define_builtin_functions():
     scope = get_scope()
     for name, params, return_ in _BUILTIN_FUNCTIONS:
-        params = tuple(get_type(t) for t in params)
-        return_ = get_type(return_)
-        fn_type = make_function_type(params, return_)
+        fn_type = make_fn_type(params, return_)
         scope.define(name, BuiltinFunction(name=name, type=fn_type))

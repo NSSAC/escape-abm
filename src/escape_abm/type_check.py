@@ -13,7 +13,10 @@ from .click_helpers import simulation_file_option
 from .parse_tree import mk_pt
 from .ast import mk_ast
 from .types import (
+    Type,
     get_type,
+    is_enum_type,
+    lub_type,
     is_convertable_to,
     is_function_type,
     is_numeric_type,
@@ -21,12 +24,13 @@ from .types import (
     is_boolean_type,
     is_eq_compareable,
     is_ord_compareable,
-    lub_type,
+    is_compatible_function,
+    make_fn_type,
 )
 
 
 @singledispatch
-def check_type(x):
+def check_type(x) -> None:
     print(f"Check undefined for type={type(x)}")
 
 
@@ -57,11 +61,15 @@ def _(x: ast.Expression):
 
             if x.operator == "not":
                 if not is_boolean_type(type):
-                    raise TypeError(f"Expected boolean type; got {type.name}.")
+                    raise TypeError(
+                        f"Expected boolean type; got {type}.", x.argument.pos
+                    )
                 x.type = get_type("bool")
             elif x.operator in ["+", "-"]:
                 if not is_numeric_type(type):
-                    raise TypeError(f"Expected numeric type; got {type.name}.")
+                    raise TypeError(
+                        f"Expected numeric type; got {type}.", x.argument.pos
+                    )
                 x.type = type
             else:
                 raise RuntimeError(f"Unexpected unary operator {x.operator}")
@@ -75,44 +83,40 @@ def _(x: ast.Expression):
             if x.operator in ["+", "-", "*", "/"]:
                 if not is_numeric_type(ltype):
                     raise TypeError(
-                        f"Expected numeric expression; got {ltype.name}", x.left.pos
+                        f"Expected numeric expression; got {ltype}", x.left.pos
                     )
                 if not is_numeric_type(rtype):
                     raise TypeError(
-                        f"Expected numeric expression; got {rtype.name}", x.right.pos
+                        f"Expected numeric expression; got {rtype}", x.right.pos
                     )
                 x.type = lub_type(ltype, rtype)
             elif x.operator == "%":
                 if not is_integral_type(ltype):
                     raise TypeError(
-                        f"Expected integral expression; got {ltype.name}", x.left.pos
+                        f"Expected integral expression; got {ltype}", x.left.pos
                     )
                 if not is_integral_type(rtype):
                     raise TypeError(
-                        f"Expected integral expression; got {rtype.name}", x.right.pos
+                        f"Expected integral expression; got {rtype}", x.right.pos
                     )
                 x.type = lub_type(ltype, rtype)
             elif x.operator in ["and", "or"]:
                 if not is_boolean_type(ltype):
                     raise TypeError(
-                        f"Expected boolean expression; got {ltype.name}", x.left.pos
+                        f"Expected boolean expression; got {ltype}", x.left.pos
                     )
                 if not is_boolean_type(rtype):
                     raise TypeError(
-                        f"Expected boolean expression; got {rtype.name}", x.right.pos
+                        f"Expected boolean expression; got {rtype}", x.right.pos
                     )
                 x.type = get_type("bool")
             elif x.operator in ["==", "!="]:
                 if not is_eq_compareable(ltype, rtype):
-                    raise TypeError(
-                        f"Uncompareable types: {ltype.name}, {rtype.name}", x.pos
-                    )
+                    raise TypeError(f"Uncompareable types: {ltype}, {rtype}", x.pos)
                 x.type = get_type("bool")
             elif x.operator in ["<", "<=", ">", ">="]:
                 if not is_ord_compareable(ltype, rtype):
-                    raise TypeError(
-                        f"Unorderable types: {ltype.name}, {rtype.name}", x.pos
-                    )
+                    raise TypeError(f"Unorderable types: {ltype}, {rtype}", x.pos)
                 x.type = get_type("bool")
             else:
                 raise RuntimeError(f"Unexpected binary operator {x.operator}")
@@ -129,7 +133,7 @@ def _(x: ast.Expression):
             fn_type = x.function.type
             if not is_function_type(fn_type):
                 raise TypeError(
-                    f"Expected function reference: got {fn_type.name}", x.function.pos
+                    f"Expected function reference: got {fn_type}", x.function.pos
                 )
 
             if len(fn_type.params) != len(x.args):
@@ -137,10 +141,10 @@ def _(x: ast.Expression):
                     f"Expected {len(fn_type.params)} args; got {len(x.args)}", x.pos
                 )
 
-            for i, (typ, expr) in enumerate(zip(fn_type.params, x.args), 1):
-                if not is_convertable_to(expr.type, typ):
+            for i, (ptype, expr) in enumerate(zip(fn_type.params, x.args), 1):
+                if not is_convertable_to(expr.type, ptype):
                     raise TypeError(
-                        f"Incompatible {i}th argument: got expression of type {expr.type.name}; expected {typ.name}."
+                        f"Incompatible {i}th argument: got expression of type {expr.type}; expected {ptype}."
                     )
 
             x.type = fn_type.return_
@@ -174,13 +178,13 @@ def _(x: ast.Statement):
 
             if not is_numeric_type(x.condition.type):
                 raise TypeError(
-                    f"Expected boolean or numeric type; got {x.condition.type.name}",
+                    f"Expected boolean or numeric type; got {x.condition.type}",
                     x.condition.pos,
                 )
             for elif_ in x.elifs:
                 if not is_numeric_type(elif_.condition.type):
                     raise TypeError(
-                        f"Expected boolean or numeric type; {elif_.condition.type.name}",
+                        f"Expected boolean or numeric type; {elif_.condition.type}",
                         elif_.condition.pos,
                     )
 
@@ -197,7 +201,7 @@ def _(x: ast.Statement):
             for case_ in x.cases:
                 if not is_eq_compareable(x.condition.type, case_.match.type):
                     raise TypeError(
-                        f"Can't compare expression of types {case_.match.type.name} and {x.condition.type.name}",
+                        f"Can't compare expression of types {case_.match.type} and {x.condition.type}",
                         case_.match.pos,
                     )
 
@@ -208,7 +212,7 @@ def _(x: ast.Statement):
 
             if not is_numeric_type(x.condition.type):
                 raise TypeError(
-                    f"Expected boolean or numeric type: got {x.condition.type.name}",
+                    f"Expected boolean or numeric type: got {x.condition.type}",
                     x.condition.pos,
                 )
 
@@ -218,7 +222,7 @@ def _(x: ast.Statement):
 
             if not is_convertable_to(x.rvalue.type, x.lvalue.type):
                 raise TypeError(
-                    f"Can't assign expression of type {x.lvalue.type.name} to {x.rvalue.type.name}",
+                    f"Can't assign expression of type {x.lvalue.type} to {x.rvalue.type}",
                     x.pos,
                 )
 
@@ -229,38 +233,205 @@ def _(x: ast.Statement):
             if x.operator in ["+=", "-=", "*=", "/="]:
                 if not is_numeric_type(x.lvalue.type):
                     raise TypeError(
-                        f"Expected numeric variable; got {x.lvalue.type.name}",
+                        f"Expected numeric variable; got {x.lvalue.type}",
                         x.lvalue.pos,
                     )
                 if not is_numeric_type(x.rvalue.type):
                     raise TypeError(
-                        f"Expected numeric expression; got {x.rvalue.type.name}",
+                        f"Expected numeric expression; got {x.rvalue.type}",
                         x.rvalue.pos,
                     )
 
             if x.operator == "%=":
                 if not is_integral_type(x.lvalue.type):
                     raise TypeError(
-                        f"Expected integral variable; got {x.lvalue.type.name}",
+                        f"Expected integral variable; got {x.lvalue.type}",
                         x.lvalue.pos,
                     )
                 if not is_integral_type(x.rvalue.type):
                     raise TypeError(
-                        f"Expected integral expression; got {x.rvalue.type.name}",
+                        f"Expected integral expression; got {x.rvalue.type}",
                         x.rvalue.pos,
                     )
 
         case ast.ParallelStatement():
-            pass
+            if x.filter_clause is not None:
+                fn = x.filter_clause.function
+                check_type(fn)
+
+                if is_function_type(fn.type):
+                    expected_type = make_fn_type([x.table], "float")
+                    if not is_compatible_function(fn.type, expected_type):
+                        raise TypeError(
+                            f"Incompatible function; expected {expected_type} got {fn.type}",
+                            fn.pos,
+                        )
+                else:
+                    if not is_convertable_to(fn.type, get_type("float")):
+                        raise TypeError(
+                            f"Incompatible expression type; expected float got {fn.type}",
+                            fn.pos,
+                        )
+            if x.sample_clause is not None:
+                check_type(x.sample_clause.amount)
+
+                if not is_numeric_type(x.sample_clause.amount.type):
+                    raise TypeError(
+                        f"Expected numeric expression; got {x.sample_clause.amount.type}",
+                        x.sample_clause.amount.pos,
+                    )
+
+            if x.apply_clause is not None:
+                fn = x.apply_clause.function
+                check_type(fn)
+
+                if is_function_type(fn.type):
+                    expected_type = make_fn_type([x.table], "_type")
+                    if not is_compatible_function(fn.type, expected_type):
+                        raise TypeError(
+                            f"Incompatible function; expected node -> void got {fn.type}",
+                            fn.pos,
+                        )
+                else:
+                    raise TypeError(
+                        f"Apply clause must be provided with a function expression",
+                        fn.pos,
+                    )
+
+            for clause in x.reduce_clauses:
+                check_type(clause.lvalue)
+                check_type(clause.function)
+
+                if clause.operator in ["+", "*"]:
+                    if not is_numeric_type(clause.lvalue.type):
+                        raise TypeError(
+                            f"Expected numeric variable; got {clause.lvalue.type}",
+                            clause.lvalue.pos,
+                        )
+                    if is_function_type(clause.function.type):
+                        if not is_numeric_type(clause.function.type.return_):
+                            raise TypeError(
+                                f"Expected numeric function; got {clause.function.type}",
+                                clause.function.pos,
+                            )
+                    else:
+                        if not is_numeric_type(clause.function.type):
+                            raise TypeError(
+                                f"Expected numeric expression; got {clause.function.type}",
+                                clause.function.pos,
+                            )
+
+
+@check_type.register
+def _(x: ast.Function | ast.LambdaFunction):
+    assert is_function_type(x.type)
+
+    for s in x.body:
+        check_type(s)
+
+    for s in x.return_statements:
+        if not is_convertable_to(s.expression.type, x.type.return_):
+            raise TypeError(
+                f"Invalid return type {s.expression.type} for function of type {x.type}",
+                s.expression.pos,
+            )
+
+    if x.type.return_ != "void" and not x.return_statements:
+        raise TypeError(f"Non void function with not return statements", x.pos)
+
+
+def _check_enum_constant(x: ast.Reference, type: Type):
+    if not isinstance(x.ref, ast.EnumConstant) or x.type != x.type:
+        raise TypeError(
+            f"Expected enumeration constant of type {type}; got {x.ref}",
+            x.pos,
+        )
+
+
+@check_type.register
+def _(x: ast.Contagion):
+    for t in x.transitions:
+        check_type(t.entry)
+        check_type(t.exit)
+    for t in x.transmissions:
+        check_type(t.contact)
+        check_type(t.entry)
+        check_type(t.exit)
+    check_type(x.transition_rate)
+    check_type(x.dwell_time)
+    check_type(x.susceptibility)
+    check_type(x.infectivity)
+    check_type(x.transmissibility)
+
+    if not is_enum_type(x.state_type):
+        raise TypeError(f"Expected an type got {x.state_type}", x.pos)
+
+    for t in x.transitions:
+        _check_enum_constant(t.entry, x.state_type)
+        _check_enum_constant(t.exit, x.state_type)
+    for t in x.transmissions:
+        _check_enum_constant(t.contact, x.state_type)
+        _check_enum_constant(t.entry, x.state_type)
+        _check_enum_constant(t.exit, x.state_type)
+
+    for fn in [x.transition_rate, x.dwell_time]:
+        if is_function_type(fn.type):
+            expected_type = make_fn_type(["node", x.state_type.name], "float")
+            if not is_compatible_function(fn.type, expected_type):
+                raise TypeError(
+                    f"Incompatible function; expected {expected_type} got {fn.type}",
+                    fn.pos,
+                )
+        else:
+            if not is_convertable_to(fn.type, get_type("float")):
+                raise TypeError(
+                    f"Incompatible expression type; expected float got {fn.type}",
+                    fn.pos,
+                )
+
+    for fn in [x.susceptibility, x.infectivity]:
+        if is_function_type(fn.type):
+            expected_type = make_fn_type(["node"], "float")
+            if not is_compatible_function(fn.type, expected_type):
+                raise TypeError(
+                    f"Incompatible function; expected {expected_type} got {fn.type}",
+                    fn.pos,
+                )
+        else:
+            if not is_convertable_to(fn.type, get_type("float")):
+                raise TypeError(
+                    f"Incompatible expression type; expected float got {fn.type}",
+                    fn.pos,
+                )
+
+    fn = x.transmissibility
+    if is_function_type(fn.type):
+        expected_type = make_fn_type(["edge"], "float")
+        if not is_compatible_function(fn.type, expected_type):
+            raise TypeError(
+                f"Incompatible function; expected {expected_type} got {fn.type}",
+                fn.pos,
+            )
+    else:
+        if not is_convertable_to(fn.type, get_type("float")):
+            raise TypeError(
+                f"Incompatible expression type; expected float got {fn.type}",
+                fn.pos,
+            )
 
 
 @check_type.register
 def _(x: ast.Source):
     for g in x.globals:
         check_type(g.default)
+
+        if not is_convertable_to(g.default.type, g.type):
+            raise TypeError(
+                f"Invalid default expression of type {g.default.type} for variable {g.type}",
+                g.default.pos,
+            )
     for f in x.functions:
-        for s in f.body:
-            check_type(s)
+        check_type(f)
     for c in x.contagions:
         check_type(c)
 

@@ -2,7 +2,7 @@
 
 config enable_hybrid_learning: bool = True
 config enable_day_30_antigen_test: bool = True
-config enable_day_30_pcr_test: bool = False
+config enable_day_30_pcr_test: bool = True
 config transmissibility_scale: float = 0.3
 
 statistic S_or_R: int = 0
@@ -61,7 +61,7 @@ def c1_transition_probability(v: node, next_state: c1_state_t) -> float:
     end
 end
 
-def sample_recov_dist():
+def sample_recov_dist() -> float:
     x: float = sample_uniform(0.0, 1.0)
 
     if x <= 0.175:  return 1
@@ -112,7 +112,7 @@ def c1_infectivity(v: node) -> float:
     end
 end
 
-def c1_transmissibility(e: node) -> float:
+def c1_transmissibility(e: edge) -> float:
     if e.is_non_home_edge and (is_isolating(e.source_node) or is_isolating(e.target_node)):
         return 0.0
     elif e.is_school_edge and not is_school_day():
@@ -122,7 +122,7 @@ def c1_transmissibility(e: node) -> float:
     end
 end
 
-def is_isolating(n: node) -> float:
+def is_isolating(n: node) -> bool:
     if CUR_TICK <= n.home_isolation_start and n.home_isolation_end < CUR_TICK:
         return True
     else:
@@ -132,7 +132,7 @@ end
 
 # Sunday = 0, Monday = 1, Tuesday = 2, Wednesday = 3
 # Thursday = 4, Friday = 5
-def is_school_day():
+def is_school_day() -> bool:
     day_of_week : int = CUR_TICK % 7
 
     if enable_hybrid_learning and 1 <= day_of_week and day_of_week <= 3:
@@ -144,7 +144,7 @@ def is_school_day():
     end
 end
 
-def is_positive_in_school_nodes(n: node) -> bool:
+def is_positive_in_school_node(n: node) -> bool:
     return (
         n.c1.state == Ipresymp or n.c1.state == Isymp or n.c1.state == Iasymp
         and n.is_in_school
@@ -185,6 +185,6 @@ def intervene():
     reduce S_or_R += 1
 
     from edge
-    filter c1_enabled
+    filter lambda (e) c1_transmissibility(e) > 0
     reduce enabled_edge_count += 1
 end
