@@ -16,19 +16,18 @@ from .types import (
     FunctionType,
     add_enum_type,
     add_contagion_type,
-    is_boolean_type,
-    is_eq_compareable,
-    is_function_type,
-    is_integral_type,
-    is_numeric_type,
-    is_ord_compareable,
     make_function_type,
     setup_type_system,
     get_type,
-    lub_type,
 )
 from .scope import Scope
-from .misc import SourcePosition, CodeError, CodeErrorList, SemanticError
+from .misc import (
+    SourcePosition,
+    CodeError,
+    CodeErrorList,
+    SemanticError,
+    ReferenceError,
+)
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
 
@@ -144,43 +143,34 @@ def parse(node, type) -> Any:
 @dataclass
 class Literal(AstNode):
     value: int | float | bool | str
+    type: Type
 
     @parser("integer")
     @staticmethod
     def parse_integer(node: PTNode) -> Literal:
-        return Literal(value=int(node.text), pos=node.pos)
+        return Literal(value=int(node.text), type=get_type("int"), pos=node.pos)
 
     @parser("float")
     @staticmethod
     def parse_float(node: PTNode) -> Literal:
-        return Literal(value=float(node.text), pos=node.pos)
+        return Literal(value=float(node.text), type=get_type("float"), pos=node.pos)
 
     @parser("boolean")
     @staticmethod
     def parse_bool(node: PTNode) -> Literal:
-        return Literal(value=(node.text == "True"), pos=node.pos)
+        return Literal(value=(node.text == "True"), type=get_type("bool"), pos=node.pos)
 
     @parser("string")
     @staticmethod
     def parse_string(node: PTNode) -> Literal:
-        return Literal(value=node.text, pos=node.pos)
-
-    @cached_property
-    def type(self) -> Type:
-        if isinstance(self.value, bool):
-            return get_type("bool")
-        elif isinstance(self.value, int):
-            return get_type("int")
-        elif isinstance(self.value, float):
-            return get_type("float")
-        else:  # isinstance(self.value, str):
-            return get_type("str")
+        return Literal(value=node.text, type=get_type("str"), pos=node.pos)
 
 
 @dataclass
 class Reference(AstNode):
     names: list[str]
     scope: Scope = field(repr=False)
+    type: Type
     ref: Any = None
 
     @cached_property
@@ -191,7 +181,9 @@ class Reference(AstNode):
     @staticmethod
     def parse(node: PTNode) -> Reference:
         names = [s.text for s in node.named_children()]
-        obj = Reference(names=names, scope=scope(), pos=node.pos)
+        obj = Reference(
+            names=names, scope=scope(), type=get_type("_type"), pos=node.pos
+        )
         return obj
 
     def deref(self) -> Any | tuple:
@@ -215,41 +207,21 @@ class Reference(AstNode):
         except Exception as e:
             raise ReferenceError(f"Failed to resolve {self.name}", self.pos) from e
 
-    @cached_property
-    def type(self) -> Type:
-        deref = self.deref()
-        try:
-            if isinstance(deref, tuple):
-                return deref[-1].type
-            else:
-                return deref.type
-        except Exception as e:
-            raise TypeError(f"Failed to get type for {self.name}", self.pos) from e
-
 
 @dataclass
 class UnaryExpression(AstNode):
     operator: str
     argument: Expression
+    type: Type
 
     @parser("unary_expression")
     @staticmethod
     def parse(node: PTNode) -> UnaryExpression:
         operator = node.field("operator").text
         argument = parse_expression(node.field("argument"))
-        return UnaryExpression(operator=operator, argument=argument, pos=node.pos)
-
-    @cached_property
-    def type(self) -> Type:
-        if self.operator == "not":
-            return get_type("bool")
-        elif self.operator in ["+", "-"]:
-            type = self.argument.type
-            if not is_numeric_type(type):
-                raise TypeError(f"Unary {self.operator} not defined for {type.name}")
-            return type
-        else:
-            raise RuntimeError(f"Unexpected unary operator {self.operator}")
+        return UnaryExpression(
+            operator=operator, argument=argument, type=get_type("_type"), pos=node.pos
+        )
 
 
 @dataclass
@@ -257,6 +229,7 @@ class BinaryExpression(AstNode):
     left: Expression
     operator: str
     right: Expression
+    type: Type
 
     @parser("binary_expression")
     @staticmethod
@@ -264,84 +237,44 @@ class BinaryExpression(AstNode):
         left = parse_expression(node.field("left"))
         operator = node.field("operator").text
         right = parse_expression(node.field("right"))
-        return BinaryExpression(left=left, operator=operator, right=right, pos=node.pos)
-
-    @cached_property
-    def type(self) -> Type:
-        if self.operator in ["+", "-", "*", "/"]:
-            type1 = self.left.type
-            if not is_numeric_type(type1):
-                raise TypeError("Expected numeric expression", self.left.pos)
-            type2 = self.right.type
-            if not is_numeric_type(type2):
-                raise TypeError("Expected numeric expression", self.right.pos)
-            return lub_type(type1, type2)
-        elif self.operator == "%":
-            type1 = self.left.type
-            if not is_integral_type(type1):
-                raise TypeError("Expected integral expression", self.left.pos)
-            type2 = self.right.type
-            if not is_integral_type(type2):
-                raise TypeError("Expected integral expression", self.right.pos)
-            return lub_type(type1, type2)
-        elif self.operator in ["and", "or"]:
-            type1 = self.left.type
-            if not is_boolean_type(type1):
-                raise TypeError("Expected boolean expression", self.left.pos)
-            type2 = self.right.type
-            if not is_boolean_type(type2):
-                raise TypeError("Expected boolean expression", self.right.pos)
-            return lub_type(type1, type2)
-        elif self.operator in ["==", "!="]:
-            type1 = self.left.type
-            type2 = self.right.type
-            if is_eq_compareable(type1, type2):
-                raise TypeError("Uncompareable types", self.pos)
-            return get_type("bool")
-        elif self.operator in ["<", "<=", ">", ">="]:
-            type1 = self.left.type
-            type2 = self.right.type
-            if is_ord_compareable(type1, type2):
-                raise TypeError("Unorderable types", self.pos)
-            return get_type("bool")
-        else:
-            raise RuntimeError(f"Unexpected binary operator {self.operator}")
+        return BinaryExpression(
+            left=left,
+            operator=operator,
+            right=right,
+            type=get_type("_type"),
+            pos=node.pos,
+        )
 
 
 @dataclass
 class ParenthesizedExpression(AstNode):
     expression: Expression
+    type: Type
 
     @parser("parenthesized_expression")
     @staticmethod
     def parse(node: PTNode) -> ParenthesizedExpression:
         expression = parse_expression(node.field("expression"))
-        return ParenthesizedExpression(expression=expression, pos=node.pos)
-
-    @cached_property
-    def type(self) -> Type:
-        return self.expression.type
+        return ParenthesizedExpression(
+            expression=expression, type=get_type("_type"), pos=node.pos
+        )
 
 
 @dataclass
 class FunctionCall(AstNode):
     function: Reference
     args: list[Expression]
+    type: Type
 
     @parser("function_call")
     @staticmethod
     def parse(node: PTNode) -> FunctionCall:
         function = parse(node.field("function"), Reference)
         args = [parse_expression(c) for c in node.fields("argument")]
-        obj = FunctionCall(function=function, args=args, pos=node.pos)
+        obj = FunctionCall(
+            function=function, args=args, type=get_type("_type"), pos=node.pos
+        )
         return obj
-
-    @cached_property
-    def type(self) -> Type:
-        fn_type = self.function.type
-        if not is_function_type(fn_type):
-            raise TypeError("Expected function reference", self.function.pos)
-        return fn_type.return_
 
 
 Expression = (
