@@ -20,6 +20,12 @@ from .types import (
     get_type,
 )
 from .scope import Scope, get_scope, new_scope, clear_scope
+from .builtin import (
+    BuiltinFunction,
+    BuiltinGlobalVariable,
+    define_builtin_functions,
+    define_builtin_variables,
+)
 from .misc import (
     SourcePosition,
     CodeError,
@@ -1125,6 +1131,9 @@ class Source:
             add_contagion_type(child.field("name").text)
 
         with new_scope(name="source"):
+            define_builtin_variables()
+            define_builtin_functions()
+
             enum_type_defns = [
                 parse(enum, EnumTypeDefn) for enum in root.named_children("enum")
             ]
