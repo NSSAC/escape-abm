@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import Any, Callable, Iterable, overload
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from .types import (
     setup_type_system,
     get_type,
 )
-from .scope import Scope
+from .scope import Scope, get_scope, new_scope, clear_scope
 from .misc import (
     SourcePosition,
     CodeError,
@@ -30,39 +29,6 @@ from .misc import (
 )
 from .parse_tree import mk_pt, PTNode
 from .click_helpers import simulation_file_option
-
-
-_SCOPE: Scope | None = None
-
-
-def scope() -> Scope:
-    if _SCOPE is None:
-        raise RuntimeError("Scope not set.")
-
-    return _SCOPE
-
-
-@contextmanager
-def new_scope(name: str):
-    global _SCOPE
-
-    parent_scope = _SCOPE
-    _SCOPE = Scope(name=name, parent=parent_scope)
-    if parent_scope is not None:
-        parent_scope.children.append(_SCOPE)
-
-    try:
-        yield
-    finally:
-        _SCOPE = parent_scope
-
-
-def clear_scope():
-    global _SCOPE
-
-    if _SCOPE is not None:
-        _SCOPE.clear()
-        _SCOPE = None
 
 
 @dataclass
@@ -182,7 +148,7 @@ class Reference(AstNode):
     def parse(node: PTNode) -> Reference:
         names = [s.text for s in node.named_children()]
         obj = Reference(
-            names=names, scope=scope(), type=get_type("_type"), pos=node.pos
+            names=names, scope=get_scope(), type=get_type("_type"), pos=node.pos
         )
         return obj
 
@@ -310,9 +276,9 @@ class EnumTypeDefn(AstNode):
         obj = EnumTypeDefn(type=type, pos=node.pos)
         for child in node.fields("constant"):
             enum_const = EnumConstant(name=child.text, type=type, pos=child.pos)
-            scope().define(enum_const.name, enum_const)
+            get_scope().define(enum_const.name, enum_const)
 
-        scope().define(name, type)
+        get_scope().define(name, type)
         return obj
 
 
@@ -333,7 +299,7 @@ class GlobalVariable(AstNode):
         obj = GlobalVariable(
             name=name, type=type, category=category, default=default, pos=node.pos
         )
-        scope().define(name, obj)
+        get_scope().define(name, obj)
         return obj
 
 
@@ -347,7 +313,7 @@ class Variable(AstNode):
         name = node.field("name").text
         type = get_type(node.field("type").text)
         obj = Variable(name=name, type=type, pos=node.pos)
-        scope().define(name, obj)
+        get_scope().define(name, obj)
         return obj
 
     @staticmethod
@@ -359,7 +325,7 @@ class Variable(AstNode):
         else:
             type = get_type(node.field("type").text)
         obj = Variable(name=name, type=type, pos=node.pos)
-        scope().define(name, obj)
+        get_scope().define(name, obj)
         return obj
 
     @staticmethod
@@ -372,8 +338,8 @@ class Variable(AstNode):
         type = get_type(type.text)
         obj = Variable(name=name, type=type, pos=node.pos)
 
-        scope().define(name, obj)
-        scope().resolve("_local_variables", list).append(obj)
+        get_scope().define(name, obj)
+        get_scope().resolve("_local_variables", list).append(obj)
         return obj
 
 
@@ -654,7 +620,7 @@ class ParallelStatement(AstNode):
         expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("bool")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         filter_clause_list: list[FilterClause] = []
         for clause in node.named_children("filter_clause"):
             filter_clause_list.append(parse(clause, FilterClause))
@@ -663,7 +629,7 @@ class ParallelStatement(AstNode):
             filter_clause = filter_clause_list[0]
         else:
             filter_clause = None
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         sample_clause_list: list[SampleClause] = []
         for clause in node.named_children("sample_clause"):
@@ -677,7 +643,7 @@ class ParallelStatement(AstNode):
         expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("void")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         apply_clause_list: list[ApplyClause] = []
         for clause in node.named_children("apply_clause"):
             apply_clause_list.append(parse(clause, ApplyClause))
@@ -686,16 +652,16 @@ class ParallelStatement(AstNode):
             apply_clause = apply_clause_list[0]
         else:
             apply_clause = None
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         expected_lambda_type = make_function_type(
             params=(get_type(table),), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         reduce_clauses: list[ReduceClause] = []
         for clause in node.named_children("reduce_clause"):
             reduce_clauses.append(parse(clause, ReduceClause))
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         return ParallelStatement(
             table=table,
@@ -747,7 +713,7 @@ class Function(AstNode):
             return_type = get_type(return_type.text)
 
         with new_scope(name):
-            fn_scope = scope()
+            fn_scope = get_scope()
 
             for child in node.fields("parameter"):
                 params.append(Variable.parse_parameter(child))
@@ -773,7 +739,7 @@ class Function(AstNode):
             scope=fn_scope,
             pos=node.pos,
         )
-        scope().define(name, obj)
+        get_scope().define(name, obj)
         return obj
 
 
@@ -794,7 +760,7 @@ class LambdaFunction(AstNode):
         params: list[Variable] = []
         local_variables: list[Variable] = []
 
-        expected_type = scope().resolve("_expected_lambda_type", FunctionType)
+        expected_type = get_scope().resolve("_expected_lambda_type", FunctionType)
 
         return_type = node.maybe_field("type")
         if return_type is None:
@@ -803,7 +769,7 @@ class LambdaFunction(AstNode):
             return_type = get_type(return_type.text)
 
         with new_scope(name):
-            fn_scope = scope()
+            fn_scope = get_scope()
 
             for child, etype in zip(node.fields("parameter"), expected_type.params):
                 params.append(Variable.parse_lambda_parameter(child, etype))
@@ -1047,7 +1013,7 @@ class Contagion(AstNode):
         expected_lambda_type = make_function_type(
             params=(get_type("node"), state_type), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         transition_rate_list: list[Expression | LambdaFunction] = []
         for child in node.fields("transition_rate"):
             transition_rate_list.append(parse_expression_or_lambda(child))
@@ -1057,12 +1023,12 @@ class Contagion(AstNode):
             "One and only one transition rate function must be provided.",
         )
         transition_rate = transition_rate_list[0]
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         expected_lambda_type = make_function_type(
             params=(get_type("node"), state_type), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         dwell_time_list: list[Expression | LambdaFunction] = []
         for child in node.fields("dwell_time"):
             dwell_time_list.append(parse_expression_or_lambda(child))
@@ -1072,12 +1038,12 @@ class Contagion(AstNode):
             "One and only one dwell time function must be provided.",
         )
         dwell_time = dwell_time_list[0]
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         expected_lambda_type = make_function_type(
             params=(get_type("node"),), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         susceptibility_list: list[Expression | LambdaFunction] = []
         for child in node.fields("susceptibility"):
             susceptibility_list.append(parse_expression_or_lambda(child))
@@ -1087,12 +1053,12 @@ class Contagion(AstNode):
             "One and only one susceptibility function must be provided.",
         )
         susceptibility = susceptibility_list[0]
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         expected_lambda_type = make_function_type(
             params=(get_type("node"),), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         infectivity_list: list[Expression | LambdaFunction] = []
         for child in node.fields("infectivity"):
             infectivity_list.append(parse_expression_or_lambda(child))
@@ -1102,12 +1068,12 @@ class Contagion(AstNode):
             "One and only one infectivity function must be provided.",
         )
         infectivity = infectivity_list[0]
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         expected_lambda_type = make_function_type(
             params=(get_type("edge"),), return_=get_type("float")
         )
-        scope().define("_expected_lambda_type", expected_lambda_type)
+        get_scope().define("_expected_lambda_type", expected_lambda_type)
         transmissibility_list: list[Expression | LambdaFunction] = []
         for child in node.fields("transmissibility"):
             transmissibility_list.append(parse_expression_or_lambda(child))
@@ -1117,7 +1083,7 @@ class Contagion(AstNode):
             "One and only one transmissibility function must be provided.",
         )
         transmissibility = transmissibility_list[0]
-        scope().undef("_expected_lambda_type")
+        get_scope().undef("_expected_lambda_type")
 
         obj = Contagion(
             name=name,

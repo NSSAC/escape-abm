@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterator, overload
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 
 from rich.tree import Tree
 from rich.pretty import Pretty
@@ -97,3 +98,36 @@ class Scope:
             child.rich_tree(tree)
 
         return tree
+
+
+_SCOPE: Scope | None = None
+
+
+def get_scope() -> Scope:
+    if _SCOPE is None:
+        raise RuntimeError("Scope not initialized.")
+
+    return _SCOPE
+
+
+@contextmanager
+def new_scope(name: str):
+    global _SCOPE
+
+    parent_scope = _SCOPE
+    _SCOPE = Scope(name=name, parent=parent_scope)
+    if parent_scope is not None:
+        parent_scope.children.append(_SCOPE)
+
+    try:
+        yield
+    finally:
+        _SCOPE = parent_scope
+
+
+def clear_scope():
+    global _SCOPE
+
+    if _SCOPE is not None:
+        _SCOPE.clear()
+        _SCOPE = None
