@@ -2,7 +2,8 @@
 
 from pathlib import Path
 from functools import singledispatch
-from typing import assert_never
+
+# from typing import assert_never
 
 import rich
 import click
@@ -148,8 +149,8 @@ def _(x: ast.Expression):
                     )
 
             x.type = fn_type.return_
-        case _:
-            assert_never("Should be unreachable")
+        # case _:
+        #     assert_never("Should be unreachable")
 
 
 @check_type.register
