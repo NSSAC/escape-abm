@@ -7,6 +7,7 @@ from .misc import CodeError, CodeErrorList
 from .parse_tree import print_parse_tree
 from .ast import print_ast
 from .type_check import print_checked_ast
+from .use_call_check import save_call_graph
 
 # from .codegen_openmp import codegen_openmp
 # from .language_server import language_server
@@ -27,6 +28,7 @@ def debug():
 debug.add_command(print_parse_tree)
 debug.add_command(print_ast)
 debug.add_command(print_checked_ast)
+debug.add_command(save_call_graph)
 
 # cli.add_command(language_server)
 

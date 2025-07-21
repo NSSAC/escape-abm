@@ -330,15 +330,57 @@ def _(x: ast.Function | ast.LambdaFunction):
     for s in x.body:
         check_type(s)
 
-    for s in x.return_statements:
+    return_stmts: list[ast.ReturnStatement] = []
+    updates_global: bool = False
+    updates_table: set[str] = set()
+    has_parallel_stmt: bool = False
+
+    for s in x.visit_body():
+        if isinstance(s, ast.ReturnStatement):
+            return_stmts.append(s)
+        elif isinstance(s, ast.ParallelStatement):
+            has_parallel_stmt = True
+        elif isinstance(s, ast.AssignmentStatement | ast.UpdateStatement | ast.ReduceClause):
+            lvalue = s.lvalue
+            if isinstance(lvalue.ref, ast.Variable):
+                if lvalue.ref.name not in lvalue.scope.names:  # non-local variable
+                    updates_global = True
+            elif isinstance(lvalue.ref, ast.GlobalVariable):
+                updates_global = True
+            elif isinstance(lvalue.ref, tuple):
+                if isinstance(lvalue.ref[-1], ast.NodeField):
+                    updates_table.add("node")
+                    if lvalue.ref[-1].is_static:
+                        raise TypeError(f"Static columns can't be updated", lvalue.pos)
+                    lvalue.ref[-1].is_written = True
+
+                elif isinstance(lvalue.ref[-1], ast.EdgeField):
+                    updates_table.add("edge")
+                    if lvalue.ref[-1].is_static:
+                        raise TypeError(f"Static columns can't be updated", lvalue.pos)
+                    lvalue.ref[-1].is_written = True
+
+            else:
+                raise TypeError("Invalid lvalue", lvalue.pos)
+        elif isinstance(s, ast.Reference):
+            if isinstance(s.ref, tuple) and isinstance(
+                s.ref[-1], ast.NodeField | ast.EdgeField
+            ):
+                s.ref[-1].is_read = True
+
+    for s in return_stmts:
         if not is_convertable_to(s.expression.type, x.type.return_):
             raise TypeError(
                 f"Invalid return type {s.expression.type} for function of type {x.type}",
                 s.expression.pos,
             )
 
-    if x.type.return_ != "void" and not x.return_statements:
+    if x.type.return_ != "void" and not return_stmts:
         raise TypeError(f"Non void function with not return statements", x.pos)
+
+    x.updates_global = updates_global
+    x.updates_table = updates_table
+    x.has_parallel_stmt = has_parallel_stmt
 
 
 def _check_enum_constant(x: ast.Reference, type: Type):

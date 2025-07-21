@@ -135,6 +135,9 @@ class Literal(AstNode):
     def parse_string(node: PTNode) -> Literal:
         return Literal(value=node.text, type=get_type("str"), pos=node.pos)
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+
 
 @dataclass
 class Reference(AstNode):
@@ -181,6 +184,9 @@ class Reference(AstNode):
         except Exception as e:
             raise ReferenceError(f"Failed to resolve {self.name}", self.pos) from e
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+
 
 @dataclass
 class UnaryExpression(AstNode):
@@ -196,6 +202,10 @@ class UnaryExpression(AstNode):
         return UnaryExpression(
             operator=operator, argument=argument, type=get_type("_type"), pos=node.pos
         )
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.argument.visit()
 
 
 @dataclass
@@ -219,6 +229,11 @@ class BinaryExpression(AstNode):
             pos=node.pos,
         )
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.left.visit()
+        yield from self.right.visit()
+
 
 @dataclass
 class ParenthesizedExpression(AstNode):
@@ -232,6 +247,10 @@ class ParenthesizedExpression(AstNode):
         return ParenthesizedExpression(
             expression=expression, type=get_type("_type"), pos=node.pos
         )
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.expression.visit()
 
 
 @dataclass
@@ -249,6 +268,12 @@ class FunctionCall(AstNode):
             function=function, args=args, type=get_type("_type"), pos=node.pos
         )
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.function.visit()
+        for arg in self.args:
+            yield from arg.visit()
 
 
 Expression = (
@@ -310,6 +335,10 @@ class GlobalVariable(AstNode):
         get_scope().define(name, obj)
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.default.visit()
+
 
 @dataclass
 class Variable(AstNode):
@@ -347,7 +376,6 @@ class Variable(AstNode):
         obj = Variable(name=name, type=type, pos=node.pos)
 
         get_scope().define(name, obj)
-        get_scope().resolve("_local_variables", list).append(obj)
         return obj
 
 
@@ -357,6 +385,9 @@ class PassStatement(AstNode):
     @staticmethod
     def parse(node: PTNode) -> PassStatement:
         return PassStatement(pos=node.pos)
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
 
 
 @dataclass
@@ -369,6 +400,10 @@ class CallStatement(AstNode):
         call = parse(node.named_children()[0], FunctionCall)
         return CallStatement(call=call, pos=node.pos)
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.call.visit()
+
 
 @dataclass
 class ReturnStatement(AstNode):
@@ -379,15 +414,17 @@ class ReturnStatement(AstNode):
     def parse(node: PTNode) -> ReturnStatement:
         expression = parse_expression(node.named_children()[0])
         obj = ReturnStatement(expression=expression, pos=node.pos)
-        get_scope().resolve("_return_statements", list).append(obj)
         return obj
 
     @staticmethod
     def from_expression(node: PTNode) -> ReturnStatement:
         expression = parse_expression(node)
         obj = ReturnStatement(expression=expression, pos=node.pos)
-        get_scope().resolve("_return_statements", list).append(obj)
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.expression.visit()
 
 
 @dataclass
@@ -404,6 +441,12 @@ class ElifSection(AstNode):
             body.append(parse_statement(child))
         return ElifSection(condition=condition, body=body, pos=node.pos)
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.condition.visit()
+        for stmt in self.body:
+            yield from stmt.visit()
+
 
 @dataclass
 class ElseSection(AstNode):
@@ -416,6 +459,11 @@ class ElseSection(AstNode):
         for child in node.fields("body"):
             body.append(parse_statement(child))
         return ElseSection(body=body, pos=node.pos)
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        for stmt in self.body:
+            yield from stmt.visit()
 
 
 @dataclass
@@ -444,6 +492,19 @@ class IfStatement(AstNode):
         )
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.condition.visit()
+        for stmt in self.body:
+            yield from stmt.visit()
+        for elif_ in self.elifs:
+            yield from elif_.condition.visit()
+            for stmt in elif_.body:
+                yield from stmt.visit()
+        if self.else_ is not None:
+            for stmt in self.else_.body:
+                yield from stmt.visit()
+
 
 @dataclass
 class CaseSection(AstNode):
@@ -459,6 +520,12 @@ class CaseSection(AstNode):
             body.append(parse_statement(child))
         return CaseSection(match=match, body=body, pos=node.pos)
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.match.visit()
+        for stmt in self.body:
+            yield from stmt.visit()
+
 
 @dataclass
 class DefaultSection(AstNode):
@@ -471,6 +538,11 @@ class DefaultSection(AstNode):
         for child in node.fields("body"):
             body.append(parse_statement(child))
         return DefaultSection(body=body, pos=node.pos)
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        for stmt in self.body:
+            yield from stmt.visit()
 
 
 @dataclass
@@ -495,6 +567,14 @@ class SwitchStatement(AstNode):
         )
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.condition.visit()
+        for case_ in self.cases:
+            yield from case_.visit()
+        if self.default is not None:
+            yield from self.default.visit()
+
 
 @dataclass
 class WhileLoop(AstNode):
@@ -509,6 +589,12 @@ class WhileLoop(AstNode):
         for child in node.fields("body"):
             body.append(parse_statement(child))
         return WhileLoop(condition=condition, body=body, pos=node.pos)
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.condition.visit()
+        for stmt in self.body:
+            yield from stmt.visit()
 
 
 @dataclass
@@ -534,6 +620,11 @@ class AssignmentStatement(AstNode):
         )
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.lvalue.visit()
+        yield from self.rvalue.visit()
+
 
 @dataclass
 class UpdateStatement(AstNode):
@@ -552,6 +643,11 @@ class UpdateStatement(AstNode):
         )
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.lvalue.visit()
+        yield from self.rvalue.visit()
+
 
 @dataclass
 class FilterClause(AstNode):
@@ -565,6 +661,10 @@ class FilterClause(AstNode):
         )
         obj = FilterClause(function=function, pos=node.pos)
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.function.visit()
 
 
 @dataclass
@@ -580,6 +680,10 @@ class SampleClause(AstNode):
         obj = SampleClause(is_absolute=is_absolute, amount=amount, pos=node.pos)
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.amount.visit()
+
 
 @dataclass
 class ApplyClause(AstNode):
@@ -593,6 +697,10 @@ class ApplyClause(AstNode):
         )
         obj = ApplyClause(function=function, pos=node.pos)
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.function.visit()
 
 
 @dataclass
@@ -614,6 +722,11 @@ class ReduceClause(AstNode):
             lvalue=lvalue, operator=operator, function=function, pos=node.pos
         )
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        yield from self.lvalue.visit()
+        yield from self.function.visit()
 
 
 @dataclass
@@ -678,8 +791,18 @@ class ParallelStatement(AstNode):
             pos=node.pos,
         )
 
-        get_scope().resolve("_parallel_statements", list).append(obj)
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        if self.filter_clause is not None:
+            yield from self.filter_clause.visit()
+        if self.sample_clause is not None:
+            yield from self.sample_clause.visit()
+        if self.apply_clause is not None:
+            yield from self.apply_clause.visit()
+        for clause in self.reduce_clauses:
+            yield from clause.visit()
 
 
 Statement = (
@@ -705,9 +828,10 @@ class Function(AstNode):
     type: Type
     params: list[Variable]
     local_variables: list[Variable] = field(repr=False)
-    return_statements: list[ReturnStatement] = field(repr=False)
-    parallel_statements: list[ParallelStatement] = field(repr=False)
     body: list[Statement]
+    updates_global: bool  # transitive
+    updates_table: set[str]  # transitive
+    has_parallel_stmt: bool  # transitive
     scope: Scope = field(repr=False)
 
     @parser("function")
@@ -716,8 +840,6 @@ class Function(AstNode):
         name = node.field("name").text
         params: list[Variable] = []
         local_variables: list[Variable] = []
-        return_statements: list[ReturnStatement] = []
-        parallel_statements: list[ParallelStatement] = []
 
         return_type = node.maybe_field("type")
         if return_type is None:
@@ -733,31 +855,31 @@ class Function(AstNode):
 
             type = make_fn_type([p.type.name for p in params], return_type)
 
-            fn_scope.define("_local_variables", local_variables)
-            fn_scope.define("_return_statements", return_statements)
-            fn_scope.define("_parallel_statements", parallel_statements)
-
             body: list[Statement] = []
             for child in node.fields("body"):
                 body.append(parse_statement(child))
-
-            fn_scope.undef("_local_variables")
-            fn_scope.undef("_return_statements")
-            fn_scope.undef("_parallel_statements")
 
         obj = Function(
             name=name,
             type=type,
             params=params,
             local_variables=local_variables,
-            return_statements=return_statements,
-            parallel_statements=parallel_statements,
             body=body,
+            updates_global=False,
+            updates_table=set(),
+            has_parallel_stmt=False,
             scope=fn_scope,
             pos=node.pos,
         )
         get_scope().define(name, obj)
         return obj
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+
+    def visit_body(self) -> Iterable[AstNode]:
+        for stmt in self.body:
+            yield from stmt.visit()
 
 
 @dataclass
@@ -765,10 +887,10 @@ class LambdaFunction(AstNode):
     name: str
     type: Type
     params: list[Variable]
-    local_variables: list[Variable] = field(repr=False)
-    return_statements: list[ReturnStatement] = field(repr=False)
-    parallel_statements: list[ParallelStatement] = field(repr=False)
     body: list[Statement]
+    updates_global: bool  # transitive
+    updates_table: set[str]  # transitive
+    has_parallel_stmt: bool  # transitive
     scope: Scope = field(repr=False)
 
     @parser("lambda_function")
@@ -776,9 +898,6 @@ class LambdaFunction(AstNode):
     def parse(node: PTNode) -> LambdaFunction:
         name = f"lambda_function_{node.pos.line}_{node.pos.col}"
         params: list[Variable] = []
-        local_variables: list[Variable] = []
-        return_statements: list[ReturnStatement] = []
-        parallel_statements: list[ParallelStatement] = []
 
         expected_type = get_scope().resolve("_expected_lambda_type", FunctionType)
 
@@ -796,10 +915,6 @@ class LambdaFunction(AstNode):
 
             type = make_fn_type([p.type.name for p in params], return_type)
 
-            fn_scope.define("_local_variables", local_variables)
-            fn_scope.define("_return_statements", return_statements)
-            fn_scope.define("_parallel_statements", parallel_statements)
-
             body: list[Statement] = []
             for child in node.fields("body"):
                 body.append(parse_statement(child))
@@ -808,21 +923,24 @@ class LambdaFunction(AstNode):
                 return_expr = ReturnStatement.from_expression(return_expr)
                 body.append(return_expr)
 
-            fn_scope.undef("_local_variables")
-            fn_scope.undef("_return_statements")
-            fn_scope.undef("_parallel_statements")
-
         return LambdaFunction(
             name=name,
             type=type,
             params=params,
-            local_variables=local_variables,
-            return_statements=return_statements,
-            parallel_statements=parallel_statements,
             body=body,
+            updates_global=False,
+            updates_table=set(),
+            has_parallel_stmt=False,
             scope=fn_scope,
             pos=node.pos,
         )
+
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+
+    def visit_body(self) -> Iterable[AstNode]:
+        for stmt in self.body:
+            yield from stmt.visit()
 
 
 def parse_expression_or_lambda(node: PTNode) -> Expression | LambdaFunction:
@@ -836,6 +954,8 @@ class NodeField(AstNode):
     is_node_key: bool
     is_static: bool
     save_to_output: bool
+    is_read: bool
+    is_written: bool
 
     @parser("node_field")
     @staticmethod
@@ -858,6 +978,8 @@ class NodeField(AstNode):
             is_static=is_static,
             save_to_output=save_to_output,
             pos=node.pos,
+            is_read=False,
+            is_written=False,
         )
 
         node_type = get_type("node")
@@ -893,6 +1015,8 @@ class EdgeField(AstNode):
     is_source_node_key: bool
     is_static: bool
     save_to_output: bool
+    is_read: bool
+    is_written: bool
 
     @parser("edge_field")
     @staticmethod
@@ -916,6 +1040,8 @@ class EdgeField(AstNode):
             is_source_node_key=is_source_node_key,
             is_static=is_static,
             save_to_output=save_to_output,
+            is_read=False,
+            is_written=False,
             pos=node.pos,
         )
 
@@ -1027,6 +1153,8 @@ class Contagion(AstNode):
             is_node_key=False,
             is_static=False,
             save_to_output=False,
+            is_read=True,
+            is_written=True,
             pos=node.pos,
         )
         type.add("state", state_field)
@@ -1120,15 +1248,30 @@ class Contagion(AstNode):
 
         return obj
 
+    def visit(self) -> Iterable[AstNode]:
+        yield self
+        for t in self.transitions:
+            yield from t.entry.visit()
+            yield from t.exit.visit()
+        for t in self.transmissions:
+            yield from t.contact.visit()
+            yield from t.entry.visit()
+            yield from t.exit.visit()
+        yield from self.transition_rate.visit()
+        yield from self.dwell_time.visit()
+        yield from self.susceptibility.visit()
+        yield from self.infectivity.visit()
+        yield from self.transmissibility.visit()
+
 
 @dataclass
 class Source:
     module: str
     enum_type_defns: list[EnumTypeDefn]
-    globals: list[GlobalVariable]
-    functions: list[Function]
     node_table: NodeTable
     edge_table: EdgeTable
+    globals: list[GlobalVariable]
+    functions: list[Function]
     contagions: list[Contagion]
 
     @staticmethod
@@ -1192,6 +1335,14 @@ class Source:
             edge_table=edge_table,
             contagions=contagions,
         )
+
+    def visit(self) -> Iterable[AstNode]:
+        for g in self.globals:
+            yield from g.visit()
+        for f in self.functions:
+            yield from f.visit()
+        for c in self.contagions:
+            yield from c.visit()
 
 
 def mk_ast(filename: Path, node: PTNode) -> Source:
