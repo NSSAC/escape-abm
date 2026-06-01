@@ -1,12 +1,12 @@
 # Howto setup Jupyter Lab for ESCAPE development on Rivanna
 
 
-## Setup ray-hpc-workflows
+## Setup slurm-hpc-workflows
 
-Please follow the instructions to setup ray-hpc-workflows on Rivanna.
+Please follow the instructions to setup slrum-hpc-workflows on Rivanna.
 As part of the process you will install Jupyter Lab for which we can install extensions.
 
-* [How to setup ray-hpc-workflows on Rivanna](https://github.com/NSSAC/ray-hpc-workflows/blob/main/docs/rivanna-setup.md)
+* [How to setup slurm-hpc-workflows on Rivanna](https://github.com/parantapa/slurm-hpc-workflows/blob/main/docs/rivanna-setup.md)
 
 ## Install ESCAPE and Jupyter Lab extensions
 
@@ -22,7 +22,7 @@ and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
 Ensure you are logged into Rivanna via ssh. Also ensure that myenv is still activated.
 
 ```sh
-pip install jupyterlab_esl escape_abm jupyterlab-lsp
+pip install jupyterlab_esl escape_abm jupyterlab-lsp "pygls>=1.1.1,<2.0.0"
 ```
 
 ## Configure jupyterlab-lsp
@@ -73,12 +73,16 @@ the real path of the `esc` executable.
 
 Jupyter Lab should now be configured for opening ESL files.
 
-## Start Jupyter from ray-hpc-workflows
+## Start Jupyter from slurm-hpc-workflows
 
-First start [Jupyter Lab from ray-hpc-workflows](https://github.com/NSSAC/ray-hpc-workflows/blob/main/docs/rivanna-setup.md#start-jupyter-from-ray-hpc-workflows).
+First start [Jupyter Lab from slurm-hpc-workflows](https://github.com/parantapa/slurm-hpc-workflows/blob/main/docs/rivanna-setup.md#start-jupyter-from-slurm-workflows-on-rivanna).
 
 Next a socks proxy over ssh is not already running
-[start the socks proxy](https://github.com/NSSAC/ray-hpc-workflows/blob/main/docs/rivanna-setup.md#start-jupyter-from-ray-hpc-workflows).
+[start the socks proxy](https://github.com/parantapa/slurm-hpc-workflows/blob/main/docs/rivanna-setup.md#setup-a-socks-proxy-over-ssh-on-your-local-computer-to-enable-your-browser-to-connect-to-rivanna).
 
-You should now be able to [connect to the Jupyter lab on Rivanna](https://github.com/NSSAC/ray-hpc-workflows/blob/main/docs/rivanna-setup.md#connect-to-the-jupyter-notebook-on-rivanna-from-your-local-browser)
+You should now be able to [connect to the Jupyter lab on Rivanna](https://github.com/parantapa/slurm-hpc-workflows/blob/main/docs/rivanna-setup.md#setup-a-socks-proxy-over-ssh-on-your-local-computer-to-enable-your-browser-to-connect-to-rivanna)
 
+## Next Steps
+
+Check out the `run-example1.ipynb` notebook in the `examples` directory
+in the newly opened jupyter lab to see how to use ESCAPE.
