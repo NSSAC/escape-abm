@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "escape-abm"
-version = "0.0.3"
+version = "0.0.4"
 authors = [
   { name="Parantapa Bhattacharya", email="parantapa@virginia.edu" },
 ]
@@ -24,7 +24,7 @@ dependencies = [
     "tree-sitter",
     "tree-sitter-esl",
     "jinja2",
-    "pygls",
+    "pygls>= 1.1.1, <2.0.0 ",
     "platformdirs",
     "numpy",
     "scipy",
