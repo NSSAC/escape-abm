@@ -13,7 +13,6 @@ Once setup is done, please ensure that your conda config `$HOME/.condarc` contai
 ```
 channels:
     - conda-forge
-    - defaults
 anaconda_upload: false
 auto_activate_base: false
 ```
@@ -48,7 +47,7 @@ escape_abm (for ESL language server),
 and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
 
 ```sh
-pip install jupyterlab_esl escape_abm jupyterlab-lsp
+pip install jupyterlab_esl escape_abm jupyterlab-lsp "pygls>=1.1.1,<2.0.0"
 ```
 
 Configure jupyterlab-lsp.
@@ -100,6 +99,11 @@ Start Jupyter Lab using the following command:
 jupyter lab
 ```
 
+## Next steps
+
+Check out the `run-example1.ipynb` notebook in the `examples` directory
+in the newly opened jupyter lab to see how to use ESCAPE.
+
 ## Known Issues
 
 If your Jupyter kernel keeps crashing on a Apple Mac
@@ -110,3 +114,4 @@ You can try using the long term release version of polars.
 pip uninstall polars
 pip install polars-lts-cpu
 ```
+
