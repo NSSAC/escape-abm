@@ -22,7 +22,8 @@ and jupyterlab-lsp (for allowing Jupyter Lab to use the language server).
 Ensure you are logged into Rivanna via ssh. Also ensure that myenv is still activated.
 
 ```sh
-pip install jupyterlab_esl escape_abm jupyterlab-lsp "pygls>=1.1.1,<2.0.0"
+conda install 
+pip install jupyterlab_esl escape_abm jupyterlab-lsp "pygls>=1.1.1,<2.0.0" cmake ninja hdf5
 ```
 
 ## Configure jupyterlab-lsp
