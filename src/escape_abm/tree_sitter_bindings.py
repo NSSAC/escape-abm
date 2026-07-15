@@ -26,4 +26,4 @@ def enum_query() -> Query:
      )
     """
     language = get_language()
-    return language.query(query)
+    return Query(language, query)

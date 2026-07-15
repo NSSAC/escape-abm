@@ -120,24 +120,25 @@ def builtin_completions() -> list[types.CompletionItem]:
 
 def enum_completions(root_node: ts.Node) -> list[types.CompletionItem]:
     completions: list[types.CompletionItem] = []
-    for node, capture in enum_query().captures(root_node).items():
-        match capture:
-            case "enum_name":
-                completions.append(
-                    types.CompletionItem(
-                        label=node.text.decode(),
-                        kind=types.CompletionItemKind.Enum,
-                        detail="enumeration type",
+    for capture, nodes in ts.QueryCursor(enum_query()).captures(root_node).items():
+        for node in nodes:
+            match capture:
+                case "enum_name":
+                    completions.append(
+                        types.CompletionItem(
+                            label=node.text.decode(),
+                            kind=types.CompletionItemKind.Enum,
+                            detail="enumeration type",
+                        )
                     )
-                )
-            case "enum_const":
-                completions.append(
-                    types.CompletionItem(
-                        label=node.text.decode(),
-                        kind=types.CompletionItemKind.EnumMember,
-                        detail="enumeration constant",
+                case "enum_const":
+                    completions.append(
+                        types.CompletionItem(
+                            label=node.text.decode(),
+                            kind=types.CompletionItemKind.EnumMember,
+                            detail="enumeration constant",
+                        )
                     )
-                )
 
     return completions
 
