@@ -6,8 +6,8 @@ from pathlib import Path
 
 import click
 import tree_sitter as ts
-import lsprotocol.types as lsp
-from pygls.server import LanguageServer
+from lsprotocol import types
+from pygls.lsp.server import LanguageServer
 from platformdirs import user_log_dir
 
 from .misc import SourcePosition, EslError, EslErrorList
@@ -19,25 +19,25 @@ from .codegen_openmp import simulator_str
 
 server = LanguageServer("esl-server", "v0.1")
 
-_CURRENT_COMPLETIONS: list[lsp.CompletionItem] = []
+_CURRENT_COMPLETIONS: list[types.CompletionItem] = []
 
 
 def error_to_diagnostic(
     type: str, explanation: str, pos: SourcePosition | None
-) -> lsp.Diagnostic:
+) -> types.Diagnostic:
     if pos is None:
-        range = lsp.Range(
-            start=lsp.Position(0, 0),
-            end=lsp.Position(0, 0),
+        range = types.Range(
+            start=types.Position(0, 0),
+            end=types.Position(0, 0),
         )
     else:
-        range = lsp.Range(
-            start=lsp.Position(pos.start[0], pos.start[1]),
-            end=lsp.Position(pos.end[0], pos.end[1]),
+        range = types.Range(
+            start=types.Position(pos.start[0], pos.start[1]),
+            end=types.Position(pos.end[0], pos.end[1]),
         )
-    return lsp.Diagnostic(
+    return types.Diagnostic(
         range=range,
-        severity=lsp.DiagnosticSeverity.Error,
+        severity=types.DiagnosticSeverity.Error,
         message=f"{type}: {explanation}",
         source="esl-server",
     )
@@ -83,13 +83,13 @@ BUILTIN_FUNCTION_DOCS = [
 
 
 @cache
-def builtin_completions() -> list[lsp.CompletionItem]:
-    completions: list[lsp.CompletionItem] = []
+def builtin_completions() -> list[types.CompletionItem]:
+    completions: list[types.CompletionItem] = []
     for type, doc in BUILTIN_TYPE_DOCS:
         completions.append(
-            lsp.CompletionItem(
+            types.CompletionItem(
                 label=type,
-                kind=lsp.CompletionItemKind.Class,
+                kind=types.CompletionItemKind.Class,
                 detail="builtin type",
                 documentation=doc,
             )
@@ -97,9 +97,9 @@ def builtin_completions() -> list[lsp.CompletionItem]:
 
     for const, detail, doc in BUILTIN_CONSTANT_DOCS:
         completions.append(
-            lsp.CompletionItem(
+            types.CompletionItem(
                 label=const,
-                kind=lsp.CompletionItemKind.Constant,
+                kind=types.CompletionItemKind.Constant,
                 detail=detail,
                 documentation=doc,
             )
@@ -107,9 +107,9 @@ def builtin_completions() -> list[lsp.CompletionItem]:
 
     for func, detail, doc in BUILTIN_FUNCTION_DOCS:
         completions.append(
-            lsp.CompletionItem(
+            types.CompletionItem(
                 label=func,
-                kind=lsp.CompletionItemKind.Function,
+                kind=types.CompletionItemKind.Function,
                 detail=detail,
                 documentation=doc,
             )
@@ -118,23 +118,23 @@ def builtin_completions() -> list[lsp.CompletionItem]:
     return completions
 
 
-def enum_completions(root_node: ts.Node) -> list[lsp.CompletionItem]:
-    completions: list[lsp.CompletionItem] = []
+def enum_completions(root_node: ts.Node) -> list[types.CompletionItem]:
+    completions: list[types.CompletionItem] = []
     for node, capture in enum_query().captures(root_node).items():
         match capture:
             case "enum_name":
                 completions.append(
-                    lsp.CompletionItem(
+                    types.CompletionItem(
                         label=node.text.decode(),
-                        kind=lsp.CompletionItemKind.Enum,
+                        kind=types.CompletionItemKind.Enum,
                         detail="enumeration type",
                     )
                 )
             case "enum_const":
                 completions.append(
-                    lsp.CompletionItem(
+                    types.CompletionItem(
                         label=node.text.decode(),
-                        kind=lsp.CompletionItemKind.EnumMember,
+                        kind=types.CompletionItemKind.EnumMember,
                         detail="enumeration constant",
                     )
                 )
@@ -152,30 +152,30 @@ def update_state(file_bytes: bytes | None):
 
 
 @server.feature(
-    lsp.TEXT_DOCUMENT_COMPLETION, lsp.CompletionOptions(trigger_characters=[","])
+    types.TEXT_DOCUMENT_COMPLETION, types.CompletionOptions(trigger_characters=[","])
 )
-def completions(params: lsp.CompletionParams | None = None) -> lsp.CompletionList:
+def completions(params: types.CompletionParams | None = None) -> types.CompletionList:
     """Returns completion items."""
-    return lsp.CompletionList(is_incomplete=False, items=_CURRENT_COMPLETIONS)
+    return types.CompletionList(is_incomplete=False, items=_CURRENT_COMPLETIONS)
 
 
-@server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
-@server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
-@server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
+@server.feature(types.TEXT_DOCUMENT_DID_OPEN)
+@server.feature(types.TEXT_DOCUMENT_DID_SAVE)
+@server.feature(types.TEXT_DOCUMENT_DID_CHANGE)
 async def validate(
     ls: LanguageServer,
     params: (
-        lsp.DidOpenTextDocumentParams
-        | lsp.DidSaveTextDocumentParams
-        | lsp.DidChangeTextDocumentParams
+        types.DidOpenTextDocumentParams
+        | types.DidSaveTextDocumentParams
+        | types.DidChangeTextDocumentParams
     ),
 ):
     global _MOST_RECENT_PARSE_TREE
 
-    ls.show_message_log("checking document")
+    ls.window_log_message(types.LogMessageParams(types.MessageType.Info, "checking document"))
 
     file_path = Path(params.text_document.uri)
-    doc = ls.workspace.get_document(params.text_document.uri)
+    doc = ls.workspace.get_text_document(params.text_document.uri)
     file_bytes = doc.source.encode()
     update_state(file_bytes)
 
@@ -189,11 +189,11 @@ async def validate(
         for e in es.errors:
             diagnostic = error_to_diagnostic(e.type, e.description, e.pos)
             diagnostics.append(diagnostic)
-        ls.publish_diagnostics(params.text_document.uri, diagnostics)
+        ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(params.text_document.uri, diagnostics))
         return
     except EslError as e:
         diagnostic = error_to_diagnostic(e.type, e.description, e.pos)
-        ls.publish_diagnostics(params.text_document.uri, [diagnostic])
+        ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(params.text_document.uri, [diagnostic]))
         return
     except Exception as e:
         diagnostic = error_to_diagnostic(
@@ -201,11 +201,11 @@ async def validate(
             f"Unexpected exception: type={type(e)!s}: {e!s}",
             None,
         )
-        ls.publish_diagnostics(params.text_document.uri, [diagnostic])
+        ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(params.text_document.uri, [diagnostic]))
         return
 
     # If we have no errors, remove all diagnostics
-    ls.publish_diagnostics(params.text_document.uri, [])
+    ls.text_document_publish_diagnostics(types.PublishDiagnosticsParams(params.text_document.uri, []))
 
 
 @click.group()
