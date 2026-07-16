@@ -1,7 +1,6 @@
 {
-    project: "episim37",
+    project: "escape-abm",
     remotes: {
-        rivanna: "rivanna:episim37",
-        anvil: "anvil:episim37",
+        rivanna: "rivanna:escape-abm",
     }
 }
