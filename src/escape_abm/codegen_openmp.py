@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from typeguard import check_type, TypeCheckError
 
 from .alias_table import AliasTable
-from .misc import EslError, EslErrorList, SourcePosition, RichException
+from .misc import EslError, EslErrorList, SourcePosition, RichException, unblock_sigchld
 from .parse_tree import mk_pt
 from .ast import mk_ast
 from .check_ast import check_ast, is_node_set
@@ -621,9 +621,10 @@ def do_prepare(gen_src_dir: Path, input: Path, source: ast.Source) -> None:
             )
         )
 
-    cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build'"
+    cmd = f"cmake -S '{gen_src_dir!s}' -B '{gen_src_dir!s}/build' -DCMAKE_BUILD_TYPE=Release"
+    print(cmd)
     cmd = shlex.split(cmd)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, preexec_fn=unblock_sigchld)
 
 
 def do_compile(build_dir: Path, source: ast.Source) -> None:
@@ -637,7 +638,7 @@ def do_compile(build_dir: Path, source: ast.Source) -> None:
 def do_build(gen_src_dir: Path) -> None:
     cmd = f"cmake --build '{gen_src_dir!s}/build'"
     cmd = shlex.split(cmd)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, preexec_fn=unblock_sigchld)
 
 
 def do_simulate(
@@ -654,10 +655,10 @@ def do_simulate(
     env = dict(os.environ)
 
     env["OMP_PROC_BIND"] = "true"
-
     env["INPUT_FILE"] = str(input_file)
     env["OUTPUT_FILE"] = str(output_file)
     env["NUM_TICKS"] = str(num_ticks)
+
     for key, value in configs.items():
         if isinstance(value, bool):
             value = int(value)

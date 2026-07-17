@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import signal
+
 from pydantic import BaseModel
 import rich
 import rich.markup
+
+
+def unblock_sigchld():
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGCHLD})
 
 
 class SourcePosition(BaseModel):
